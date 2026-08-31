@@ -31,6 +31,9 @@ class FakeService:
     def capabilities_resource(self):
         return {"libreoffice_fork": False, "agent_publish_authority": False}
 
+    def window_context_resource(self):
+        return {"active": True, "address": "B7", "agent_control": False}
+
 
 def request(method, params=None, request_id=1):
     supplied = dict(params or {})
@@ -113,6 +116,12 @@ class McpTests(unittest.TestCase):
         payload = json.loads(response["result"]["contents"][0]["text"])
         self.assertFalse(payload["libreoffice_fork"])
         self.assertFalse(payload["agent_publish_authority"])
+
+    def test_live_window_context_is_agent_readable_but_not_controllable(self) -> None:
+        response = self.server.handle(request("resources/read", {"uri": "omasheets://window"}))
+        payload = json.loads(response["result"]["contents"][0]["text"])
+        self.assertEqual(payload["address"], "B7")
+        self.assertFalse(payload["agent_control"])
 
     def test_stdio_rejects_and_drains_oversized_messages(self) -> None:
         source = io.StringIO("x" * 40 + "\nnot json\n")

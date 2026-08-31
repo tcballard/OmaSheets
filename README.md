@@ -49,6 +49,11 @@ interactive tile engine in OmaSheets-owned GTK chrome with scrolling,
 selection, keyboard editing, sheets, zoom and save-copy controls. Calc remains
 the file-association fallback until real Omarchy/Wayland acceptance passes.
 
+The native window and MCP server share one immutable workbook session. Agents
+can observe its bounded, path-free selection and viewport through
+`omasheets://window`, inspect the relevant cells, and stage semantic changes;
+they cannot drive pointer/keyboard input or publish workbook bytes.
+
 ## Status
 
 Early development. The `main` branch remains the minimal bootstrap; v0.0.1 is

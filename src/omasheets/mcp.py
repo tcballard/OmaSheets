@@ -28,6 +28,7 @@ class AgentService(Protocol):
     def current_resource(self) -> dict[str, Any]: ...
     def pending_resource(self) -> dict[str, Any]: ...
     def capabilities_resource(self) -> dict[str, Any]: ...
+    def window_context_resource(self) -> dict[str, Any]: ...
 
 
 def _object(properties: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
@@ -314,6 +315,7 @@ class McpServer:
                     {"uri": "omasheets://current", "name": "Current workbook", "mimeType": "application/json"},
                     {"uri": "omasheets://pending", "name": "Pending plan", "mimeType": "application/json"},
                     {"uri": "omasheets://capabilities", "name": "OmaSheets capabilities", "mimeType": "application/json"},
+                    {"uri": "omasheets://window", "name": "Live OmaSheets window context", "mimeType": "application/json"},
                 ]})
             if method == "resources/read":
                 params = request.get("params", {})
@@ -327,6 +329,8 @@ class McpServer:
                     payload = self.service.pending_resource()
                 elif uri == "omasheets://capabilities":
                     payload = self.service.capabilities_resource()
+                elif uri == "omasheets://window":
+                    payload = self.service.window_context_resource()
                 else:
                     raise InvalidParams("unknown resource URI")
                 return self._result(request_id, {"contents": [{

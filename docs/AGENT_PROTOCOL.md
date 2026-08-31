@@ -46,9 +46,18 @@ format properties before save, then requires the same fingerprints after reopen.
 - `omasheets://pending`: the current pending plan, if one exists.
 - `omasheets://capabilities`: engine identity, fork status, supported operations,
   and the local-only publication boundary.
+- `omasheets://window`: the active native window's bounded sheet, cell/formula,
+  zoom, dirty state, and visible rectangle. It contains no source path and
+  grants no pointer, keyboard, save, or publication authority.
 
 Resources are convenience pointers, not ambient authority. A client cannot
 change the selected workbook by constructing a URI or passing a path.
+
+Opening `omasheets window` creates the same immutable workbook session consumed
+by MCP. An agent can reason from the person's current selection and viewport,
+then use the ordinary bounded read and planning tools against that session.
+Window context is observational: agents still propose semantic cell operations
+and the person still approves publication locally.
 
 ## Errors
 

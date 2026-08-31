@@ -88,8 +88,21 @@ def main(argv: list[str] | None = None) -> int:
         from .native_window import open_window
 
         service = _service()
-        path = arguments.path if arguments.command == "window" else service.current_local_path()
-        print(json.dumps({"pid": open_window(path), "window": "omasheets"}, sort_keys=True))
+        if arguments.command == "window":
+            session = service.select_workbook(arguments.path)
+        else:
+            session = service.current_resource()
+            if not session.get("selected"):
+                raise SystemExit("No workbook is selected.")
+        path = service.current_local_path()
+        context = service.prepare_window_context(session["session_id"])
+        pid = open_window(
+            path,
+            context_path=context,
+            session_id=session["session_id"],
+            revision=session["revision"],
+        )
+        print(json.dumps({"pid": pid, "session_id": session["session_id"], "window": "omasheets"}, sort_keys=True))
         return 0
     if arguments.command == "convert":
         print(json.dumps(_service().convert_legacy_local(arguments.path), indent=2, sort_keys=True))

@@ -7,10 +7,13 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <sys/resource.h>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 
@@ -30,11 +33,21 @@ struct WindowState {
     fs::path source;
     fs::path profile;
     fs::path smoke_screenshot;
+    fs::path context_path;
+    std::string session_id;
+    int revision = 0;
+    int sheet = 0;
+    std::string selected_address;
+    std::string selected_formula;
+    float zoom_value = 1.0F;
+    GdkRectangle visible{};
     bool loaded = false;
+    bool active = false;
     bool dirty = false;
     bool smoke = false;
     bool editable = false;
     guint visible_area_source = 0;
+    guint context_source = 0;
     unsigned visible_area_requests = 0;
     unsigned visible_area_updates = 0;
     unsigned scroll_events = 0;
@@ -46,6 +59,77 @@ struct WindowState {
 };
 
 constexpr const char* kProgram = "/usr/lib/libreoffice/program";
+
+std::string json_escape(std::string_view value)
+{
+    std::ostringstream escaped;
+    for (const unsigned char character : value) {
+        switch (character) {
+        case '\\': escaped << "\\\\"; break;
+        case '"': escaped << "\\\""; break;
+        case '\b': escaped << "\\b"; break;
+        case '\f': escaped << "\\f"; break;
+        case '\n': escaped << "\\n"; break;
+        case '\r': escaped << "\\r"; break;
+        case '\t': escaped << "\\t"; break;
+        default:
+            if (character < 0x20) {
+                const char* hex = "0123456789abcdef";
+                escaped << "\\u00" << hex[character >> 4] << hex[character & 0x0f];
+            } else {
+                escaped << character;
+            }
+        }
+    }
+    return escaped.str();
+}
+
+void write_context_now(WindowState* state)
+{
+    if (state->context_path.empty())
+        return;
+    const fs::path temporary = state->context_path.string() + ".tmp-" + std::to_string(getpid());
+    try {
+        std::ofstream output(temporary, std::ios::trunc);
+        output << "{\"active\":" << (state->active ? "true" : "false")
+               << ",\"address\":\"" << json_escape(state->selected_address.substr(0, 64)) << "\""
+               << ",\"dirty\":" << (state->dirty ? "true" : "false")
+               << ",\"formula\":\"" << json_escape(state->selected_formula.substr(0, 8192)) << "\""
+               << ",\"revision\":" << state->revision
+               << ",\"session_id\":\"" << state->session_id << "\""
+               << ",\"sheet\":" << state->sheet
+               << ",\"updated_at_ms\":" << g_get_real_time() / 1000
+               << ",\"version\":1"
+               << ",\"visible\":{\"height\":" << std::max(0, state->visible.height)
+               << ",\"width\":" << std::max(0, state->visible.width)
+               << ",\"x\":" << std::max(0, state->visible.x)
+               << ",\"y\":" << std::max(0, state->visible.y) << "}"
+               << ",\"zoom\":" << state->zoom_value << "}\n";
+        output.flush();
+        if (!output)
+            return;
+        output.close();
+        fs::permissions(temporary, fs::perms::owner_read | fs::perms::owner_write, fs::perm_options::replace);
+        fs::rename(temporary, state->context_path);
+    } catch (const fs::filesystem_error&) {
+        std::error_code ignored;
+        fs::remove(temporary, ignored);
+    }
+}
+
+gboolean flush_context(gpointer data)
+{
+    auto* state = static_cast<WindowState*>(data);
+    state->context_source = 0;
+    write_context_now(state);
+    return G_SOURCE_REMOVE;
+}
+
+void schedule_context(WindowState* state)
+{
+    if (!state->context_path.empty() && state->context_source == 0)
+        state->context_source = g_timeout_add(50, flush_context, state);
+}
 
 void set_status(WindowState* state, const char* message)
 {
@@ -79,9 +163,11 @@ void on_italic(GtkButton*, gpointer data) { post_command(static_cast<WindowState
 void update_zoom(WindowState* state, float value)
 {
     lok_doc_view_set_zoom(LOK_DOC_VIEW(state->view), value);
+    state->zoom_value = value;
     const int percent = static_cast<int>(value * 100.0F + 0.5F);
     const std::string label = std::to_string(percent) + "%";
     gtk_label_set_text(GTK_LABEL(state->zoom), label.c_str());
+    schedule_context(state);
 }
 
 void on_zoom_in(GtkButton*, gpointer data)
@@ -148,7 +234,9 @@ void update_visible_area_now(WindowState* state)
         static_cast<int>(lok_doc_view_pixel_to_twip(LOK_DOC_VIEW(state->view), allocation.height)),
     };
     lok_doc_view_set_visible_area(LOK_DOC_VIEW(state->view), &visible);
+    state->visible = visible;
     ++state->visible_area_updates;
+    schedule_context(state);
 }
 
 gboolean flush_visible_area(gpointer data)
@@ -218,20 +306,26 @@ void on_sheet_changed(GtkComboBox* box, gpointer data)
 void on_part_changed(LOKDocView*, int part, gpointer data)
 {
     auto* state = static_cast<WindowState*>(data);
+    state->sheet = part;
     if (gtk_combo_box_get_active(GTK_COMBO_BOX(state->sheets)) != part)
         gtk_combo_box_set_active(GTK_COMBO_BOX(state->sheets), part);
+    schedule_context(state);
 }
 
 void on_address_changed(LOKDocView*, const gchar* value, gpointer data)
 {
     auto* state = static_cast<WindowState*>(data);
+    state->selected_address = value != nullptr ? value : "";
     gtk_label_set_text(GTK_LABEL(state->address), value != nullptr && *value != '\0' ? value : "—");
+    schedule_context(state);
 }
 
 void on_formula_changed(LOKDocView*, const gchar* value, gpointer data)
 {
     auto* state = static_cast<WindowState*>(data);
+    state->selected_formula = value != nullptr ? value : "";
     gtk_entry_set_text(GTK_ENTRY(state->formula), value != nullptr ? value : "");
+    schedule_context(state);
 }
 
 void on_selection_changed(LOKDocView*, gboolean selected, gpointer data)
@@ -251,6 +345,7 @@ void on_command_changed(LOKDocView*, const gchar* command, gpointer data)
         if (state->dirty)
             title += " •";
         gtk_header_bar_set_title(GTK_HEADER_BAR(gtk_window_get_titlebar(GTK_WINDOW(state->window))), title.c_str());
+        schedule_context(state);
     }
 }
 
@@ -259,6 +354,18 @@ void on_command_result(LOKDocView*, const gchar* result, gpointer data)
     auto* state = static_cast<WindowState*>(data);
     if (result != nullptr && std::string_view(result).find("save") != std::string_view::npos)
         set_status(state, "LibreOfficeKit completed the save command");
+}
+
+void on_destroy(GtkWidget*, gpointer data)
+{
+    auto* state = static_cast<WindowState*>(data);
+    state->active = false;
+    if (state->context_source != 0) {
+        g_source_remove(state->context_source);
+        state->context_source = 0;
+    }
+    write_context_now(state);
+    gtk_main_quit();
 }
 
 void save_copy(WindowState* state, const fs::path& destination)
@@ -277,6 +384,7 @@ void save_copy(WindowState* state, const fs::path& destination)
         gtk_header_bar_set_title(
             GTK_HEADER_BAR(gtk_window_get_titlebar(GTK_WINDOW(state->window))),
             state->source.filename().c_str());
+        schedule_context(state);
     }
     set_status(state, saved ? "Saved a new workbook copy" : "LibreOfficeKit could not save the copy");
 }
@@ -392,6 +500,7 @@ void on_opened(GObject* object, GAsyncResult* result, gpointer data)
         return;
     }
     state->loaded = true;
+    state->active = true;
     state->loaded_at = std::chrono::steady_clock::now();
     state->load_ms = std::chrono::duration_cast<std::chrono::milliseconds>(state->loaded_at - state->started).count();
     lok_doc_view_set_edit(LOK_DOC_VIEW(state->view), state->editable ? TRUE : FALSE);
@@ -516,7 +625,7 @@ GtkWidget* build_window(WindowState* state)
     gtk_box_pack_end(GTK_BOX(footer), gtk_label_new("Experimental native window"), FALSE, FALSE, 10);
     gtk_box_pack_start(GTK_BOX(root), footer, FALSE, FALSE, 0);
 
-    g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), nullptr);
+    g_signal_connect(window, "destroy", G_CALLBACK(on_destroy), state);
     g_signal_connect(window, "delete-event", G_CALLBACK(on_delete), state);
     g_signal_connect(state->sheets, "changed", G_CALLBACK(on_sheet_changed), state);
     g_signal_connect(state->view, "part-changed", G_CALLBACK(on_part_changed), state);
@@ -547,13 +656,30 @@ int main(int argc, char** argv)
     gtk_init(&argc, &argv);
     WindowState state;
     std::string stage = "arguments";
-    int source_index = 1;
-    if (argc == 4 && std::string_view(argv[1]) == "--smoke-test") {
-        state.smoke = true;
-        state.smoke_screenshot = fs::absolute(argv[2]);
-        source_index = 3;
-    } else if (argc != 2) {
-        std::cerr << "usage: omasheets-window [--smoke-test SCREENSHOT.png] WORKBOOK\n";
+    int source_index = -1;
+    for (int index = 1; index < argc; ++index) {
+        const std::string_view argument(argv[index]);
+        if (argument == "--smoke-test" && index + 1 < argc) {
+            state.smoke = true;
+            state.smoke_screenshot = fs::absolute(argv[++index]);
+        } else if (argument == "--context" && index + 1 < argc) {
+            state.context_path = fs::absolute(argv[++index]);
+        } else if (argument == "--session" && index + 1 < argc) {
+            state.session_id = argv[++index];
+        } else if (argument == "--revision" && index + 1 < argc) {
+            state.revision = std::atoi(argv[++index]);
+        } else if (!argument.empty() && argument.front() != '-' && source_index < 0) {
+            source_index = index;
+        } else {
+            source_index = -1;
+            break;
+        }
+    }
+    const bool any_context = !state.context_path.empty() || !state.session_id.empty() || state.revision != 0;
+    const bool valid_session = state.session_id.size() == 32 && std::all_of(
+        state.session_id.begin(), state.session_id.end(), [](unsigned char value) { return std::isxdigit(value) != 0; });
+    if (source_index < 0 || (any_context && (state.context_path.empty() || !valid_session || state.revision < 1))) {
+        std::cerr << "usage: omasheets-window [--smoke-test SCREENSHOT.png] [--context FILE --session ID --revision N] WORKBOOK\n";
         return 2;
     }
     try {
