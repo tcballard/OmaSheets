@@ -83,7 +83,7 @@ jobs:
           plugin="$HOME/.config/omarchy/plugins/io.github.tcballard.omasheets"
           mkdir -p "$(dirname "$plugin")" "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
-          cp -a "$GITHUB_WORKSPACE/." "$plugin/"
+          git clone "$GITHUB_WORKSPACE" "$plugin"
           "$plugin/bin/omasheets-plugin" install
           "$HOME/.local/bin/omasheets" doctor
       - name: Prove native binary source provenance
