@@ -40,6 +40,11 @@ hashes before every mutation test.
    and render latency separately for cold and warm runs.
 9. Repeat with `.xlsx`, `.xlsm`, and `.ods`, a non-ASCII filename, and a broken
    workbook. Confirm failures never alter the source or an existing output.
+10. Open a workbook with at least 100,000 used rows and 50 used columns. Confirm
+    initial load stays below 15 seconds, first paint below 5 seconds, and RSS
+    below 1 GiB; record the actual hardware and measured values.
+11. Drag both scrollbars continuously for 10 seconds. Confirm controls remain
+    responsive and no stale tile seams remain after input stops.
 
 Passing this section proves only the rendering spike. It does not promote
 LibreOfficeKit to the default human editor.
