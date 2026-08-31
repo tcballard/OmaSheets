@@ -16,6 +16,7 @@ from .operations import destructive_operations, validate_operations
 from .paths import AppPaths
 from .policy import Actor, require_agent_readable, require_stageable, workbook_format
 from .store import read_json, write_json_atomic
+from .transactions import Publisher, plan_lock
 
 
 class Engine(Protocol):
@@ -46,6 +47,7 @@ class OmaSheetsService:
         self.staging = self.paths.cache / "staging"
         for directory in (self.sessions, self.plans, self.staging):
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.publisher = Publisher(paths)
 
     @property
     def current_path(self) -> Path:
@@ -184,8 +186,14 @@ class OmaSheetsService:
             "engine": evidence.get("engine", {}),
         }
         plan["seal"] = _canonical_hash(plan)
-        write_json_atomic(self.plans / f"{plan_id}.json", plan)
+        self._save_plan(plan)
         return self._public_plan(plan)
+
+    def _save_plan(self, plan: dict[str, Any]) -> None:
+        sealed = dict(plan)
+        sealed.pop("seal", None)
+        plan["seal"] = _canonical_hash(sealed)
+        write_json_atomic(self.plans / f"{plan['plan_id']}.json", plan)
 
     def get_plan(self, plan_id: str) -> dict[str, Any]:
         return self._public_plan(self._load_plan(plan_id))
@@ -222,6 +230,104 @@ class OmaSheetsService:
             "seal": plan["seal"],
         }
 
+    def prepare_local_review(
+        self,
+        plan_id: str,
+        expected_revision: int,
+        *,
+        mode: str = "copy",
+        destination: Path | None = None,
+    ) -> dict[str, Any]:
+        """Seal a local publication target before asking for approval."""
+
+        with plan_lock(self.paths, plan_id):
+            plan = self._load_plan(plan_id)
+            if plan["status"] not in ("verified", "review_pending"):
+                raise ConflictError("plan is not eligible for local review")
+            if plan["revision"] != expected_revision:
+                raise ConflictError("plan revision is stale")
+            session = self._session(plan["session_id"])
+            source = Path(session["source"])
+            if mode == "copy":
+                target = destination or source.with_name(f"{source.stem}-omasheets{source.suffix.lower()}")
+                target = target.expanduser().resolve(strict=False)
+                if target == source:
+                    raise ConflictError("copy target cannot be the selected workbook")
+                if target.suffix.lower() != source.suffix.lower():
+                    raise ConflictError("copy target must retain the workbook format")
+                backup = None
+            elif mode == "replace":
+                if destination is not None and destination.expanduser().resolve(strict=False) != source:
+                    raise ConflictError("replace target must be the selected workbook")
+                target = source
+                receipt_id = plan.get("receipt_id") or secrets.token_hex(16)
+                backup = self.publisher.backups / f"{receipt_id}{source.suffix.lower()}"
+            else:
+                raise ConflictError("publication mode must be copy or replace")
+            receipt_id = plan.get("receipt_id") or secrets.token_hex(16)
+            plan.update({
+                "status": "review_pending",
+                "target_mode": mode,
+                "target_destination": str(target),
+                "backup_artifact": str(backup) if backup else None,
+                "receipt_id": receipt_id,
+                "review_prepared_at": _now(),
+            })
+            self._save_plan(plan)
+            return {
+                "plan_id": plan_id,
+                "expected_revision": expected_revision,
+                "target_mode": mode,
+                "destination": str(target),
+                "source_sha256": plan["source_sha256"],
+                "staged_sha256": plan["staged_sha256"],
+                "preview_sha256": plan["preview_sha256"],
+                "semantic_diff": plan["semantic_diff"],
+                "verification": plan["verification"],
+                "warnings": plan["warnings"],
+                "destructive_operations": plan["destructive_operations"],
+                "seal": plan["seal"],
+                "approval_token": f"APPLY {plan_id}",
+            }
+
+    def commit_local_review(self, plan_id: str, expected_revision: int, token: str) -> dict[str, Any]:
+        with plan_lock(self.paths, plan_id):
+            plan = self._load_plan(plan_id)
+            if plan["status"] == "committed":
+                return self.publisher.receipts.get(plan["receipt_id"])
+            if plan["status"] not in ("review_pending", "approved"):
+                raise ConflictError("plan is not awaiting local approval")
+            if token != f"APPLY {plan_id}":
+                raise ConflictError("approval token did not match the plan")
+            if plan["revision"] != expected_revision:
+                raise ConflictError("plan revision is stale")
+            session = self._session(plan["session_id"])
+            plan["status"] = "approved"
+            plan["approved_at"] = _now()
+            self._save_plan(plan)
+            try:
+                receipt = self.publisher.publish(plan, Path(session["source"]))
+            except ConflictError:
+                plan["status"] = "conflicted"
+                plan["conflicted_at"] = _now()
+                self._save_plan(plan)
+                raise
+            except Exception:
+                # Keep the durable approved journal recoverable. A retry can
+                # recognize already-published bytes and finish the receipt.
+                plan["last_publish_error_at"] = _now()
+                self._save_plan(plan)
+                raise
+            plan["status"] = "committed"
+            plan["committed_at"] = _now()
+            self._save_plan(plan)
+            return receipt
+
+    def undo_receipt(self, receipt_id: str, token: str) -> dict[str, Any]:
+        """Local-only undo entry point; never exposed through AgentService."""
+
+        return self.publisher.undo(receipt_id, token)
+
     def change_history(self, session_id: str, since_revision: int | None = None, include_receipts: bool = False) -> dict[str, Any]:
         self._session(session_id)
         plans = []
@@ -238,5 +344,5 @@ class OmaSheetsService:
     @staticmethod
     def _public_plan(plan: dict[str, Any]) -> dict[str, Any]:
         return {key: value for key, value in plan.items() if key not in {
-            "staged_artifact", "preview_artifact"
+            "staged_artifact", "preview_artifact", "target_destination", "backup_artifact"
         }}
