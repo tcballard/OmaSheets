@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from . import __version__
 from .errors import ConflictError, EngineError
 from .identity import FileIdentity, identify_regular_file
 from .operations import destructive_operations, validate_operations
@@ -121,6 +122,48 @@ class OmaSheetsService:
             return {"pending": False}
         latest = max(candidates, key=lambda plan: plan["created_at"])
         return {"pending": True, **self._public_plan(latest)}
+
+    def local_status(self) -> dict[str, Any]:
+        """Return a bounded, path-free status record for the Omarchy panel."""
+
+        current = self.current_resource()
+        actionable: list[dict[str, Any]] = []
+        if current.get("selected"):
+            for path in self.plans.glob("*.json"):
+                plan = self._load_plan(path.stem)
+                if plan.get("session_id") == current["session_id"] and plan.get("status") in {
+                    "verified", "review_pending", "approved"
+                }:
+                    actionable.append(plan)
+        latest = max(actionable, key=lambda plan: plan["created_at"]) if actionable else None
+        pending = {"pending": False}
+        if latest:
+            verification = latest.get("verification") or {}
+            pending = {
+                "pending": True,
+                "plan_id": latest["plan_id"],
+                "revision": latest["revision"],
+                "status": latest["status"],
+                "operation_count": len(latest.get("operations", [])),
+                "destructive_count": len(latest.get("destructive_operations", [])),
+                "warning_count": len(latest.get("warnings", [])),
+                "formula_error_count": len(verification.get("formula_errors", [])),
+            }
+        return {
+            "version": __version__,
+            "current": current,
+            "review": pending,
+            "agent_commit_authority": False,
+        }
+
+    def current_local_path(self) -> Path:
+        """Return and revalidate the locally selected source without exposing it to MCP."""
+
+        if not self.current_path.exists():
+            raise ConflictError("no workbook is selected")
+        session = read_json(self.current_path)
+        self._revalidate_source(session)
+        return Path(session["source"])
 
     def describe_workbook(self, session_id: str, include_formulas: bool = False) -> dict[str, Any]:
         session = self._session(session_id)
@@ -248,6 +291,7 @@ class OmaSheetsService:
                 raise ConflictError("plan revision is stale")
             session = self._session(plan["session_id"])
             source = Path(session["source"])
+            receipt_id = plan.get("receipt_id") or secrets.token_hex(16)
             if mode == "copy":
                 target = destination or source.with_name(f"{source.stem}-omasheets{source.suffix.lower()}")
                 target = target.expanduser().resolve(strict=False)
@@ -260,11 +304,9 @@ class OmaSheetsService:
                 if destination is not None and destination.expanduser().resolve(strict=False) != source:
                     raise ConflictError("replace target must be the selected workbook")
                 target = source
-                receipt_id = plan.get("receipt_id") or secrets.token_hex(16)
                 backup = self.publisher.backups / f"{receipt_id}{source.suffix.lower()}"
             else:
                 raise ConflictError("publication mode must be copy or replace")
-            receipt_id = plan.get("receipt_id") or secrets.token_hex(16)
             plan.update({
                 "status": "review_pending",
                 "target_mode": mode,

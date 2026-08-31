@@ -5,6 +5,14 @@ from omasheets.operations import destructive_operations, validate_operations
 
 
 class OperationTests(unittest.TestCase):
+    def test_scalar_writes_reject_multi_cell_ranges(self):
+        for operation in (
+            {"type": "set_value", "sheet": "Sheet1", "range": "A1:B2", "value": 1},
+            {"type": "set_formula", "sheet": "Sheet1", "range": "A1:A2", "formula": "=1+1"},
+        ):
+            with self.subTest(operation=operation["type"]), self.assertRaises(PolicyError):
+                validate_operations([operation])
+
     def test_normalizes_a1_ranges(self) -> None:
         result = validate_operations([{"type": "clear_range", "sheet": "Data", "range": "a1:b2"}])
         self.assertEqual(result[0]["range"], "A1:B2")

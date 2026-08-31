@@ -46,6 +46,8 @@ def validate_operations(operations: list[dict[str, Any]]) -> list[dict[str, Any]
             not isinstance(operation["range"], str) or _A1.fullmatch(operation["range"].upper()) is None
         ):
             raise PolicyError(f"operation {index} has an invalid A1 range")
+        if kind in {"set_value", "set_formula"} and ":" in operation["range"]:
+            raise PolicyError(f"operation {index} must target one cell")
         if "formula" in operation and (
             not isinstance(operation["formula"], str)
             or not operation["formula"].startswith("=")
