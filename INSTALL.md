@@ -24,10 +24,12 @@ manager or requests privilege. If dependencies are missing, it stops and prints
 this explicit Omarchy command for the user to approve and run:
 
 ```bash
-omarchy pkg add gcc make cmake pkgconf gtk3 libreoffice-fresh libreoffice-fresh-sdk python-uno bubblewrap
+omarchy pkg add gcc make cmake pkgconf gtk3 libreoffice-fresh libreoffice-fresh-sdk bubblewrap
 ```
 
-Then run the **Install OmaSheets** action again.
+Current Arch `libreoffice-fresh` ships the system Python `uno` module and
+`libpyuno`; there is no separate `python-uno` package. The bootstrap still
+checks `import uno` explicitly. Then run the **Install OmaSheets** action again.
 
 ## Installed surfaces
 

@@ -76,7 +76,7 @@ jobs:
       XDG_CACHE_HOME: /tmp/omasheets-home/.cache
       XDG_RUNTIME_DIR: /tmp/omasheets-runtime
     steps:
-      - run: pacman -Syu --noconfirm --needed git cmake gtk3 libreoffice-fresh libreoffice-fresh-sdk python-uno bubblewrap jq ttf-dejavu xorg-server-xvfb
+      - run: pacman -Syu --noconfirm --needed git cmake gtk3 libreoffice-fresh libreoffice-fresh-sdk bubblewrap jq ttf-dejavu xorg-server-xvfb
       - uses: actions/checkout@v7
       - name: Install through the production Omarchy bootstrap path
         run: |
