@@ -142,7 +142,7 @@ class CalcEngine:
             "--setenv", "LC_ALL", "C.UTF-8",
             "--setenv", "PYTHONNOUSERSITE", "1",
             "--setenv", "PYTHONPATH", "/usr/lib/libreoffice/program",
-            "--setenv", "SAL_USE_VCLPLUGIN", "gen",
+            "--setenv", "SAL_USE_VCLPLUGIN", "svp",
             str(self.config.python),
             "/omasheets-worker.py",
             "/job/request.json",
