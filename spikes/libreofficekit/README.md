@@ -46,6 +46,12 @@ to replace an existing file.
 - dirty-close confirmation and password prompts; and
 - a clear status/error surface owned by OmaSheets.
 
+Scroll and resize bursts are coalesced to one visible-area update per 16 ms
+frame. CI opens a sparse 100,000-row by 50-column workbook, scrolls deep into
+it, captures the painted window, and enforces first-paint, load-time, memory,
+and viewport-update budgets. This prevents v0.0.1 from quietly regressing into
+full-sheet rendering or one engine update per input event.
+
 The GTK widget is an engine-facing component. Window layout, controls, product
 identity, save policy, profile isolation, and launch authority belong to
 OmaSheets.
@@ -65,7 +71,8 @@ renders a 320×200 tile, and validates the output header and byte count.
 | Is the user's LibreOffice profile reused? | No; every helper process receives a one-shot profile URL. |
 | Is there an OmaSheets-owned window? | Yes. CI launches it under Xvfb and captures the rendered workbook window. |
 | Are scrolling and selection wired? | Yes. GTK scroll adjustments update the LOK visible area; LOKDocView owns pointer selection and keyboard editing. |
-| Is this a complete native editor? | No. Accessibility evidence, complex dialogs, performance targets, crash sandboxing, and Wayland acceptance remain open. |
+| Does a large sparse sheet stay bounded? | CI enforces a 15 s load, 5 s first-paint, 1 GiB RSS ceiling and coalesced viewport updates on 100,000 × 50 used dimensions. |
+| Is this a complete native editor? | No. Accessibility evidence, complex dialogs, crash sandboxing, and Wayland acceptance remain open. |
 
 ## Promotion gate
 

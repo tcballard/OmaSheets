@@ -4,11 +4,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <sys/resource.h>
 
 namespace fs = std::filesystem;
 
@@ -32,6 +34,15 @@ struct WindowState {
     bool dirty = false;
     bool smoke = false;
     bool editable = false;
+    guint visible_area_source = 0;
+    unsigned visible_area_requests = 0;
+    unsigned visible_area_updates = 0;
+    unsigned scroll_events = 0;
+    bool first_paint_seen = false;
+    std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point loaded_at{};
+    long load_ms = 0;
+    long first_paint_ms = 0;
 };
 
 constexpr const char* kProgram = "/usr/lib/libreoffice/program";
@@ -122,7 +133,7 @@ void on_paste(GtkButton*, gpointer data)
     gtk_widget_grab_focus(state->view);
 }
 
-void update_visible_area(WindowState* state)
+void update_visible_area_now(WindowState* state)
 {
     if (!state->loaded)
         return;
@@ -137,10 +148,48 @@ void update_visible_area(WindowState* state)
         static_cast<int>(lok_doc_view_pixel_to_twip(LOK_DOC_VIEW(state->view), allocation.height)),
     };
     lok_doc_view_set_visible_area(LOK_DOC_VIEW(state->view), &visible);
+    ++state->visible_area_updates;
 }
 
-void on_scroll_changed(GtkAdjustment*, gpointer data) { update_visible_area(static_cast<WindowState*>(data)); }
-void on_scroller_size(GtkWidget*, GtkAllocation*, gpointer data) { update_visible_area(static_cast<WindowState*>(data)); }
+gboolean flush_visible_area(gpointer data)
+{
+    auto* state = static_cast<WindowState*>(data);
+    state->visible_area_source = 0;
+    update_visible_area_now(state);
+    return G_SOURCE_REMOVE;
+}
+
+void schedule_visible_area(WindowState* state)
+{
+    if (!state->loaded)
+        return;
+    ++state->visible_area_requests;
+    if (state->visible_area_source == 0)
+        state->visible_area_source = g_timeout_add_full(G_PRIORITY_HIGH_IDLE, 16, flush_visible_area, state, nullptr);
+}
+
+void on_scroll_changed(GtkAdjustment*, gpointer data)
+{
+    auto* state = static_cast<WindowState*>(data);
+    ++state->scroll_events;
+    schedule_visible_area(state);
+}
+
+void on_scroller_size(GtkWidget*, GtkAllocation*, gpointer data)
+{
+    schedule_visible_area(static_cast<WindowState*>(data));
+}
+
+gboolean on_view_drawn(GtkWidget*, cairo_t*, gpointer data)
+{
+    auto* state = static_cast<WindowState*>(data);
+    if (state->loaded && !state->first_paint_seen) {
+        state->first_paint_seen = true;
+        state->first_paint_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - state->loaded_at).count();
+    }
+    return FALSE;
+}
 
 void populate_sheets(WindowState* state)
 {
@@ -301,12 +350,32 @@ gboolean capture_smoke(gpointer data)
         std::cerr << "omasheets-window: screenshot failed: " << (error != nullptr ? error->message : "unknown error") << '\n';
         g_clear_error(&error);
     } else {
+        rusage usage{};
+        getrusage(RUSAGE_SELF, &usage);
+        const double rss_mib = static_cast<double>(usage.ru_maxrss) / 1024.0;
         std::cout << "{\"editable\":" << (state->editable ? "true" : "false")
                   << ",\"engine\":\"libreofficekitgtk\",\"loaded\":true,\"parts\":"
                   << lok_doc_view_get_parts(LOK_DOC_VIEW(state->view))
-                  << ",\"scrolling\":true,\"selection\":true,\"window_owned_by\":\"omasheets\"}\n";
+                  << ",\"scrolling\":true,\"selection\":true,\"window_owned_by\":\"omasheets\""
+                  << ",\"performance\":{\"load_ms\":" << state->load_ms
+                  << ",\"first_paint_ms\":" << state->first_paint_ms
+                  << ",\"first_paint_observed\":" << (state->first_paint_seen ? "true" : "false")
+                  << ",\"rss_mib\":" << rss_mib
+                  << ",\"scroll_events\":" << state->scroll_events
+                  << ",\"visible_area_requests\":" << state->visible_area_requests
+                  << ",\"visible_area_updates\":" << state->visible_area_updates << "}}\n";
     }
     gtk_widget_destroy(state->window);
+    return G_SOURCE_REMOVE;
+}
+
+gboolean exercise_large_sheet_scroll(gpointer data)
+{
+    auto* state = static_cast<WindowState*>(data);
+    GtkAdjustment* horizontal = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(state->scroller));
+    GtkAdjustment* vertical = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(state->scroller));
+    gtk_adjustment_set_value(horizontal, std::max(0.0, gtk_adjustment_get_upper(horizontal) * 0.75 - gtk_adjustment_get_page_size(horizontal)));
+    gtk_adjustment_set_value(vertical, std::max(0.0, gtk_adjustment_get_upper(vertical) * 0.75 - gtk_adjustment_get_page_size(vertical)));
     return G_SOURCE_REMOVE;
 }
 
@@ -323,10 +392,12 @@ void on_opened(GObject* object, GAsyncResult* result, gpointer data)
         return;
     }
     state->loaded = true;
+    state->loaded_at = std::chrono::steady_clock::now();
+    state->load_ms = std::chrono::duration_cast<std::chrono::milliseconds>(state->loaded_at - state->started).count();
     lok_doc_view_set_edit(LOK_DOC_VIEW(state->view), state->editable ? TRUE : FALSE);
     populate_sheets(state);
     update_zoom(state, 1.0F);
-    update_visible_area(state);
+    update_visible_area_now(state);
     gtk_spinner_stop(GTK_SPINNER(state->spinner));
     gtk_widget_hide(state->spinner);
     gtk_widget_set_sensitive(state->save, state->editable ? TRUE : FALSE);
@@ -334,8 +405,10 @@ void on_opened(GObject* object, GAsyncResult* result, gpointer data)
         ? "Ready — click a cell and type to edit"
         : "Read-only format — use the verified conversion flow to create an editable .xlsx");
     gtk_widget_grab_focus(state->view);
-    if (state->smoke)
+    if (state->smoke) {
+        g_timeout_add(100, exercise_large_sheet_scroll, state);
         g_timeout_add(1500, capture_smoke, state);
+    }
 }
 
 void apply_style()
@@ -453,6 +526,7 @@ GtkWidget* build_window(WindowState* state)
     g_signal_connect(state->view, "command-changed", G_CALLBACK(on_command_changed), state);
     g_signal_connect(state->view, "command-result", G_CALLBACK(on_command_result), state);
     g_signal_connect(state->view, "password-required", G_CALLBACK(on_password), state);
+    g_signal_connect_after(state->view, "draw", G_CALLBACK(on_view_drawn), state);
     g_signal_connect(gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(state->scroller)), "value-changed", G_CALLBACK(on_scroll_changed), state);
     g_signal_connect(gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(state->scroller)), "value-changed", G_CALLBACK(on_scroll_changed), state);
     g_signal_connect(state->scroller, "size-allocate", G_CALLBACK(on_scroller_size), state);

@@ -80,8 +80,11 @@ jobs:
             --outdir "$RUNNER_TEMP/lok-input" spikes/libreofficekit/fixtures/smoke.fods
           libreoffice --headless --convert-to xlsx \
             --outdir "$RUNNER_TEMP/lok-input" spikes/libreofficekit/fixtures/smoke.fods
+          libreoffice --headless --convert-to xlsx \
+            --outdir "$RUNNER_TEMP/lok-input" spikes/libreofficekit/fixtures/large.fods
           test -s "$RUNNER_TEMP/lok-input/smoke.xls"
           test -s "$RUNNER_TEMP/lok-input/smoke.xlsx"
+          test -s "$RUNNER_TEMP/lok-input/large.xlsx"
       - name: Render the workbook through LibreOfficeKit
         run: |
           build/lok-spike/omasheets-lok-render \
@@ -103,7 +106,7 @@ jobs:
       - name: Open the OmaSheets-owned interactive window
         run: |
           xvfb-run -a build/lok-spike/omasheets-window \
-            --smoke-test "$RUNNER_TEMP/omasheets-window.png" "$RUNNER_TEMP/lok-input/smoke.xlsx" \
+            --smoke-test "$RUNNER_TEMP/omasheets-window.png" "$RUNNER_TEMP/lok-input/large.xlsx" \
             | tee "$RUNNER_TEMP/window-report.json"
           python - <<'PY'
           import json
@@ -112,15 +115,18 @@ jobs:
 
           report = json.loads(Path(os.environ["RUNNER_TEMP"], "window-report.json").read_text())
           screenshot = Path(os.environ["RUNNER_TEMP"], "omasheets-window.png").read_bytes()
-          assert report == {
-              "editable": True,
-              "engine": "libreofficekitgtk",
-              "loaded": True,
-              "parts": 1,
-              "scrolling": True,
-              "selection": True,
-              "window_owned_by": "omasheets",
-          }
+          assert report["editable"] is True
+          assert report["engine"] == "libreofficekitgtk"
+          assert report["loaded"] is True and report["parts"] == 1
+          assert report["scrolling"] is True and report["selection"] is True
+          assert report["window_owned_by"] == "omasheets"
+          performance = report["performance"]
+          assert performance["load_ms"] <= 15_000
+          assert performance["first_paint_observed"] is True
+          assert 0 <= performance["first_paint_ms"] <= 5_000
+          assert performance["rss_mib"] <= 1024
+          assert performance["scroll_events"] >= 2
+          assert performance["visible_area_updates"] < performance["scroll_events"] + 1
           assert screenshot.startswith(b"\x89PNG\r\n\x1a\n")
           assert len(screenshot) > 10_000
           PY
