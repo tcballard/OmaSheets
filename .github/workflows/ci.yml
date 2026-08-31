@@ -64,11 +64,37 @@ jobs:
           rm -rf .omarchy-contract
           bash "$RUNNER_TEMP/omarchy-plugin-validate" .
 
-  production-install:
-    name: Arch production install and native acceptance
+  native-package:
+    name: Build native release bundle
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel
+    steps:
+      - run: pacman -Syu --noconfirm --needed git cmake gtk3 libreoffice-fresh libreoffice-fresh-sdk
+      - uses: actions/checkout@v7
+      - name: Build the release-native executables once
+        run: python scripts/build_native_bundle.py --output dist-native
+      - name: Verify the bundle payload and embedded provenance
+        run: |
+          archive=$(find dist-native -maxdepth 1 -type f -name 'omasheets-native-*-linux-x86_64.tar.gz')
+          test -n "$archive"
+          mkdir "$RUNNER_TEMP/native-smoke"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/native-smoke"
+          sha256sum --check "$archive.sha256"
+          "$RUNNER_TEMP/native-smoke/bin/omasheets-window" --provenance
+          "$RUNNER_TEMP/native-smoke/bin/omasheets-lok-render" --provenance
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omasheets-native-linux-x86_64
+          path: dist-native/
+          if-no-files-found: error
+
+  production-install:
+    name: Compiler-free Arch install and native acceptance
+    needs: native-package
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base
       # The production worker still uses Bubblewrap with --unshare-all. The
       # outer hosted container needs namespace authority so that inner sandbox
       # can be created instead of failing closed before Calc starts.
@@ -81,16 +107,26 @@ jobs:
       XDG_CACHE_HOME: /tmp/omasheets-home/.cache
       XDG_RUNTIME_DIR: /tmp/omasheets-runtime
     steps:
-      - run: pacman -Syu --noconfirm --needed git cmake gtk3 libreoffice-fresh libreoffice-fresh-sdk bubblewrap jq ttf-dejavu xorg-server-xvfb
+      - run: pacman -Syu --noconfirm --needed git gtk3 libreoffice-fresh bubblewrap jq ttf-dejavu xorg-server-xvfb
       - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: omasheets-native-linux-x86_64
+          path: dist-native
       - name: Install through the production Omarchy bootstrap path
         run: |
           plugin="$HOME/.config/omarchy/plugins/io.github.tcballard.omasheets"
           mkdir -p "$(dirname "$plugin")" "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
           git clone "$GITHUB_WORKSPACE" "$plugin"
+          export OMASHEETS_NATIVE_BUNDLE_PATH
+          OMASHEETS_NATIVE_BUNDLE_PATH=$(find "$GITHUB_WORKSPACE/dist-native" -maxdepth 1 -type f -name 'omasheets-native-*-linux-x86_64.tar.gz')
+          test -n "$OMASHEETS_NATIVE_BUNDLE_PATH"
           "$plugin/bin/omasheets-plugin" install
           "$HOME/.local/bin/omasheets" doctor
+          for command in c++ gcc cmake make pkg-config; do
+            ! command -v "$command"
+          done
       - name: Prove native binary source provenance
         run: |
           plugin="$HOME/.config/omarchy/plugins/io.github.tcballard.omasheets"

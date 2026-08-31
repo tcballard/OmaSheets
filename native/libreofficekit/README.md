@@ -5,13 +5,14 @@ window and bounded LibreOfficeKit renderer. LibreOfficeKit remains a replaceable
 document engine; the window chrome, session bridge, review overlay, save-copy
 policy and launch authority belong to OmaSheets.
 
-Users do not build or install this directory manually. The repository-local
-`bin/omasheets-plugin install` bootstrap checks external dependencies, builds
-these targets from the installed plugin checkout, and installs them into the
-current user's XDG data directory. It never invokes a package manager or sudo.
+Users do not build or install this directory manually. Release CI builds these
+targets once from the tagged checkout and publishes a source-bound native
+bundle. The repository-local bootstrap verifies that bundle and installs it
+into the current user's XDG data directory. It never invokes a compiler,
+package manager, or sudo.
 
-Each binary embeds the Git commit and full tracked-source digest supplied by the
-installer. `omasheets-window --provenance` and
+Each binary embeds the Git commit and full tracked-source digest supplied by
+release CI. `omasheets-window --provenance` and
 `omasheets-lok-render --provenance` expose that identity; the Arch production
 installation job verifies it against the installed checkout.
 

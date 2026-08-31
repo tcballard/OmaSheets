@@ -44,9 +44,13 @@ omarchy plugin add https://github.com/tcballard/OmaSheets.git --enable
 The command installs and enables the Omarchy bar surface. Choose **Install
 OmaSheets** there to run the privilege-free, user-local bootstrap for the native
 window, Python service, Codex plugin, MCP server, desktop entry and MIME
-associations. Omarchy intentionally runs no plugin install hooks; missing Arch
-dependencies are reported with an explicit `omarchy pkg add` command for the
-user to approve. Full installation and reversible removal details are in
+associations. The bootstrap downloads the native executables built by the
+matching GitHub release and verifies their checksum, version, architecture,
+source commit, tracked-source digest and individual file hashes before
+installation. Users do not need a compiler, CMake, `pkgconf`, or the
+LibreOffice SDK. Omarchy intentionally runs no plugin install hooks; missing
+runtime dependencies are reported with an explicit `omarchy pkg add` command
+for the user to approve. Full installation and reversible removal details are in
 [`INSTALL.md`](INSTALL.md).
 
 Open a workbook and choose **Ask Agent** from the OmaSheets window or Omarchy

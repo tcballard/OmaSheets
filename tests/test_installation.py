@@ -1,11 +1,15 @@
+import hashlib
+import io
 import json
 from pathlib import Path
-import subprocess
+import tarfile
 import tempfile
 import unittest
 
-from omasheets.installation import InstallPaths, PLUGIN_ENTRY, install, uninstall
+from omasheets import __version__
+from omasheets.installation import ARCH_PACKAGES, InstallPaths, PLUGIN_ENTRY, install, source_identity, uninstall
 from omasheets.integration import DESKTOP_ID, IntegrationPaths
+from omasheets.native_bundle import NATIVE_EXECUTABLES, normalized_architecture, platform_id
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,26 +32,38 @@ class InstallationTests(unittest.TestCase):
                 root / "state/omasheets/desktop-integration.json",
             ),
         )
-        self.stage = None
+        self.bundle = root / "omasheets-native.tar.gz"
+        self.make_bundle(self.bundle)
 
     def tearDown(self):
         self.temporary.cleanup()
 
-    def fake_cmake(self, argv, **kwargs):
-        if argv[1] == "-S":
-            option = next(value for value in argv if value.startswith("-DCMAKE_INSTALL_PREFIX="))
-            self.stage = Path(option.split("=", 1)[1])
-        elif argv[1] == "--install":
-            binary = self.stage / "bin"
-            binary.mkdir(parents=True)
-            for name in ("omasheets-window", "omasheets-lok-render"):
-                path = binary / name
-                path.write_bytes((name + "\n").encode())
-                path.chmod(0o755)
-        return subprocess.CompletedProcess(argv, 0)
+    def make_bundle(self, path, *, source=None, extra=None):
+        source = source or source_identity(ROOT)
+        executable = (
+            "#!/bin/sh\n"
+            f"printf '%s\\n' '{{\"source_commit\":\"{source['commit']}\","
+            f"\"source_sha256\":\"{source['sha256']}\"}}'\n"
+        ).encode()
+        payloads = {f"bin/{name}": executable for name in NATIVE_EXECUTABLES}
+        manifest = {
+            "schema": 1,
+            "version": __version__,
+            "platform": platform_id(),
+            "architecture": normalized_architecture(),
+            "source": source,
+            "files": {name: hashlib.sha256(data).hexdigest() for name, data in payloads.items()},
+        }
+        encoded_manifest = (json.dumps(manifest) + "\n").encode()
+        with tarfile.open(path, "w:gz") as bundle:
+            for name, data in {"manifest.json": encoded_manifest, **payloads, **(extra or {})}.items():
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                member.mode = 0o755 if name.startswith("bin/") else 0o644
+                bundle.addfile(member, io.BytesIO(data))
 
     def test_install_and_uninstall_cover_all_owned_surfaces(self):
-        result = install(ROOT, self.paths, check_dependencies=False, runner=self.fake_cmake)
+        result = install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
         self.assertTrue(result["changed"])
         self.assertTrue(self.paths.launcher.is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-window").is_file())
@@ -56,7 +72,7 @@ class InstallationTests(unittest.TestCase):
         marketplace = json.loads(self.paths.codex_marketplace.read_text())
         self.assertIn(PLUGIN_ENTRY, marketplace["plugins"])
         self.assertIn(str(self.paths.launcher), self.paths.integration.desktop.read_text())
-        self.assertFalse(install(ROOT, self.paths, check_dependencies=False, runner=self.fake_cmake)["changed"])
+        self.assertFalse(install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)["changed"])
 
         marketplace["plugins"].append({"name": "keep-me"})
         self.paths.codex_marketplace.write_text(json.dumps(marketplace))
@@ -70,8 +86,13 @@ class InstallationTests(unittest.TestCase):
         self.assertFalse(self.paths.codex_plugin.exists())
         self.assertFalse(self.paths.app.exists())
 
+    def test_user_dependencies_are_runtime_only(self):
+        self.assertEqual(ARCH_PACKAGES, ("gtk3", "libreoffice-fresh", "bubblewrap"))
+        for build_tool in ("gcc", "make", "cmake", "pkgconf", "libreoffice-fresh-sdk"):
+            self.assertNotIn(build_tool, ARCH_PACKAGES)
+
     def test_uninstall_preserves_a_modified_owned_file(self):
-        install(ROOT, self.paths, check_dependencies=False, runner=self.fake_cmake)
+        install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
         self.paths.launcher.write_text("user changed this")
         result = uninstall(self.paths)
         self.assertEqual(len(result["conflicts"]), 1)
@@ -88,10 +109,24 @@ class InstallationTests(unittest.TestCase):
             journal=self.paths.journal,
             integration=self.paths.integration,
         )
-        install(ROOT, paths, check_dependencies=False, runner=self.fake_cmake)
+        install(ROOT, paths, check_dependencies=False, bundle_path=self.bundle)
         launcher = paths.launcher.read_text()
         self.assertIn("'\"'\"'", launcher)
         self.assertNotIn('PYTHONPATH="', launcher)
+
+    def test_bundle_must_match_the_exact_plugin_source(self):
+        wrong = self.bundle.with_name("wrong.tar.gz")
+        self.make_bundle(wrong, source={"commit": "0" * 40, "sha256": "1" * 64})
+        with self.assertRaisesRegex(RuntimeError, "source does not match"):
+            install(ROOT, self.paths, check_dependencies=False, bundle_path=wrong)
+        self.assertFalse(self.paths.app.exists())
+
+    def test_bundle_rejects_unexpected_archive_members(self):
+        unsafe = self.bundle.with_name("unsafe.tar.gz")
+        self.make_bundle(unsafe, extra={"../escape": b"nope"})
+        with self.assertRaisesRegex(RuntimeError, "unexpected file set"):
+            install(ROOT, self.paths, check_dependencies=False, bundle_path=unsafe)
+        self.assertFalse((Path(self.temporary.name).parent / "escape").exists())
 
 
 if __name__ == "__main__":

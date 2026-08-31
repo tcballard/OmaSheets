@@ -24,13 +24,19 @@ def main() -> int:
     for required in (
         "README.md", "INSTALL.md", "docs/ACCEPTANCE.md", "docs/SECURITY.md",
         "docs/AGENT_PROTOCOL.md", "docs/AGENT_WORKFLOWS.md",
-        "bin/omasheets-plugin", "scripts/install.py",
+        "bin/omasheets-plugin", "scripts/install.py", "scripts/build_native_bundle.py",
+        "src/omasheets/native_bundle.py", ".github/workflows/release.yml",
         "native/libreofficekit/CMakeLists.txt", "plugins/omasheets/.codex-plugin/plugin.json",
     ):
         assert (ROOT / required).is_file(), f"missing release document: {required}"
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     assert "b686ed892d9c3020c3336203f6d34cc75b544e2b" in workflow, "Omarchy validator pin drifted"
-    assert "Arch production install and native acceptance" in workflow
+    assert "Compiler-free Arch install and native acceptance" in workflow
+    assert "archlinux:base\n" in workflow
+    assert "libreoffice-fresh-sdk" in workflow
+    install_job = workflow.split("  production-install:", 1)[1]
+    assert "cmake" not in install_job.split("      - name: Install through", 1)[0]
+    assert "OMASHEETS_NATIVE_BUNDLE_PATH" in install_job
     assert "Exercise the installed agentic workbook loop" in workflow
     assert '"agent-session", "call", "describe_workbook"' in workflow
     assert "omasheets://session" in (ROOT / "README.md").read_text()
