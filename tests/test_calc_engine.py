@@ -75,6 +75,24 @@ class CalcEngineTests(unittest.TestCase):
                 preview=self.root / "preview.pdf",
             )
 
+    def test_worker_failure_uses_only_its_bounded_structured_error(self):
+        source = self.root / "book.xlsx"
+        source.write_bytes(b"workbook")
+
+        def fail_worker(command, **options):
+            del command
+            (Path(options["cwd"]) / "result.json").write_text(
+                '{"ok":false,"error":"RuntimeError: bounded worker detail"}'
+            )
+            from subprocess import CompletedProcess
+
+            return CompletedProcess([], 1, stdout="ignored", stderr="secret stderr")
+
+        engine = CalcEngine(self.paths, config=self.config, runner=fail_worker)
+        with self.assertRaisesRegex(EngineError, "bounded worker detail") as raised:
+            engine.describe(source, include_formulas=False)
+        self.assertNotIn("secret stderr", str(raised.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
