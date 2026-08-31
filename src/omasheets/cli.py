@@ -58,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     integrate_commands = integrate.add_subparsers(dest="integrate_command", required=True)
     integrate_commands.add_parser("install", help="Install the desktop entry and MIME associations")
     integrate_commands.add_parser("uninstall", help="Restore or remove OmaSheets integration")
+    commands.add_parser("uninstall", help="Remove the user-local OmaSheets product installation")
     lok = commands.add_parser("lok", help="Run the experimental LibreOfficeKit spike")
     lok_commands = lok.add_subparsers(dest="lok_command", required=True)
     lok_status = lok_commands.add_parser("status", help="Check LibreOfficeKit spike dependencies")
@@ -177,6 +178,12 @@ def main(argv: list[str] | None = None) -> int:
         result = install() if arguments.integrate_command == "install" else uninstall()
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
+    if arguments.command == "uninstall":
+        from .installation import uninstall
+
+        result = uninstall()
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 1 if result["conflicts"] else 0
     if arguments.command == "lok":
         from .lok_spike import render_workbook, status
 
@@ -198,3 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

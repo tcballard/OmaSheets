@@ -27,8 +27,8 @@ MIME_TYPES = (
 DESKTOP_ENTRY = """[Desktop Entry]
 Type=Application
 Name=OmaSheets
-Comment=Open spreadsheets in native LibreOffice Calc
-Exec=omasheets open %F
+Comment=Open spreadsheets in the native OmaSheets window
+Exec=omasheets window %F
 Icon=x-office-spreadsheet
 Terminal=false
 StartupNotify=true
@@ -143,14 +143,24 @@ def _refresh_desktop_database(desktop: Path) -> None:
         subprocess.run([executable, str(desktop.parent)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def install(paths: IntegrationPaths | None = None) -> dict[str, Any]:
+def desktop_entry(executable: Path | None = None) -> bytes:
+    if executable is None:
+        command = "omasheets"
+    else:
+        command = str(executable.resolve(strict=True)).replace("%", "%%")
+        if any(character.isspace() for character in command):
+            command = '"' + command.replace('"', '\\"') + '"'
+    return DESKTOP_ENTRY.replace("Exec=omasheets window %F", f"Exec={command} window %F").encode()
+
+
+def install(paths: IntegrationPaths | None = None, *, executable: Path | None = None) -> dict[str, Any]:
     paths = paths or IntegrationPaths.discover()
     with exclusive_lock(paths.journal.parent / ".desktop-integration.lock"):
-        return _install_locked(paths)
+        return _install_locked(paths, executable)
 
 
-def _install_locked(paths: IntegrationPaths) -> dict[str, Any]:
-    desired_desktop = DESKTOP_ENTRY.encode()
+def _install_locked(paths: IntegrationPaths, executable: Path | None = None) -> dict[str, Any]:
+    desired_desktop = desktop_entry(executable)
     if paths.journal.exists():
         journal = read_json(paths.journal)
         desktop_ok = paths.desktop.exists() and _sha(paths.desktop.read_bytes()) == journal.get("desktop_after_sha256")

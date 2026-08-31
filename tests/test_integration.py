@@ -24,7 +24,7 @@ class IntegrationTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_install_and_uninstall_restore_exact_original(self):
-        self.assertIn("Exec=omasheets open %F", DESKTOP_ENTRY)
+        self.assertIn("Exec=omasheets window %F", DESKTOP_ENTRY)
         original = b"[Default Applications]\napplication/vnd.ms-excel=calc.desktop;\n# keep me\n"
         self.paths.mimeapps.parent.mkdir(parents=True)
         self.paths.mimeapps.write_bytes(original)

@@ -1,0 +1,29 @@
+#!/bin/bash
+set -euo pipefail
+
+plugin_root=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+launcher="${HOME}/.local/bin/omasheets"
+
+case "${1:-}" in
+install | doctor | uninstall)
+  exec /usr/bin/python "$plugin_root/scripts/install.py" "$1"
+  ;;
+run)
+  shift
+  if [[ ! -x $launcher ]]; then
+    printf '%s\n' 'OmaSheets setup is incomplete. Run the Install action from the bar widget.' >&2
+    exit 69
+  fi
+  exec "$launcher" "$@"
+  ;;
+status)
+  if [[ -x $launcher ]]; then
+    exec "$launcher" status --json
+  fi
+  printf '%s\n' '{"installed":false,"current":{"selected":false},"review":{"pending":false}}'
+  ;;
+*)
+  printf '%s\n' 'usage: omasheets-plugin {install|doctor|uninstall|status|run ...}' >&2
+  exit 2
+  ;;
+esac
