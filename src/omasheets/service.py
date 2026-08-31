@@ -327,6 +327,9 @@ class OmaSheetsService:
 
     def plan_changes(self, session_id: str, expected_revision: int, operations: list[dict[str, Any]]) -> dict[str, Any]:
         session = self._session(session_id)
+        window = self.window_context_resource()
+        if window.get("active") and window.get("session_id") == session_id and window.get("dirty"):
+            raise ConflictError("native window has unsaved changes; save a copy or close it before staging agent changes")
         if session["revision"] != expected_revision:
             raise ConflictError("workbook revision is stale")
         require_stageable(Path(session["source"]), actor=Actor.AGENT)
