@@ -52,6 +52,18 @@ class ServiceTests(unittest.TestCase):
         self.assertNotIn("source", session)
         self.assertNotIn(str(self.source), str(session))
 
+    def test_local_status_is_bounded_and_path_free(self):
+        session = self.service.select_workbook(self.source)
+        plan = self.service.plan_changes(
+            session["session_id"], 1,
+            [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}],
+        )
+        status = self.service.local_status()
+        self.assertEqual(status["review"]["plan_id"], plan["plan_id"])
+        self.assertEqual(status["review"]["operation_count"], 1)
+        self.assertFalse(status["agent_commit_authority"])
+        self.assertNotIn(str(self.source.parent), str(status))
+
     def test_plan_is_sealed_and_handoff_is_non_mutating(self):
         session = self.service.select_workbook(self.source)
         plan = self.service.plan_changes(

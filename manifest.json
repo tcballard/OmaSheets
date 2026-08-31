@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.tcballard.omasheets",
+  "name": "OmaSheets",
+  "version": "0.0.1",
+  "author": "Tom Ballard",
+  "license": "MIT",
+  "description": "Selected workbook and agent-change review status for OmaSheets",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "OmaSheets",
+    "description": "Open the selected workbook and hand staged changes to a local review terminal",
+    "category": "Office",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}
