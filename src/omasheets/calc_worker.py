@@ -923,10 +923,15 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
             )
             detail = ""
             if "workbook_objects_match" in failed:
+                differing = {
+                    key: {"expected": expected_objects[key], "reopened": reopened_objects[key]}
+                    for key in ("charts", "pivots")
+                    if expected_objects[key] != reopened_objects[key]
+                }
                 detail = "; objects=" + json.dumps(
-                    {"expected": expected_objects, "reopened": reopened_objects},
+                    differing,
                     sort_keys=True, separators=(",", ":"),
-                )[:320]
+                )[:400]
             raise RuntimeError(
                 "staged workbook did not survive save and reopen verification: "
                 + ", ".join(failed) + detail
