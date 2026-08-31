@@ -126,7 +126,7 @@ jobs:
           assert 0 <= performance["first_paint_ms"] <= 5_000
           assert performance["rss_mib"] <= 1024
           assert performance["scroll_events"] >= 2
-          assert performance["visible_area_updates"] < performance["scroll_events"] + 1
+          assert performance["visible_area_updates"] < performance["visible_area_requests"]
           assert screenshot.startswith(b"\x89PNG\r\n\x1a\n")
           assert len(screenshot) > 10_000
           PY
