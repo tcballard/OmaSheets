@@ -14,6 +14,7 @@ from typing import Any
 
 from .errors import ConflictError
 from .store import read_json, write_json_atomic
+from .transactions import exclusive_lock
 
 DESKTOP_ID = "io.github.tcballard.OmaSheets.desktop"
 MIME_TYPES = (
@@ -27,7 +28,7 @@ DESKTOP_ENTRY = """[Desktop Entry]
 Type=Application
 Name=OmaSheets
 Comment=Open spreadsheets in native LibreOffice Calc
-Exec=omasheets open %U
+Exec=omasheets open %F
 Icon=x-office-spreadsheet
 Terminal=false
 StartupNotify=true
@@ -144,6 +145,11 @@ def _refresh_desktop_database(desktop: Path) -> None:
 
 def install(paths: IntegrationPaths | None = None) -> dict[str, Any]:
     paths = paths or IntegrationPaths.discover()
+    with exclusive_lock(paths.journal.parent / ".desktop-integration.lock"):
+        return _install_locked(paths)
+
+
+def _install_locked(paths: IntegrationPaths) -> dict[str, Any]:
     desired_desktop = DESKTOP_ENTRY.encode()
     if paths.journal.exists():
         journal = read_json(paths.journal)
@@ -175,6 +181,11 @@ def install(paths: IntegrationPaths | None = None) -> dict[str, Any]:
 
 def uninstall(paths: IntegrationPaths | None = None) -> dict[str, Any]:
     paths = paths or IntegrationPaths.discover()
+    with exclusive_lock(paths.journal.parent / ".desktop-integration.lock"):
+        return _uninstall_locked(paths)
+
+
+def _uninstall_locked(paths: IntegrationPaths) -> dict[str, Any]:
     if not paths.journal.exists():
         return {"installed": False, "changed": False, "desktop_id": DESKTOP_ID}
     journal = read_json(paths.journal)

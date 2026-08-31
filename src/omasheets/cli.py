@@ -32,6 +32,10 @@ def build_parser() -> argparse.ArgumentParser:
     open_command = commands.add_parser("open", help="Open workbooks in LibreOffice Calc")
     open_command.add_argument("paths", nargs="+", type=Path)
     commands.add_parser("open-current", help="Open the selected workbook in LibreOffice Calc")
+    convert = commands.add_parser("convert", help="Convert .xls to a new adjacent .xlsx")
+    convert.add_argument("path", type=Path)
+    doctor = commands.add_parser("doctor", help="Check the local OmaSheets runtime")
+    doctor.add_argument("--json", action="store_true", help="Emit JSON")
     commands.add_parser("review-current", help="Review the newest staged plan in this terminal")
     plan = commands.add_parser("plan", help="Review a staged plan")
     plan_commands = plan.add_subparsers(dest="plan_command")
@@ -68,6 +72,21 @@ def main(argv: list[str] | None = None) -> int:
         paths = arguments.paths if arguments.command == "open" else [service.current_local_path()]
         print(json.dumps({"pid": open_workbooks(paths), "opened": len(paths)}, sort_keys=True))
         return 0
+    if arguments.command == "convert":
+        print(json.dumps(_service().convert_legacy_local(arguments.path), indent=2, sort_keys=True))
+        return 0
+    if arguments.command == "doctor":
+        from .doctor import diagnose
+
+        result = diagnose()
+        if arguments.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            for check in result["checks"]:
+                mark = "ok" if check["ok"] else "missing"
+                print(f"{mark:7} {check['name']}: {check['detail']}")
+            print("ready" if result["ready"] else "not ready")
+        return 0 if result["ready"] else 1
     if arguments.command == "review-current":
         service = _service()
         status = service.local_status()["review"]

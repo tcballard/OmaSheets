@@ -251,5 +251,9 @@ class CalcEngine:
             "convert_xls",
             source,
             {},
-            {"workbook": chosen, "preview": preview},
+            # Keep the public adjacent workbook as the final copy. If the
+            # process is interrupted during artifact publication, at worst a
+            # private preview remains; no half-completed public conversion is
+            # presented as finished.
+            {"preview": preview, "workbook": chosen},
         )

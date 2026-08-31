@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 from contextlib import contextmanager
@@ -18,6 +19,9 @@ from .errors import ConflictError
 from .identity import identify_regular_file
 from .paths import AppPaths
 from .store import read_json, write_json_atomic
+
+_RECEIPT_ID = re.compile(r"^(?:[0-9a-f]{32}|undo-[0-9a-f]{32})$")
+_PUBLISH_RECEIPT_ID = re.compile(r"^[0-9a-f]{32}$")
 
 
 def _now() -> str:
@@ -42,6 +46,8 @@ def exclusive_lock(path: Path) -> Iterator[None]:
 
 
 def plan_lock(paths: AppPaths, plan_id: str) -> Iterator[None]:
+    if not isinstance(plan_id, str) or _PUBLISH_RECEIPT_ID.fullmatch(plan_id) is None:
+        raise ConflictError("invalid plan identifier")
     return exclusive_lock(paths.state / "locks" / f"plan-{plan_id}.lock")
 
 
@@ -71,6 +77,8 @@ class ReceiptStore:
         self.lock = self.directory / ".chain.lock"
 
     def path(self, receipt_id: str) -> Path:
+        if not isinstance(receipt_id, str) or _RECEIPT_ID.fullmatch(receipt_id) is None:
+            raise ConflictError("invalid receipt identifier")
         return self.directory / f"{receipt_id}.json"
 
     def get(self, receipt_id: str) -> dict[str, Any]:
@@ -170,6 +178,8 @@ class Publisher:
         return self.receipts.record(receipt)
 
     def undo(self, receipt_id: str, token: str) -> dict[str, Any]:
+        if not isinstance(receipt_id, str) or _PUBLISH_RECEIPT_ID.fullmatch(receipt_id) is None:
+            raise ConflictError("invalid receipt identifier")
         if token != f"UNDO {receipt_id}":
             raise ConflictError("undo token did not match the receipt")
         original = self.receipts.get(receipt_id)

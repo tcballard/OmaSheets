@@ -24,6 +24,20 @@ always requires manual review.
 
 The product and safety contracts are in [`docs/`](docs/).
 
+## Current developer commands
+
+```bash
+omasheets doctor
+omasheets open workbook.xls
+omasheets select workbook.xlsx
+omasheets convert workbook.xls
+omasheets status --json
+omasheets mcp serve
+```
+
+Installation is documented in [`INSTALL.md`](INSTALL.md); the real Omarchy and
+LibreOffice release pass is in [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).
+
 ## Status
 
 Early development. The `main` branch remains the minimal bootstrap; v0.0.1 is

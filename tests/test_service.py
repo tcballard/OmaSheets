@@ -34,6 +34,15 @@ class FakeEngine:
             "engine": {"name": "fake"},
         }
 
+    def convert_legacy(self, source, *, destination=None, preview):
+        destination.write_bytes(b"xlsx-converted")
+        preview.write_bytes(b"%PDF-conversion-preview")
+        return {
+            "comparison": {"sheet_count_before": 1, "sheet_count_after": 1},
+            "warnings": ["manual review required"],
+            "engine": {"name": "fake"},
+        }
+
 
 class ServiceTests(unittest.TestCase):
     def setUp(self):
@@ -64,6 +73,16 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(status["agent_commit_authority"])
         self.assertNotIn(str(self.source.parent), str(status))
 
+    def test_legacy_conversion_creates_a_receipt_and_preserves_source(self):
+        legacy = self.source.with_name("legacy.xls")
+        legacy.write_bytes(b"legacy-source")
+        receipt = self.service.convert_legacy_local(legacy)
+        self.assertEqual(legacy.read_bytes(), b"legacy-source")
+        self.assertEqual(legacy.with_suffix(".xlsx").read_bytes(), b"xlsx-converted")
+        self.assertEqual(receipt["kind"], "conversion")
+        self.assertTrue(receipt["manual_review_required"])
+        self.assertFalse(receipt["excel_equivalence_claimed"])
+
     def test_plan_is_sealed_and_handoff_is_non_mutating(self):
         session = self.service.select_workbook(self.source)
         plan = self.service.plan_changes(
@@ -92,6 +111,16 @@ class ServiceTests(unittest.TestCase):
         path.write_text(text.replace('"status":"verified"', '"status":"approved"'))
         with self.assertRaises(ConflictError):
             self.service.get_plan(plan["plan_id"])
+
+    def test_identifiers_cannot_traverse_state_directories(self):
+        malicious = "../" * 10 + "xx"
+        self.assertEqual(len(malicious), 32)
+        with self.assertRaises(ConflictError):
+            self.service.get_plan(malicious)
+        with self.assertRaises(ConflictError):
+            self.service._session(malicious)
+        with self.assertRaises(ConflictError):
+            self.service.undo_receipt(malicious, f"UNDO {malicious}")
 
     def test_preview_and_staged_hashes_are_rechecked(self):
         session = self.service.select_workbook(self.source)

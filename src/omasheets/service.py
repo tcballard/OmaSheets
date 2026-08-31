@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -19,6 +20,8 @@ from .policy import Actor, require_agent_readable, require_stageable, workbook_f
 from .store import read_json, write_json_atomic
 from .transactions import Publisher, plan_lock
 
+_IDENTIFIER = re.compile(r"^[0-9a-f]{32}$")
+
 
 class Engine(Protocol):
     def describe(self, source: Path, *, include_formulas: bool) -> dict[str, Any]: ...
@@ -27,6 +30,7 @@ class Engine(Protocol):
     def trace(self, source: Path, **arguments: Any) -> dict[str, Any]: ...
     def render(self, source: Path, *, output: Path) -> dict[str, Any]: ...
     def stage(self, source: Path, operations: list[dict[str, Any]], *, output: Path, preview: Path) -> dict[str, Any]: ...
+    def convert_legacy(self, source: Path, *, destination: Path | None = None, preview: Path) -> dict[str, Any]: ...
 
 
 def _now() -> str:
@@ -75,7 +79,7 @@ class OmaSheetsService:
         return self._public_session(session)
 
     def _session(self, session_id: str) -> dict[str, Any]:
-        if not isinstance(session_id, str) or len(session_id) != 32:
+        if not isinstance(session_id, str) or _IDENTIFIER.fullmatch(session_id) is None:
             raise ConflictError("invalid workbook session")
         path = self.sessions / f"{session_id}.json"
         if not path.exists():
@@ -165,6 +169,37 @@ class OmaSheetsService:
         self._revalidate_source(session)
         return Path(session["source"])
 
+    def convert_legacy_local(self, source: Path) -> dict[str, Any]:
+        """Convert an explicitly chosen `.xls` to an adjacent, new `.xlsx`."""
+
+        from .policy import conversion_destination
+
+        resolved = source.expanduser().resolve(strict=True)
+        source_identity = identify_regular_file(resolved)
+        destination = conversion_destination(resolved)
+        receipt_id = secrets.token_hex(16)
+        preview = self.paths.cache / "conversions" / f"{receipt_id}.pdf"
+        preview.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        result = self.engine.convert_legacy(resolved, destination=destination, preview=preview)
+        destination_identity = identify_regular_file(destination)
+        preview_identity = identify_regular_file(preview)
+        receipt = self.publisher.receipts.record({
+            "receipt_id": receipt_id,
+            "kind": "conversion",
+            "source": str(resolved),
+            "source_sha256": source_identity.sha256,
+            "target": str(destination),
+            "result_sha256": destination_identity.sha256,
+            "preview": str(preview),
+            "preview_sha256": preview_identity.sha256,
+            "manual_review_required": True,
+            "excel_equivalence_claimed": False,
+            "engine": result.get("engine", {}),
+            "comparison": result.get("comparison", {}),
+            "warnings": result.get("warnings", []),
+        })
+        return receipt
+
     def describe_workbook(self, session_id: str, include_formulas: bool = False) -> dict[str, Any]:
         session = self._session(session_id)
         result = self.engine.describe(Path(session["source"]), include_formulas=include_formulas)
@@ -242,7 +277,7 @@ class OmaSheetsService:
         return self._public_plan(self._load_plan(plan_id))
 
     def _load_plan(self, plan_id: str) -> dict[str, Any]:
-        if not isinstance(plan_id, str) or len(plan_id) != 32:
+        if not isinstance(plan_id, str) or _IDENTIFIER.fullmatch(plan_id) is None:
             raise ConflictError("invalid plan identifier")
         path = self.plans / f"{plan_id}.json"
         if not path.exists():
