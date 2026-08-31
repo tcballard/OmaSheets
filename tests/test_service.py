@@ -181,6 +181,30 @@ class ServiceTests(unittest.TestCase):
             with self.assertRaisesRegex(ConflictError, "workbook state changed"):
                 self.service.apply_plan_handoff(plan["plan_id"], 1)
 
+    def test_live_reads_do_not_reuse_snapshot_without_an_edit_generation(self):
+        session = self.service.select_workbook(self.source)
+        context_path = self.service.prepare_window_context(session["session_id"])
+        context = json.loads(context_path.read_text())
+        context.update({
+            "active": True,
+            "dirty": True,
+            "live_document_bridge": True,
+            "updated_at_ms": 4,
+        })
+        context_path.write_text(json.dumps(context))
+        snapshots = []
+        for index in range(2):
+            snapshot = self.source.with_name(f"fresh-live-{index}.xlsx")
+            snapshot.write_bytes(f"live-{index}".encode())
+            snapshots.append(LiveSnapshot(
+                snapshot, identify_regular_file(snapshot), "xlsx", f"{index + 1:064x}",
+            ))
+        with patch("omasheets.service.request_live_snapshot", side_effect=snapshots) as request:
+            self.service.describe_workbook(session["session_id"])
+            self.service.describe_workbook(session["session_id"])
+        self.assertEqual(request.call_count, 2)
+        self.assertFalse(any(snapshot.path.exists() for snapshot in snapshots))
+
     def test_native_overlay_confirmation_publishes_only_a_new_copy(self):
         session = self.service.select_workbook(self.source)
         context_path = self.service.prepare_window_context(session["session_id"])

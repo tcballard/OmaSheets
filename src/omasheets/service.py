@@ -343,6 +343,11 @@ class OmaSheetsService:
         if window.get("active") and window.get("session_id") == session["session_id"]:
             if not window.get("live_document_bridge"):
                 raise EngineError("native window is active but its live document bridge is unavailable")
+            # A fresh save-copy is deliberate. `updated_at_ms` also changes for
+            # selection/viewport updates and `dirty` remains true across many
+            # edits, so neither is a trustworthy document generation for safe
+            # snapshot reuse. The bridge must expose an edit generation before
+            # live-unsaved snapshots can be cached without stale agent reads.
             snapshot = request_live_snapshot(
                 self.paths, session["session_id"], Path(session["source"]).suffix,
             )
