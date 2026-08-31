@@ -98,6 +98,18 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(context["address"], "C9")
         self.assertFalse(context["agent_control"])
 
+    def test_agent_staging_refuses_dirty_native_window_state(self):
+        session = self.service.select_workbook(self.source)
+        path = self.service.prepare_window_context(session["session_id"])
+        payload = json.loads(path.read_text())
+        payload.update({"active": True, "dirty": True, "updated_at_ms": 4})
+        path.write_text(json.dumps(payload))
+        with self.assertRaisesRegex(ConflictError, "unsaved changes"):
+            self.service.plan_changes(
+                session["session_id"], 1,
+                [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}],
+            )
+
     def test_legacy_conversion_creates_a_receipt_and_preserves_source(self):
         legacy = self.source.with_name("legacy.xls")
         legacy.write_bytes(b"legacy-source")

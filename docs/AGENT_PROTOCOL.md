@@ -58,6 +58,8 @@ by MCP. An agent can reason from the person's current selection and viewport,
 then use the ordinary bounded read and planning tools against that session.
 Window context is observational: agents still propose semantic cell operations
 and the person still approves publication locally.
+If the native window is dirty, OmaSheets refuses agent staging because the
+on-disk source no longer represents the person's in-memory view.
 
 ## Errors
 
