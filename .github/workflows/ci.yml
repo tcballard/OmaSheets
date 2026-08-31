@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/v0.0.1]
+    branches: [main, "feat/**"]
   pull_request:
 
 permissions:
@@ -56,7 +56,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: omacom/omarchy
-          ref: 981274b20af8e85c09845071ac33c6230909f119
+          ref: b686ed892d9c3020c3336203f6d34cc75b544e2b
           path: .omarchy-contract
       - run: sudo apt-get update && sudo apt-get install --yes jq
       - run: |
@@ -64,15 +64,49 @@ jobs:
           rm -rf .omarchy-contract
           bash "$RUNNER_TEMP/omarchy-plugin-validate" .
 
-  libreofficekit-spike:
-    name: LibreOfficeKit .xls rendering spike
+  production-install:
+    name: Arch production install and native acceptance
     runs-on: ubuntu-latest
     container: archlinux:base-devel
+    env:
+      HOME: /tmp/omasheets-home
+      XDG_DATA_HOME: /tmp/omasheets-home/.local/share
+      XDG_CONFIG_HOME: /tmp/omasheets-home/.config
+      XDG_STATE_HOME: /tmp/omasheets-home/.local/state
+      XDG_CACHE_HOME: /tmp/omasheets-home/.cache
+      XDG_RUNTIME_DIR: /tmp/omasheets-runtime
     steps:
-      - run: pacman -Syu --noconfirm --needed git cmake gtk3 libreoffice-fresh libreoffice-fresh-sdk ttf-dejavu xorg-server-xvfb
+      - run: pacman -Syu --noconfirm --needed git cmake gtk3 libreoffice-fresh libreoffice-fresh-sdk python-uno bubblewrap jq ttf-dejavu xorg-server-xvfb
       - uses: actions/checkout@v7
-      - run: cmake -S spikes/libreofficekit -B build/lok-spike -DCMAKE_BUILD_TYPE=Release
-      - run: cmake --build build/lok-spike --parallel 2
+      - name: Install through the production Omarchy bootstrap path
+        run: |
+          plugin="$HOME/.config/omarchy/plugins/io.github.tcballard.omasheets"
+          mkdir -p "$(dirname "$plugin")" "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          cp -a "$GITHUB_WORKSPACE/." "$plugin/"
+          "$plugin/bin/omasheets-plugin" install
+          "$HOME/.local/bin/omasheets" doctor
+      - name: Prove native binary source provenance
+        run: |
+          plugin="$HOME/.config/omarchy/plugins/io.github.tcballard.omasheets"
+          app="$XDG_DATA_HOME/omasheets/app"
+          PYTHONPATH="$plugin/src" python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+          from omasheets.installation import source_identity
+
+          plugin = Path(os.environ["HOME"], ".config/omarchy/plugins/io.github.tcballard.omasheets")
+          app = Path(os.environ["XDG_DATA_HOME"], "omasheets/app")
+          expected = source_identity(plugin)
+          receipt = json.loads((app / "provenance.json").read_text())
+          assert receipt["source"] == expected
+          for binary in ("omasheets-window", "omasheets-lok-render"):
+              report = json.loads(subprocess.check_output([app / "bin" / binary, "--provenance"], text=True))
+              assert report["source_commit"] == expected["commit"]
+              assert report["source_sha256"] == expected["sha256"]
+          PY
       - name: Create an Excel 97 fixture
         run: |
           mkdir -p "$RUNNER_TEMP/lok-input"
@@ -87,7 +121,7 @@ jobs:
           test -s "$RUNNER_TEMP/lok-input/large.xlsx"
       - name: Render the workbook through LibreOfficeKit
         run: |
-          build/lok-spike/omasheets-lok-render \
+          "$XDG_DATA_HOME/omasheets/app/bin/omasheets-lok-render" \
             "$RUNNER_TEMP/lok-input/smoke.xls" "$RUNNER_TEMP/lok-tile.ppm" 320 200 \
             | tee "$RUNNER_TEMP/lok-report.json"
           python - <<'PY'
@@ -107,7 +141,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/window-runtime"
           session=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-          PYTHONPATH=src python - <<'PY'
+          PYTHONPATH="$XDG_DATA_HOME/omasheets/app/lib" python - <<'PY'
           import os
           from pathlib import Path
           from omasheets.diff_overlay import publish_overlay
@@ -128,7 +162,7 @@ jobs:
               }]},
           })
           PY
-          xvfb-run -a build/lok-spike/omasheets-window \
+          xvfb-run -a "$XDG_DATA_HOME/omasheets/app/bin/omasheets-window" \
             --smoke-test "$RUNNER_TEMP/omasheets-window.png" \
             --context "$RUNNER_TEMP/window-runtime/context.json" \
             --bridge "$RUNNER_TEMP/window-runtime/window-bridge.sock" \
@@ -149,7 +183,7 @@ jobs:
           import sys
           import zipfile
 
-          sys.path.insert(0, "src")
+          sys.path.insert(0, str(Path(os.environ["XDG_DATA_HOME"], "omasheets/app/lib")))
           from omasheets.live_bridge import request_live_snapshot
           from omasheets.paths import AppPaths
 
@@ -191,3 +225,13 @@ jobs:
           assert screenshot.startswith(b"\x89PNG\r\n\x1a\n")
           assert len(screenshot) > 10_000
           PY
+      - name: Uninstall without touching unrelated user state
+        run: |
+          mkdir -p "$HOME/.codex/plugins/keep-me"
+          printf '%s\n' keep > "$HOME/.codex/plugins/keep-me/user.txt"
+          "$HOME/.local/bin/omasheets" uninstall
+          test ! -e "$HOME/.local/bin/omasheets"
+          test ! -e "$XDG_DATA_HOME/omasheets/app"
+          test ! -e "$HOME/.codex/plugins/omasheets"
+          test -f "$HOME/.codex/plugins/keep-me/user.txt"
+          test ! -e "$XDG_DATA_HOME/applications/io.github.tcballard.OmaSheets.desktop"
