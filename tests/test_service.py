@@ -2,8 +2,12 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+import zipfile
 
 from omasheets.errors import ConflictError
+from omasheets.identity import identify_regular_file
+from omasheets.live_bridge import LiveSnapshot
 from omasheets.paths import AppPaths
 from omasheets.service import OmaSheetsService
 
@@ -82,6 +86,8 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("format_cells", capabilities["agent_operations"])
         self.assertEqual(capabilities["live_window_context"]["resource"], "omasheets://window")
         self.assertFalse(capabilities["live_window_context"]["agent_control"])
+        self.assertTrue(capabilities["live_document_bridge"]["unsaved_state_visible"])
+        self.assertFalse(capabilities["live_document_bridge"]["agent_mutates_open_document"])
 
     def test_live_window_context_is_path_free_and_session_bound(self):
         session = self.service.select_workbook(self.source)
@@ -98,17 +104,48 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(context["address"], "C9")
         self.assertFalse(context["agent_control"])
 
-    def test_agent_staging_refuses_dirty_native_window_state(self):
+    def test_agent_staging_uses_dirty_live_window_snapshot(self):
         session = self.service.select_workbook(self.source)
         path = self.service.prepare_window_context(session["session_id"])
         payload = json.loads(path.read_text())
-        payload.update({"active": True, "dirty": True, "updated_at_ms": 4})
+        payload.update({
+            "active": True, "dirty": True, "live_document_bridge": True,
+            "updated_at_ms": 4,
+        })
         path.write_text(json.dumps(payload))
-        with self.assertRaisesRegex(ConflictError, "unsaved changes"):
-            self.service.plan_changes(
+        snapshot = self.source.with_name("live.xlsx")
+        with zipfile.ZipFile(snapshot, "w") as archive:
+            archive.writestr("xl/workbook.xml", "<workbook><sheets/></workbook>")
+            archive.writestr("xl/worksheets/sheet1.xml", "<worksheet><sheetData><v>2</v></sheetData></worksheet>")
+        live = LiveSnapshot(snapshot, identify_regular_file(snapshot), "xlsx", "c" * 64)
+        with patch("omasheets.service.request_live_snapshot", return_value=live):
+            plan = self.service.plan_changes(
                 session["session_id"], 1,
                 [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}],
             )
+        self.assertEqual(plan["base_source"], {"kind": "live_window", "sha256": live.semantic_sha256})
+        self.assertFalse(snapshot.exists())
+
+    def test_live_plan_conflicts_when_in_memory_workbook_changes(self):
+        session = self.service.select_workbook(self.source)
+        context_path = self.service.prepare_window_context(session["session_id"])
+        context = json.loads(context_path.read_text())
+        context.update({"active": True, "live_document_bridge": True, "updated_at_ms": 4})
+        context_path.write_text(json.dumps(context))
+        snapshots = []
+        for index, semantic_hash in enumerate(("c" * 64, "d" * 64)):
+            snapshot = self.source.with_name(f"live-{index}.xlsx")
+            with zipfile.ZipFile(snapshot, "w") as archive:
+                archive.writestr("xl/workbook.xml", "<workbook><sheets/></workbook>")
+                archive.writestr("xl/worksheets/sheet1.xml", f"<worksheet><sheetData><v>{index}</v></sheetData></worksheet>")
+            snapshots.append(LiveSnapshot(snapshot, identify_regular_file(snapshot), "xlsx", semantic_hash))
+        with patch("omasheets.service.request_live_snapshot", side_effect=snapshots):
+            plan = self.service.plan_changes(
+                session["session_id"], 1,
+                [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}],
+            )
+            with self.assertRaisesRegex(ConflictError, "workbook state changed"):
+                self.service.apply_plan_handoff(plan["plan_id"], 1)
 
     def test_legacy_conversion_creates_a_receipt_and_preserves_source(self):
         legacy = self.source.with_name("legacy.xls")

@@ -35,6 +35,14 @@ the current immutable session. MCP exposes a validated, path-free projection as
 `omasheets://window`, joining human selection and viewport state to semantic
 agent tools without turning MCP into a remote-control channel.
 
+For workbook content, the window owns a separate bounded Unix-socket bridge.
+It uses LibreOfficeKit's save-copy behavior (no `TakeOwnership`) to produce a
+new private snapshot in the source format. The isolated UNO worker then applies
+the existing semantic read or staging operation to that snapshot. This exposes
+unsaved in-memory content without running agent commands in the GTK process or
+changing the human view. Snapshot paths remain internal, are mode `0600`, and
+are removed after each operation.
+
 ### Local approval surface
 
 The Omarchy panel launches a local terminal review. Approval requires an exact

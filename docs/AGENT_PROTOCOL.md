@@ -58,8 +58,13 @@ by MCP. An agent can reason from the person's current selection and viewport,
 then use the ordinary bounded read and planning tools against that session.
 Window context is observational: agents still propose semantic cell operations
 and the person still approves publication locally.
-If the native window is dirty, OmaSheets refuses agent staging because the
-on-disk source no longer represents the person's in-memory view.
+
+When the window is active, read and planning tools request a private save-copy
+from its LibreOfficeKit document over a same-user Unix socket. The copy retains
+unsaved values, formulas, formatting and structure without renaming, saving or
+moving the visible workbook. A semantic fingerprint seals live-window plans;
+approval requests a fresh snapshot and rejects content drift while ignoring
+selection-only changes. Live-window plans can publish only as a new copy.
 
 ## Errors
 

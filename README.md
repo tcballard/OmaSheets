@@ -54,6 +54,11 @@ can observe its bounded, path-free selection and viewport through
 `omasheets://window`, inspect the relevant cells, and stage semantic changes;
 they cannot drive pointer/keyboard input or publish workbook bytes.
 
+While the window is open, those reads and plans are based on private
+LibreOfficeKit save-copies of the exact in-memory document, including unsaved
+work. Agents never mutate the visible document; verified output still goes
+through local review and live plans are copy-only.
+
 ## Status
 
 Early development. The `main` branch remains the minimal bootstrap; v0.0.1 is

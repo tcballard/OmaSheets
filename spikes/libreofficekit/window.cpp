@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -34,6 +35,7 @@ struct WindowState {
     fs::path profile;
     fs::path smoke_screenshot;
     fs::path context_path;
+    fs::path bridge_path;
     std::string session_id;
     int revision = 0;
     int sheet = 0;
@@ -41,6 +43,9 @@ struct WindowState {
     std::string selected_formula;
     float zoom_value = 1.0F;
     GdkRectangle visible{};
+    LibreOfficeKitDocument* document = nullptr;
+    GSocketService* bridge_service = nullptr;
+    std::mutex bridge_mutex;
     bool loaded = false;
     bool active = false;
     bool dirty = false;
@@ -95,6 +100,7 @@ void write_context_now(WindowState* state)
                << ",\"address\":\"" << json_escape(state->selected_address.substr(0, 64)) << "\""
                << ",\"dirty\":" << (state->dirty ? "true" : "false")
                << ",\"formula\":\"" << json_escape(state->selected_formula.substr(0, 8192)) << "\""
+               << ",\"live_document_bridge\":" << (state->bridge_service != nullptr && state->active ? "true" : "false")
                << ",\"revision\":" << state->revision
                << ",\"session_id\":\"" << state->session_id << "\""
                << ",\"sheet\":" << state->sheet
@@ -115,6 +121,141 @@ void write_context_now(WindowState* state)
         std::error_code ignored;
         fs::remove(temporary, ignored);
     }
+}
+
+bool lowercase_hex(std::string_view value)
+{
+    return value.size() == 32 && std::all_of(value.begin(), value.end(), [](unsigned char character) {
+        return std::isdigit(character) != 0 || (character >= 'a' && character <= 'f');
+    });
+}
+
+void bridge_reply(GSocketConnection* connection, const std::string& response)
+{
+    GOutputStream* output = g_io_stream_get_output_stream(G_IO_STREAM(connection));
+    gsize written = 0;
+    GError* error = nullptr;
+    g_output_stream_write_all(output, response.data(), response.size(), &written, nullptr, &error);
+    g_output_stream_flush(output, nullptr, nullptr);
+    g_clear_error(&error);
+}
+
+gboolean on_bridge_request(GThreadedSocketService*, GSocketConnection* connection, GObject*, gpointer data)
+{
+    auto* state = static_cast<WindowState*>(data);
+    GSocket* socket = g_socket_connection_get_socket(connection);
+    g_socket_set_timeout(socket, 5);
+    GError* error = nullptr;
+    GCredentials* credentials = g_socket_get_credentials(socket, &error);
+    const guint64 peer = credentials != nullptr ? g_credentials_get_unix_user(credentials, &error) : G_MAXUINT64;
+    if (credentials != nullptr)
+        g_object_unref(credentials);
+    if (error != nullptr || peer != static_cast<guint64>(getuid())) {
+        g_clear_error(&error);
+        bridge_reply(connection, "{\"error\":\"peer rejected\",\"ok\":false}\n");
+        return TRUE;
+    }
+
+    char buffer[257]{};
+    gsize used = 0;
+    GInputStream* input = g_io_stream_get_input_stream(G_IO_STREAM(connection));
+    while (used < sizeof(buffer) - 1) {
+        const gssize count = g_input_stream_read(input, buffer + used, sizeof(buffer) - 1 - used, nullptr, &error);
+        if (count <= 0)
+            break;
+        used += static_cast<gsize>(count);
+        if (std::find(buffer, buffer + used, '\n') != buffer + used)
+            break;
+    }
+    if (error != nullptr || used == sizeof(buffer) - 1 || used == 0 || buffer[used - 1] != '\n') {
+        g_clear_error(&error);
+        bridge_reply(connection, "{\"error\":\"invalid request\",\"ok\":false}\n");
+        return TRUE;
+    }
+
+    std::istringstream request(std::string(buffer, used - 1));
+    std::string command;
+    std::string session;
+    std::string nonce;
+    std::string extra;
+    request >> command >> session >> nonce >> extra;
+    if (command != "SNAPSHOT" || session != state->session_id || !lowercase_hex(nonce) || !extra.empty()) {
+        bridge_reply(connection, "{\"error\":\"invalid request\",\"ok\":false}\n");
+        return TRUE;
+    }
+
+    std::string format = state->source.extension().string().substr(1);
+    std::transform(format.begin(), format.end(), format.begin(), [](unsigned char character) {
+        return static_cast<char>(std::tolower(character));
+    });
+    const fs::path destination = state->bridge_path.parent_path() /
+        ("snapshot-" + session + "-" + nonce + "." + format);
+    const fs::path temporary = state->bridge_path.parent_path() /
+        (".snapshot-" + session + "-" + nonce + ".tmp." + format);
+    bool saved = false;
+    {
+        std::lock_guard<std::mutex> guard(state->bridge_mutex);
+        if (state->active && state->document != nullptr && !fs::exists(destination) && !fs::exists(temporary)) {
+            gchar* uri = g_filename_to_uri(temporary.c_str(), nullptr, nullptr);
+            saved = uri != nullptr && state->document->pClass->saveAs(
+                state->document, uri, format.c_str(), nullptr) != 0;
+            g_free(uri);
+            if (saved) {
+                try {
+                    fs::permissions(temporary, fs::perms::owner_read | fs::perms::owner_write, fs::perm_options::replace);
+                    fs::rename(temporary, destination);
+                } catch (const fs::filesystem_error&) {
+                    saved = false;
+                }
+            }
+        }
+    }
+    if (!saved) {
+        std::error_code ignored;
+        fs::remove(temporary, ignored);
+        bridge_reply(connection, "{\"error\":\"snapshot failed\",\"ok\":false}\n");
+        return TRUE;
+    }
+    bridge_reply(connection, "{\"format\":\"" + format + "\",\"ok\":true}\n");
+    return TRUE;
+}
+
+bool start_bridge(WindowState* state)
+{
+    if (state->bridge_path.empty())
+        return true;
+    try {
+        if (fs::exists(state->bridge_path))
+            return false;
+    } catch (const fs::filesystem_error&) {
+        return false;
+    }
+    state->bridge_service = G_SOCKET_SERVICE(g_threaded_socket_service_new(2));
+    GSocketAddress* address = g_unix_socket_address_new(state->bridge_path.c_str());
+    GError* error = nullptr;
+    const gboolean added = g_socket_listener_add_address(
+        G_SOCKET_LISTENER(state->bridge_service), address, G_SOCKET_TYPE_STREAM,
+        G_SOCKET_PROTOCOL_DEFAULT, nullptr, nullptr, &error);
+    g_object_unref(address);
+    if (!added) {
+        g_clear_error(&error);
+        g_object_unref(state->bridge_service);
+        state->bridge_service = nullptr;
+        return false;
+    }
+    try {
+        fs::permissions(state->bridge_path, fs::perms::owner_read | fs::perms::owner_write, fs::perm_options::replace);
+    } catch (const fs::filesystem_error&) {
+        g_socket_listener_close(G_SOCKET_LISTENER(state->bridge_service));
+        g_object_unref(state->bridge_service);
+        state->bridge_service = nullptr;
+        std::error_code ignored;
+        fs::remove(state->bridge_path, ignored);
+        return false;
+    }
+    g_signal_connect(state->bridge_service, "run", G_CALLBACK(on_bridge_request), state);
+    g_socket_service_start(state->bridge_service);
+    return true;
 }
 
 gboolean flush_context(gpointer data)
@@ -359,12 +500,22 @@ void on_command_result(LOKDocView*, const gchar* result, gpointer data)
 void on_destroy(GtkWidget*, gpointer data)
 {
     auto* state = static_cast<WindowState*>(data);
-    state->active = false;
+    {
+        std::lock_guard<std::mutex> guard(state->bridge_mutex);
+        state->active = false;
+    }
+    if (state->bridge_service != nullptr) {
+        g_socket_service_stop(state->bridge_service);
+        g_socket_listener_close(G_SOCKET_LISTENER(state->bridge_service));
+    }
     if (state->context_source != 0) {
         g_source_remove(state->context_source);
         state->context_source = 0;
     }
     write_context_now(state);
+    std::error_code ignored;
+    if (!state->bridge_path.empty())
+        fs::remove(state->bridge_path, ignored);
     gtk_main_quit();
 }
 
@@ -500,7 +651,11 @@ void on_opened(GObject* object, GAsyncResult* result, gpointer data)
         return;
     }
     state->loaded = true;
-    state->active = true;
+    state->document = lok_doc_view_get_document(LOK_DOC_VIEW(state->view));
+    {
+        std::lock_guard<std::mutex> guard(state->bridge_mutex);
+        state->active = true;
+    }
     state->loaded_at = std::chrono::steady_clock::now();
     state->load_ms = std::chrono::duration_cast<std::chrono::milliseconds>(state->loaded_at - state->started).count();
     lok_doc_view_set_edit(LOK_DOC_VIEW(state->view), state->editable ? TRUE : FALSE);
@@ -514,6 +669,22 @@ void on_opened(GObject* object, GAsyncResult* result, gpointer data)
         ? "Ready — click a cell and type to edit"
         : "Read-only format — use the verified conversion flow to create an editable .xlsx");
     gtk_widget_grab_focus(state->view);
+    if (state->smoke && state->editable) {
+        constexpr std::string_view marker = "OmaSheets unsaved live bridge";
+        if (lok_doc_view_paste(
+                LOK_DOC_VIEW(state->view), "text/plain;charset=utf-8",
+                marker.data(), marker.size())) {
+            state->dirty = true;
+        }
+    }
+    if (!start_bridge(state)) {
+        set_status(state, "Workbook opened, but the private agent bridge could not start");
+        if (state->smoke) {
+            gtk_widget_destroy(state->window);
+            return;
+        }
+    }
+    schedule_context(state);
     if (state->smoke) {
         g_timeout_add(100, exercise_large_sheet_scroll, state);
         g_timeout_add(1500, capture_smoke, state);
@@ -664,6 +835,8 @@ int main(int argc, char** argv)
             state.smoke_screenshot = fs::absolute(argv[++index]);
         } else if (argument == "--context" && index + 1 < argc) {
             state.context_path = fs::absolute(argv[++index]);
+        } else if (argument == "--bridge" && index + 1 < argc) {
+            state.bridge_path = fs::absolute(argv[++index]);
         } else if (argument == "--session" && index + 1 < argc) {
             state.session_id = argv[++index];
         } else if (argument == "--revision" && index + 1 < argc) {
@@ -675,11 +848,9 @@ int main(int argc, char** argv)
             break;
         }
     }
-    const bool any_context = !state.context_path.empty() || !state.session_id.empty() || state.revision != 0;
-    const bool valid_session = state.session_id.size() == 32 && std::all_of(
-        state.session_id.begin(), state.session_id.end(), [](unsigned char value) { return std::isxdigit(value) != 0; });
-    if (source_index < 0 || (any_context && (state.context_path.empty() || !valid_session || state.revision < 1))) {
-        std::cerr << "usage: omasheets-window [--smoke-test SCREENSHOT.png] [--context FILE --session ID --revision N] WORKBOOK\n";
+    const bool any_context = !state.context_path.empty() || !state.bridge_path.empty() || !state.session_id.empty() || state.revision != 0;
+    if (source_index < 0 || (any_context && (state.context_path.empty() || state.bridge_path.empty() || !lowercase_hex(state.session_id) || state.revision < 1))) {
+        std::cerr << "usage: omasheets-window [--smoke-test SCREENSHOT.png] [--context FILE --bridge SOCKET --session ID --revision N] WORKBOOK\n";
         return 2;
     }
     try {

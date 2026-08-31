@@ -105,9 +105,47 @@ jobs:
           PY
       - name: Open the OmaSheets-owned interactive window
         run: |
+          mkdir -p "$RUNNER_TEMP/window-runtime"
+          session=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
           xvfb-run -a build/lok-spike/omasheets-window \
-            --smoke-test "$RUNNER_TEMP/omasheets-window.png" "$RUNNER_TEMP/lok-input/large.xlsx" \
-            | tee "$RUNNER_TEMP/window-report.json"
+            --smoke-test "$RUNNER_TEMP/omasheets-window.png" \
+            --context "$RUNNER_TEMP/window-runtime/context.json" \
+            --bridge "$RUNNER_TEMP/window-runtime/bridge.sock" \
+            --session "$session" --revision 1 \
+            "$RUNNER_TEMP/lok-input/large.xlsx" > "$RUNNER_TEMP/window-report.json" &
+          window_pid=$!
+          for attempt in $(seq 1 100); do
+            test ! -S "$RUNNER_TEMP/window-runtime/bridge.sock" || break
+            sleep 0.05
+          done
+          test -S "$RUNNER_TEMP/window-runtime/bridge.sock"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import socket
+          import stat
+          import zipfile
+
+          runtime = Path(os.environ["RUNNER_TEMP"], "window-runtime")
+          session = "a" * 32
+          nonce = "b" * 32
+          bridge = runtime / "bridge.sock"
+          assert stat.S_IMODE(bridge.stat().st_mode) == 0o600
+          with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+              connection.settimeout(10)
+              connection.connect(str(bridge))
+              connection.sendall(f"SNAPSHOT {session} {nonce}\n".encode())
+              response = json.loads(connection.recv(4096))
+          assert response == {"format": "xlsx", "ok": True}
+          snapshot = runtime / f"snapshot-{session}-{nonce}.xlsx"
+          assert stat.S_IMODE(snapshot.stat().st_mode) == 0o600
+          with zipfile.ZipFile(snapshot) as archive:
+              content = b"".join(archive.read(name) for name in archive.namelist() if name.endswith(".xml"))
+          assert b"OmaSheets unsaved live bridge" in content
+          PY
+          wait "$window_pid"
+          cat "$RUNNER_TEMP/window-report.json"
           python - <<'PY'
           import json
           import os
