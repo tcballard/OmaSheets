@@ -92,6 +92,77 @@ class ServiceTests(unittest.TestCase):
         with self.assertRaises(ConflictError):
             self.service.apply_plan_handoff(plan["plan_id"], 1)
 
+    def _plan(self):
+        session = self.service.select_workbook(self.source)
+        plan = self.service.plan_changes(
+            session["session_id"], 1,
+            [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}],
+        )
+        return session, plan
+
+    def test_copy_publication_never_clobbers(self):
+        _, plan = self._plan()
+        destination = self.source.with_name("result.xlsx")
+        destination.write_bytes(b"someone-else")
+        self.service.prepare_local_review(plan["plan_id"], 1, destination=destination)
+        with self.assertRaises(ConflictError):
+            self.service.commit_local_review(plan["plan_id"], 1, f"APPLY {plan['plan_id']}")
+        self.assertEqual(destination.read_bytes(), b"someone-else")
+
+    def test_wrong_approval_token_writes_nothing(self):
+        _, plan = self._plan()
+        review = self.service.prepare_local_review(plan["plan_id"], 1)
+        with self.assertRaises(ConflictError):
+            self.service.commit_local_review(plan["plan_id"], 1, "APPLY something-else")
+        self.assertFalse(Path(review["destination"]).exists())
+
+    def test_replace_creates_receipt_and_undo_restores_source(self):
+        _, plan = self._plan()
+        original = self.source.read_bytes()
+        self.service.prepare_local_review(plan["plan_id"], 1, mode="replace")
+        receipt = self.service.commit_local_review(plan["plan_id"], 1, f"APPLY {plan['plan_id']}")
+        self.assertNotEqual(self.source.read_bytes(), original)
+        self.assertEqual(receipt["target_mode"], "replace")
+        undo = self.service.undo_receipt(receipt["receipt_id"], f"UNDO {receipt['receipt_id']}")
+        self.assertEqual(undo["kind"], "undo")
+        self.assertEqual(self.source.read_bytes(), original)
+
+    def test_receipts_form_a_hash_chain(self):
+        _, first_plan = self._plan()
+        first_review = self.service.prepare_local_review(first_plan["plan_id"], 1)
+        first = self.service.commit_local_review(first_plan["plan_id"], 1, f"APPLY {first_plan['plan_id']}")
+        self.assertIsNone(first["previous_receipt_hash"])
+        Path(first_review["destination"]).unlink()
+        # Reselect because the first plan intentionally leaves the source unchanged.
+        _, second_plan = self._plan()
+        second_review = self.service.prepare_local_review(second_plan["plan_id"], 1)
+        second = self.service.commit_local_review(second_plan["plan_id"], 1, f"APPLY {second_plan['plan_id']}")
+        self.assertEqual(second["previous_receipt_hash"], first["receipt_hash"])
+        Path(second_review["destination"]).unlink()
+
+    def test_retry_finishes_receipt_after_post_publish_failure(self):
+        _, plan = self._plan()
+        review = self.service.prepare_local_review(plan["plan_id"], 1)
+        original_record = self.service.publisher.receipts.record
+        attempts = 0
+
+        def fail_once(receipt):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise OSError("simulated receipt storage interruption")
+            return original_record(receipt)
+
+        self.service.publisher.receipts.record = fail_once
+        token = f"APPLY {plan['plan_id']}"
+        with self.assertRaises(OSError):
+            self.service.commit_local_review(plan["plan_id"], 1, token)
+        self.assertTrue(Path(review["destination"]).exists())
+        self.assertEqual(self.service.get_plan(plan["plan_id"])["status"], "approved")
+        receipt = self.service.commit_local_review(plan["plan_id"], 1, token)
+        self.assertEqual(receipt["kind"], "publish")
+        self.assertEqual(self.service.get_plan(plan["plan_id"])["status"], "committed")
+
 
 if __name__ == "__main__":
     unittest.main()
