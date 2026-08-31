@@ -214,6 +214,39 @@ class CalcWorkerTests(unittest.TestCase):
             "sheet": "Summary", "name": "RevenueChart", "title": "Revenue by region",
         }])
 
+    def test_xlsx_pivot_header_shift_normalizes_to_requested_anchor(self):
+        source = SimpleNamespace(Sheet=0, StartColumn=3, StartRow=0, EndColumn=5, EndRow=3)
+        anchor = SimpleNamespace(Sheet=1, Column=0, Row=1)
+
+        def fingerprint(output_row):
+            output = SimpleNamespace(Sheet=1, StartColumn=0, StartRow=output_row)
+            table = SimpleNamespace(getSourceRange=lambda: source, getOutputRange=lambda: output)
+            tables = SimpleNamespace(
+                hasByName=lambda name: name == "RevenuePivot",
+                getByName=lambda name: table,
+            )
+            sheet = SimpleNamespace(
+                getDataPilotTables=lambda: tables,
+                getCellRangeByName=lambda name: SimpleNamespace(getCellAddress=lambda: anchor),
+            )
+            sheets = SimpleNamespace(
+                hasByName=lambda name: name == "Summary",
+                getByName=lambda name: sheet,
+            )
+            document = SimpleNamespace(getSheets=lambda: sheets)
+            return _object_fingerprints(document, [{
+                "type": "upsert_pivot", "sheet": "Summary", "name": "RevenuePivot",
+                "output_cell": "A2",
+            }])["pivots"]
+
+        expected = [{
+            "sheet": "Summary", "name": "RevenuePivot",
+            "source": [0, 3, 0, 5, 3], "output_start": [1, 0, 1],
+        }]
+        self.assertEqual(fingerprint(1), expected)
+        self.assertEqual(fingerprint(2), expected)
+        self.assertEqual(fingerprint(3)[0]["output_start"], [1, 0, 3])
+
     def test_fill_directions_are_uno_enums_not_constants(self):
         fake_uno = SimpleNamespace(Enum=lambda type_name, member: (type_name, member))
         with patch.dict("sys.modules", {"uno": fake_uno}):
