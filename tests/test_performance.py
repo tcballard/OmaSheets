@@ -1,8 +1,12 @@
 from pathlib import Path
+import fcntl
 import json
+import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import xml.etree.ElementTree as ElementTree
 from unittest.mock import patch
@@ -32,6 +36,16 @@ class _FixedSampler:
 
 
 class PerformanceTests(unittest.TestCase):
+    @staticmethod
+    def _lock_is_available(path: Path) -> bool:
+        with path.open("a+") as handle:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+            fcntl.flock(handle, fcntl.LOCK_UN)
+        return True
+
     def test_proc_sampler_sums_complete_process_group_memory(self):
         with tempfile.TemporaryDirectory() as temporary:
             proc = Path(temporary)
@@ -48,13 +62,15 @@ class PerformanceTests(unittest.TestCase):
             (other / "stat").write_text("103 (other) S 1 88 88 0 0\n")
             (other / "smaps_rollup").write_text("Rss: 999 kB\nPss: 999 kB\n")
 
-            sample = ProcProcessGroupSampler(proc).sample(77, 0.25)
+            sampler = ProcProcessGroupSampler(proc)
+            sample = sampler.sample(77, 0.25)
 
         self.assertEqual(sample.process_count, 2)
         self.assertEqual(sample.rss_bytes, 180 * 1024)
         self.assertEqual(sample.pss_bytes, 110 * 1024)
         self.assertEqual(sample.uss_bytes, 50 * 1024)
         self.assertEqual(sample.source, "smaps_rollup")
+        self.assertEqual(sampler.last_members, (101, 102))
 
     def test_missing_smaps_reports_rss_without_inventing_pss_or_uss(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -112,6 +128,7 @@ class PerformanceTests(unittest.TestCase):
         )
         self.assertEqual(result["schema"], "OMASHEETS_PERFORMANCE_V1")
         self.assertEqual(result["exit_code"], 0)
+        self.assertIsNone(result["termination_complete"])
         self.assertGreaterEqual(result["wall_seconds"], 0)
         self.assertEqual(result["memory"]["peak_pss_bytes"], 20_000)
         self.assertFalse(result["command"]["argv_recorded"])
@@ -128,8 +145,110 @@ class PerformanceTests(unittest.TestCase):
             sampler=_FixedSampler(),
         )
         self.assertTrue(result["timed_out"])
+        self.assertTrue(result["termination_complete"])
         self.assertNotEqual(result["exit_code"], 0)
         self.assertLess(result["wall_seconds"], 2)
+
+    def test_timeout_kills_descendant_that_ignores_term_after_leader_exits(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            child_pid_path = Path(temporary) / "child.pid"
+            child_lock_path = Path(temporary) / "child.lock"
+            child_code = (
+                "import fcntl,os,signal,sys,time; from pathlib import Path; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "lock=Path(sys.argv[2]).open('w'); fcntl.flock(lock, fcntl.LOCK_EX); "
+                "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+            )
+            parent_code = (
+                "import subprocess,sys,time; from pathlib import Path; "
+                "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3]]); "
+                "path=Path(sys.argv[2]); deadline=time.monotonic()+5; "
+                "exec('while not path.exists() and time.monotonic() < deadline:\\n time.sleep(0.005)'); "
+                "time.sleep(30)"
+            )
+            result = measure_command(
+                "term-resistant-descendant",
+                [
+                    sys.executable, "-c", parent_code, child_code,
+                    str(child_pid_path), str(child_lock_path),
+                ],
+                interval_seconds=0.01,
+                timeout_seconds=1.0,
+                max_samples=16,
+                sampler=_FixedSampler(),
+            )
+            self.assertTrue(result["timed_out"])
+            self.assertTrue(result["termination_complete"])
+            if not self._lock_is_available(child_lock_path):
+                os.kill(int(child_pid_path.read_text()), signal.SIGKILL)
+                self.fail("timed-out descendant was left running")
+
+    @unittest.skipUnless(Path("/proc").is_dir(), "Linux /proc is required")
+    def test_timeout_kills_observed_descendant_that_creates_a_new_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            child_pid_path = Path(temporary) / "setsid-child.pid"
+            child_lock_path = Path(temporary) / "setsid-child.lock"
+            child_code = (
+                "import fcntl,os,signal,sys,time; from pathlib import Path; "
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "lock=Path(sys.argv[2]).open('w'); fcntl.flock(lock, fcntl.LOCK_EX); "
+                "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+            )
+            parent_code = (
+                "import subprocess,sys,time; from pathlib import Path; "
+                "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3]], "
+                "start_new_session=True); path=Path(sys.argv[2]); deadline=time.monotonic()+5; "
+                "exec('while not path.exists() and time.monotonic() < deadline:\\n time.sleep(0.005)'); "
+                "time.sleep(30)"
+            )
+            result = measure_command(
+                "setsid-descendant",
+                [
+                    sys.executable, "-c", parent_code, child_code,
+                    str(child_pid_path), str(child_lock_path),
+                ],
+                interval_seconds=0.02,
+                timeout_seconds=1.0,
+                max_samples=64,
+            )
+
+            self.assertTrue(result["timed_out"])
+            self.assertTrue(result["termination_complete"])
+            self.assertGreaterEqual(result["memory"]["peak_process_count"], 2)
+            if not self._lock_is_available(child_lock_path):
+                os.kill(int(child_pid_path.read_text()), signal.SIGKILL)
+                self.fail("session-changing descendant was left running")
+
+    def test_timeout_allows_cooperative_descendant_to_use_grace_period(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ready = root / "ready"
+            graceful = root / "graceful"
+            child_code = (
+                "import signal,sys,time; from pathlib import Path; "
+                "target=Path(sys.argv[2]); "
+                "signal.signal(signal.SIGTERM, lambda *_: "
+                "(time.sleep(0.2), target.write_text('done'), sys.exit(0))); "
+                "Path(sys.argv[1]).write_text('ready'); time.sleep(30)"
+            )
+            parent_code = (
+                "import subprocess,sys,time; from pathlib import Path; "
+                "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3]]); "
+                "path=Path(sys.argv[2]); deadline=time.monotonic()+5; "
+                "exec('while not path.exists() and time.monotonic() < deadline:\\n time.sleep(0.005)'); "
+                "time.sleep(30)"
+            )
+            result = measure_command(
+                "cooperative-descendant",
+                [sys.executable, "-c", parent_code, child_code, str(ready), str(graceful)],
+                interval_seconds=0.02,
+                timeout_seconds=1.0,
+                max_samples=64,
+            )
+
+            self.assertTrue(result["timed_out"])
+            self.assertTrue(result["termination_complete"])
+            self.assertEqual(graceful.read_text(), "done")
 
     def test_standard_fixture_manifest_states_actual_population(self):
         manifest = fixture_manifest("standard")
