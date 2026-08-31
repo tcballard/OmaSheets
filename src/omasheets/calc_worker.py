@@ -238,6 +238,36 @@ def _trace(document, arguments: dict[str, Any], limits: dict[str, int]) -> dict[
     }
 
 
+def _color(value: str) -> int:
+    return int(value.removeprefix("#"), 16)
+
+
+def _number_format(document, format_code: str) -> int:
+    from com.sun.star.lang import Locale
+
+    formats = document.getNumberFormats()
+    locale = Locale()
+    key = formats.queryKey(format_code, locale, True)
+    return key if key >= 0 else formats.addNew(format_code, locale)
+
+
+def _matrix_values(values: list[list[Any]]) -> tuple[tuple[Any, ...], ...]:
+    rows = []
+    for row in values:
+        output = []
+        for value in row:
+            if value is None:
+                output.append("")
+            elif isinstance(value, bool):
+                output.append(1.0 if value else 0.0)
+            elif isinstance(value, (int, float)):
+                output.append(float(value))
+            else:
+                output.append(value)
+        rows.append(tuple(output))
+    return tuple(rows)
+
+
 def _apply(document, operations: list[dict[str, Any]]) -> None:
     sheets = document.getSheets()
     for operation in operations:
@@ -264,6 +294,61 @@ def _apply(document, operations: list[dict[str, Any]]) -> None:
                     area.setValue(float(value))
                 else:
                     area.setString(value)
+            elif kind == "set_range_values":
+                area.clearContents(1023)
+                area.setDataArray(_matrix_values(operation["values"]))
+            elif kind == "set_range_formulas":
+                area.setFormulaArray(tuple(tuple(row) for row in operation["formulas"]))
+            elif kind == "format_cells":
+                if "number_format" in operation:
+                    area.NumberFormat = _number_format(document, operation["number_format"])
+                if "bold" in operation:
+                    area.CharWeight = 150.0 if operation["bold"] else 100.0
+                if "text_color" in operation:
+                    area.CharColor = _color(operation["text_color"])
+                if "background_color" in operation:
+                    area.CellBackColor = _color(operation["background_color"])
+                if "wrap_text" in operation:
+                    area.IsTextWrapped = operation["wrap_text"]
+
+
+def _format_snapshot(document, area, operation: dict[str, Any]) -> dict[str, Any]:
+    snapshot: dict[str, Any] = {}
+    if "number_format" in operation:
+        formats = document.getNumberFormats()
+        properties = formats.getByKey(int(area.NumberFormat))
+        snapshot["number_format"] = str(properties.getPropertyValue("FormatString"))
+    if "bold" in operation:
+        snapshot["bold"] = float(area.CharWeight) >= 150.0
+    if "text_color" in operation:
+        snapshot["text_color"] = f"#{int(area.CharColor) & 0xFFFFFF:06X}"
+    if "background_color" in operation:
+        snapshot["background_color"] = f"#{int(area.CellBackColor) & 0xFFFFFF:06X}"
+    if "wrap_text" in operation:
+        snapshot["wrap_text"] = bool(area.IsTextWrapped)
+    return snapshot
+
+
+def _target_fingerprints(document, operations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sheets = document.getSheets()
+    targets: dict[tuple[str, str], dict[str, Any]] = {}
+    for operation in operations:
+        if "range" not in operation or not sheets.hasByName(operation["sheet"]):
+            continue
+        key = (operation["sheet"], operation["range"])
+        target = targets.setdefault(key, {"sheet": key[0], "range": key[1], "format": {}})
+        if operation["type"] == "format_cells":
+            target["format"].update(_format_snapshot(document, sheets.getByName(key[0]).getCellRangeByName(key[1]), operation))
+    result = []
+    for key in sorted(targets):
+        target = targets[key]
+        area = sheets.getByName(key[0]).getCellRangeByName(key[1])
+        result.append({
+            **target,
+            "values": area.getDataArray(),
+            "formulas": area.getFormulaArray(),
+        })
+    return result
 
 
 def _store(document, path: Path, filter_name: str) -> None:
@@ -328,6 +413,8 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError("unsupported Calc action")
 
         document.calculateAll()
+        expected = _inspect(document, limits, include_formulas=True)
+        expected_targets = _target_fingerprints(document, request["arguments"].get("operations", []))
         workbook = out / f"workbook{extension}"
         _store(document, workbook, filter_name)
         document.close(True)
@@ -335,13 +422,17 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
         reopened = _load(context, workbook, read_only=True)
         reopened.calculateAll()
         after = _inspect(reopened, limits, include_formulas=True)
+        reopened_targets = _target_fingerprints(reopened, request["arguments"].get("operations", []))
         preview = out / "preview.pdf"
         _render_pdf(reopened, preview)
         comparison = {
-            "sheet_inventory_match": _inventory(before)["sheets"] == _inventory(after)["sheets"],
-            "formula_count_match": before["formula_count"] == after["formula_count"] if action == "convert_xls" else None,
+            "sheet_inventory_match": _inventory(expected)["sheets"] == _inventory(after)["sheets"],
+            "formula_count_match": expected["formula_count"] == after["formula_count"],
+            "target_ranges_match": expected_targets == reopened_targets,
             "new_formula_errors": [error for error in after["formula_errors"] if error not in before["formula_errors"]],
         }
+        if not comparison["sheet_inventory_match"] or not comparison["formula_count_match"] or not comparison["target_ranges_match"]:
+            raise RuntimeError("staged workbook did not survive save and reopen verification")
         status = "manual_review_required" if action == "convert_xls" else "verified"
         result = {
             "semantic_diff": {

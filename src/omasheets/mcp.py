@@ -12,6 +12,7 @@ from .errors import OmaSheetsError, PolicyError
 
 PROTOCOL_VERSION = "2026-07-28"
 SERVER_INFO = {"name": "omasheets", "version": __version__}
+MAX_MESSAGE_CHARACTERS = 8 * 1024 * 1024
 
 
 class AgentService(Protocol):
@@ -26,6 +27,7 @@ class AgentService(Protocol):
     def apply_plan_handoff(self, **arguments: Any) -> dict[str, Any]: ...
     def current_resource(self) -> dict[str, Any]: ...
     def pending_resource(self) -> dict[str, Any]: ...
+    def capabilities_resource(self) -> dict[str, Any]: ...
 
 
 def _object(properties: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
@@ -42,6 +44,24 @@ PLAN = {"type": "string", "pattern": "^[a-f0-9]{32}$"}
 REVISION = {"type": "integer", "minimum": 1}
 SHEET = {"type": "string", "minLength": 1, "maxLength": 128}
 RANGE = {"type": "string", "minLength": 1, "maxLength": 64}
+SCALAR = {"type": ["string", "number", "integer", "boolean", "null"]}
+VALUE_MATRIX = {
+    "type": "array",
+    "minItems": 1,
+    "maxItems": 10_000,
+    "items": {"type": "array", "minItems": 1, "maxItems": 10_000, "items": SCALAR},
+}
+FORMULA_MATRIX = {
+    "type": "array",
+    "minItems": 1,
+    "maxItems": 10_000,
+    "items": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 10_000,
+        "items": {"type": "string", "minLength": 1, "maxLength": 8192},
+    },
+}
 
 OPERATION_SCHEMA = _object(
     {
@@ -54,12 +74,22 @@ OPERATION_SCHEMA = _object(
                 "rename_sheet",
                 "add_sheet",
                 "delete_sheet",
+                "set_range_values",
+                "set_range_formulas",
+                "format_cells",
             ],
         },
         "sheet": SHEET,
         "range": RANGE,
-        "value": {"type": ["string", "number", "integer", "boolean", "null"]},
+        "value": SCALAR,
         "formula": {"type": "string", "minLength": 1, "maxLength": 8192},
+        "values": VALUE_MATRIX,
+        "formulas": FORMULA_MATRIX,
+        "number_format": {"type": "string", "minLength": 1, "maxLength": 128},
+        "bold": {"type": "boolean"},
+        "text_color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "background_color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "wrap_text": {"type": "boolean"},
         "new_name": SHEET,
     },
     ["type"],
@@ -282,6 +312,7 @@ class McpServer:
                 return self._result(request_id, {"resources": [
                     {"uri": "omasheets://current", "name": "Current workbook", "mimeType": "application/json"},
                     {"uri": "omasheets://pending", "name": "Pending plan", "mimeType": "application/json"},
+                    {"uri": "omasheets://capabilities", "name": "OmaSheets capabilities", "mimeType": "application/json"},
                 ]})
             if method == "resources/read":
                 params = request.get("params", {})
@@ -293,6 +324,8 @@ class McpServer:
                     payload = self.service.current_resource()
                 elif uri == "omasheets://pending":
                     payload = self.service.pending_resource()
+                elif uri == "omasheets://capabilities":
+                    payload = self.service.capabilities_resource()
                 else:
                     raise InvalidParams("unknown resource URI")
                 return self._result(request_id, {"contents": [{
@@ -341,7 +374,17 @@ def serve_stdio(service: AgentService, stdin: TextIO = sys.stdin, stdout: TextIO
     """Serve newline-delimited JSON-RPC without logging to stdout."""
 
     server = McpServer(service)
-    for line in stdin:
+    while True:
+        line = stdin.readline(MAX_MESSAGE_CHARACTERS + 1)
+        if line == "":
+            break
+        if len(line) > MAX_MESSAGE_CHARACTERS:
+            while line and not line.endswith("\n"):
+                line = stdin.readline(MAX_MESSAGE_CHARACTERS + 1)
+            response = McpServer._error(None, -32700, "Message too large")
+            stdout.write(json.dumps(response, separators=(",", ":")) + "\n")
+            stdout.flush()
+            continue
         try:
             request = json.loads(line)
             response = server.handle(request)

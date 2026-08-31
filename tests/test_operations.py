@@ -1,7 +1,7 @@
 import unittest
 
 from omasheets.errors import PolicyError
-from omasheets.operations import destructive_operations, validate_operations
+from omasheets.operations import destructive_operations, range_shape, validate_operations
 
 
 class OperationTests(unittest.TestCase):
@@ -31,6 +31,50 @@ class OperationTests(unittest.TestCase):
             {"type": "delete_sheet", "sheet": "Old"},
         ])
         self.assertEqual(destructive_operations(operations), [1])
+
+    def test_bulk_values_require_an_exact_bounded_matrix(self) -> None:
+        operation = {
+            "type": "set_range_values",
+            "sheet": "Data",
+            "range": "B2:C3",
+            "values": [[1, 2], [3, None]],
+        }
+        self.assertEqual(validate_operations([operation])[0]["values"], operation["values"])
+        operation["values"] = [[1, 2, 3]]
+        with self.assertRaises(PolicyError):
+            validate_operations([operation])
+
+    def test_bulk_formulas_must_all_be_formulas(self) -> None:
+        operation = {
+            "type": "set_range_formulas",
+            "sheet": "Data",
+            "range": "A1:A2",
+            "formulas": [["=1+1"], ["not a formula"]],
+        }
+        with self.assertRaises(PolicyError):
+            validate_operations([operation])
+
+    def test_formatting_is_typed_and_normalized(self) -> None:
+        result = validate_operations([{
+            "type": "format_cells",
+            "sheet": "Data",
+            "range": "A1:B2",
+            "number_format": "0.00%",
+            "bold": True,
+            "background_color": "#aabbcc",
+            "wrap_text": False,
+        }])
+        self.assertEqual(result[0]["background_color"], "#AABBCC")
+        with self.assertRaises(PolicyError):
+            validate_operations([{"type": "format_cells", "sheet": "Data", "range": "A1"}])
+
+    def test_ranges_are_bounded_by_sheet_and_operation_limits(self) -> None:
+        self.assertEqual(range_shape("A1:XFD1"), (1, 16384))
+        for invalid in ("XFE1", "A1048577", "B2:A1"):
+            with self.subTest(invalid=invalid), self.assertRaises(PolicyError):
+                range_shape(invalid)
+        with self.assertRaises(PolicyError):
+            validate_operations([{"type": "clear_range", "sheet": "Data", "range": "A1:A10001"}])
 
 
 if __name__ == "__main__":
