@@ -134,7 +134,9 @@ def _formula_errors(sheet_name: str, area, formulas, values, limit: int) -> list
 
 
 def _named_ranges(document, limit: int) -> dict[str, Any]:
-    ranges = document.getNamedRanges()
+    ranges = getattr(document, "NamedRanges", None)
+    if ranges is None:
+        ranges = document.getNamedRanges()
     names = sorted(ranges.getElementNames())
     result = []
     for name in names[:limit]:

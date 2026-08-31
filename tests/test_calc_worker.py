@@ -169,6 +169,10 @@ class FakeNamedRanges:
 
 
 class FakeNamedDocument:
+    NamedRanges = FakeNamedRanges()
+
+
+class FakeLegacyNamedDocument:
     def getNamedRanges(self):
         return FakeNamedRanges()
 
@@ -256,6 +260,7 @@ class CalcWorkerTests(unittest.TestCase):
         self.assertTrue(result["items"][0]["content_redacted"])
         self.assertNotIn("/home/tom", str(result))
         self.assertEqual(result["items"][1]["content"], "$Sheet1.$B$2")
+        self.assertEqual(_named_ranges(FakeLegacyNamedDocument(), 1)["total"], 2)
 
     def test_startup_diagnostic_is_bounded_and_removes_paths_and_urls(self):
         with TemporaryDirectory() as temporary:
