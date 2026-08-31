@@ -66,6 +66,12 @@ moving the visible workbook. A semantic fingerprint seals live-window plans;
 approval requests a fresh snapshot and rejects content drift while ignoring
 selection-only changes. Live-window plans can publish only as a new copy.
 
+Staging an active-window plan also publishes a bounded, path-free native review
+payload. This is a one-way presentation channel: agents cannot open, close,
+approve or otherwise control the overlay. Its before/after records come from
+the recalculated staged document and are rechecked before any human-approved
+copy is published.
+
 ## Errors
 
 Protocol, schema, stale revision, conflict, policy, and engine failures use

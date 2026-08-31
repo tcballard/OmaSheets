@@ -41,6 +41,8 @@ to replace an existing file.
 - mouse selection and direct keyboard editing through `LOKDocView`;
 - live cell address and formula/value display;
 - sheet switching, zoom, undo/redo, copy/paste, bold and italic actions;
+- a session-bound agent diff overlay with verified before/after cards,
+  destructive/truncation warnings, dismissal and explicit copy-only approval;
 - a human-only **Save a Copy** flow which refuses to replace an existing path;
 - an isolated temporary LibreOffice profile for every window;
 - dirty-close confirmation and password prompts; and
