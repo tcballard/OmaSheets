@@ -50,6 +50,15 @@ def build_parser() -> argparse.ArgumentParser:
     integrate_commands = integrate.add_subparsers(dest="integrate_command", required=True)
     integrate_commands.add_parser("install", help="Install the desktop entry and MIME associations")
     integrate_commands.add_parser("uninstall", help="Restore or remove OmaSheets integration")
+    lok = commands.add_parser("lok", help="Run the experimental LibreOfficeKit spike")
+    lok_commands = lok.add_subparsers(dest="lok_command", required=True)
+    lok_status = lok_commands.add_parser("status", help="Check LibreOfficeKit spike dependencies")
+    lok_status.add_argument("--json", action="store_true", help="Emit JSON")
+    lok_render = lok_commands.add_parser("render", help="Render a workbook tile through LibreOfficeKit")
+    lok_render.add_argument("path", type=Path)
+    lok_render.add_argument("--output", required=True, type=Path)
+    lok_render.add_argument("--width", type=int, default=1024)
+    lok_render.add_argument("--height", type=int, default=640)
     return parser
 
 
@@ -126,6 +135,26 @@ def main(argv: list[str] | None = None) -> int:
         from .integration import install, uninstall
 
         result = install() if arguments.integrate_command == "install" else uninstall()
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+    if arguments.command == "lok":
+        from .lok_spike import render_workbook, status
+
+        if arguments.lok_command == "status":
+            result = status()
+            if arguments.json:
+                print(json.dumps(result, indent=2, sort_keys=True))
+            else:
+                for check in result["checks"]:
+                    print(f"{'ok' if check['ok'] else 'missing':7} {check['name']}: {check['detail']}")
+                print("spike ready" if result["ready"] else "spike not ready")
+            return 0 if result["ready"] else 1
+        result = render_workbook(
+            arguments.path,
+            arguments.output,
+            width=arguments.width,
+            height=arguments.height,
+        )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     return 0

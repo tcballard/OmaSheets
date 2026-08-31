@@ -174,6 +174,8 @@ int main(int argc, char** argv)
             throw std::runtime_error("input and output paths must differ");
         if (destination.extension() != ".ppm")
             throw std::runtime_error("spike output must use the .ppm extension");
+        if (fs::exists(destination))
+            throw std::runtime_error("output already exists");
         if (!destination.parent_path().empty() && !fs::is_directory(destination.parent_path()))
             throw std::runtime_error("output directory does not exist");
 

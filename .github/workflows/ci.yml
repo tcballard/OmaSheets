@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
-      - run: pacman -Syu --noconfirm --needed git cmake libreoffice-fresh ttf-dejavu
+      - run: pacman -Syu --noconfirm --needed git cmake libreoffice-fresh libreoffice-fresh-sdk ttf-dejavu
       - uses: actions/checkout@v7
       - run: cmake -S spikes/libreofficekit -B build/lok-spike -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build/lok-spike --parallel 2

@@ -35,6 +35,8 @@ omasheets select workbook.xlsx
 omasheets convert workbook.xls
 omasheets status --json
 omasheets mcp serve
+omasheets lok status
+omasheets lok render workbook.xls --output /tmp/workbook-tile.ppm
 ```
 
 Installation is documented in [`INSTALL.md`](INSTALL.md); the real Omarchy and
