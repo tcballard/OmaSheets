@@ -1,19 +1,19 @@
 {
   "name": "omasheets",
   "version": "0.0.1",
-  "description": "Safe, native spreadsheet work on Omarchy",
+  "description": "Agentic native spreadsheet work with verified human review",
   "author": {
     "name": "Tom Ballard"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "OmaSheets",
-    "shortDescription": "Inspect and propose verified spreadsheet changes.",
-    "longDescription": "OmaSheets connects agents to a locally selected workbook through bounded reads, formula tracing, staged changes, semantic diffs, and explicit local approval.",
+    "shortDescription": "Understand, revise, and safely improve live workbooks.",
+    "longDescription": "OmaSheets gives Codex selection-aware workbook context, sealed observations, explainable purpose-grouped plans, verified semantic diffs, iterative revision, and explicit local approval without agent publication authority.",
     "developerName": "Tom Ballard",
     "category": "Productivity",
     "capabilities": ["mcp", "skills"],
-    "defaultPrompt": "Use OmaSheets to inspect or safely propose changes to my selected workbook."
+    "defaultPrompt": "Start from omasheets://agent and help with my selected workbook. Inspect the evidence you need, clarify material ambiguity, and explain any verified proposal. Never publish workbook bytes."
   },
   "mcpServers": "./.mcp.json"
 }

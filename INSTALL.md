@@ -60,6 +60,12 @@ omasheets --version
 desktop integration and the Omarchy plugin. Restart or refresh Codex after the
 first installation so it discovers the new personal plugin and MCP server.
 
+Open or select a workbook, then choose **Ask Codex** from either the native
+window header or Omarchy bar. This starts Codex with a fixed path-free prompt;
+the installed OmaSheets plugin reads the workbook session and live selection
+through MCP. If Codex is not on `PATH`, the native window reports that the
+agent entry point is unavailable while spreadsheet editing remains functional.
+
 ## Removal
 
 Remove the product-owned files before removing the Omarchy checkout:

@@ -3,6 +3,8 @@
 Run this on an Omarchy `quattro` workstation. Automated Arch CI covers policy,
 transactions, the pinned plugin validator, wheel packaging, user-local install,
 native launch under Xvfb, live bridge, diff overlay, provenance and uninstall.
+The native/agent job also exercises evidence-cited planning, structural rows,
+formula fill, sorting, plan supersession and the non-publishing apply handoff.
 It does not prove a real Quickshell/Wayland session, physical input,
 accessibility, desktop portal behavior or file-manager integration.
 
@@ -63,23 +65,33 @@ crash-containment limitations.
 
 ## Agent read and staged change
 
-1. Start `omasheets mcp serve` through an MCP client.
-2. Read `omasheets://window` while changing cells and sheets in the native
+1. Choose **Ask Codex** in the native header and Omarchy panel. Confirm each
+   opens Codex with no workbook path in its initial prompt.
+2. Read `omasheets://agent` and confirm it contains the selected workbook's
+   public session and current focus but no source path or publication authority.
+3. Start `omasheets mcp serve` through another MCP client if needed.
+4. Read `omasheets://window` while changing cells and sheets in the native
    window. Confirm address, formula, sheet, zoom and visible rectangle follow
    within 100 ms, and confirm the resource contains no filesystem path.
-3. Make an unsaved value and formula edit, then use `read_range`. Confirm the
+5. Make an unsaved value and formula edit, then use `read_range`. Confirm the
    result reports `document_source: live_window` and contains both edits while
-   the source file hash remains unchanged.
-4. Describe the workbook, read a range, search, and trace one formula.
-5. Stage scalar value, formula, formatting and bounded range changes. Confirm
-   the native diff overlay opens, shows red/green before-and-after records and
-   flags any destructive operation. Confirm hiding it does not change the
-   workbook and that a proposal over 200 visible changes states it is truncated.
-6. Change a different live cell after staging and invoke the MCP apply handoff;
+   the source file hash remains unchanged. Retain each returned `evidence_id`.
+6. Describe the workbook, read a range, search, and trace one formula. Confirm
+   a plan cannot cite evidence from another session or semantic live snapshot.
+7. Stage scalar value, formula, formatting, bounded range, inserted row,
+   reference-aware fill and bounded sort changes. Confirm the native diff
+   overlay opens and shows the goal, explanation, assumptions, purpose groups,
+   red/green before-and-after records, and destructive flags. Confirm hiding it
+   does not change the workbook and that a proposal over 200 visible changes
+   states it is truncated.
+8. Give a correction such as “exclude Forecast” and confirm `revise_plan`
+   creates a new plan, the prior plan becomes `superseded`, and only the new
+   plan is actionable.
+9. Change a different live cell after staging and invoke the MCP apply handoff;
    confirm semantic fingerprint drift rejects the plan. Restage without further
    edits and confirm the handoff returns local review instructions
    and still does not write a workbook.
-7. From the overlay choose **Approve & Save a Copy**. Cancel the confirmation
+10. From the overlay choose **Approve & Save a Copy**. Cancel the confirmation
    first and confirm no output appears. Repeat, approve a new destination, and
    confirm the verified copy appears, the overlay closes and the original and
    open in-memory workbook remain unchanged. Also repeat the terminal review,
@@ -106,6 +118,10 @@ Confirm `sample.xls` retains its original SHA-256, a new adjacent
 `manual_review_required: true` and `excel_equivalence_claimed: false`. Open both
 versions and manually compare sheets, formulas, formatting, charts, named
 ranges, and any warnings.
+
+The maintainer has reported completing a hands-on test. Record the tested
+commit, Omarchy version, hardware, files, measurements and pass/fail notes here
+before treating every numbered item above as release evidence.
 
 ## Removal
 

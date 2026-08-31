@@ -61,6 +61,20 @@ reject unknown arguments. Hidden implementation arguments cannot be smuggled in
 by a client. `apply_plan` is a read-only handoff that returns local review
 instructions; it does not commit.
 
+`omasheets://agent` is the path-free entry point for a new workbook task. The
+native window and Omarchy panel can start Codex with a fixed product prompt;
+the prompt contains no workbook path or content. Codex obtains the selected
+session and live focus through MCP, then uses ordinary bounded tools.
+
+Successful reads create sealed observation records below the private XDG state
+directory. Each record binds the session, revision, exact selected-file or
+live-window semantic source, tool arguments and result digest. Agent plans cite
+those record IDs and carry bounded goal, summary, assumptions and purpose
+groups. These explanations are sealed and presented, but are not calculation
+evidence. `revise_plan` stages a complete replacement from the same immutable
+base and marks its predecessor `superseded`; it never edits a reviewed plan in
+place.
+
 The native window publishes a coalesced, private XDG-runtime context record for
 the current immutable session. MCP exposes a validated, path-free projection as
 `omasheets://window`, joining human selection and viewport state to semantic
@@ -77,7 +91,8 @@ are removed after each operation.
 After staging, the service derives a mode-`0600`, session-bound review payload
 from the sealed plan and its verified target fingerprints. The native window
 renders at most 200 exact cell/range changes in a GTK overlay above the
-LibreOfficeKit view. Larger proposals retain their total count and visibly say
+LibreOfficeKit view. The overlay also presents the sealed goal, summary,
+assumptions and operation-group purposes. Larger proposals retain their total count and visibly say
 that the list is truncated. The overlay never sends edit commands to the
 document engine.
 
@@ -95,7 +110,7 @@ A plan progresses through:
 
 `planned -> verified -> approved -> committed`
 
-It may instead become `rejected`, `conflicted`, or `failed`. `approved` is a
+It may instead become `superseded`, `rejected`, `conflicted`, or `failed`. `approved` is a
 durable recovery state, not evidence that publication completed. A durable
 receipt is the commit linearization point.
 
