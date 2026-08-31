@@ -110,15 +110,15 @@ jobs:
           xvfb-run -a build/lok-spike/omasheets-window \
             --smoke-test "$RUNNER_TEMP/omasheets-window.png" \
             --context "$RUNNER_TEMP/window-runtime/context.json" \
-            --bridge "$RUNNER_TEMP/window-runtime/bridge.sock" \
+            --bridge "$RUNNER_TEMP/window-runtime/window-bridge.sock" \
             --session "$session" --revision 1 \
             "$RUNNER_TEMP/lok-input/large.xlsx" > "$RUNNER_TEMP/window-report.json" &
           window_pid=$!
           for attempt in $(seq 1 100); do
-            test ! -S "$RUNNER_TEMP/window-runtime/bridge.sock" || break
+            test ! -S "$RUNNER_TEMP/window-runtime/window-bridge.sock" || break
             sleep 0.05
           done
-          test -S "$RUNNER_TEMP/window-runtime/bridge.sock"
+          test -S "$RUNNER_TEMP/window-runtime/window-bridge.sock"
           python - <<'PY'
           import os
           from pathlib import Path
@@ -132,7 +132,7 @@ jobs:
 
           runtime = Path(os.environ["RUNNER_TEMP"], "window-runtime")
           session = "a" * 32
-          bridge = runtime / "bridge.sock"
+          bridge = runtime / "window-bridge.sock"
           assert stat.S_IMODE(bridge.stat().st_mode) == 0o600
           paths = AppPaths(runtime / "state", runtime / "cache", runtime)
           snapshot = request_live_snapshot(paths, session, ".xlsx")
