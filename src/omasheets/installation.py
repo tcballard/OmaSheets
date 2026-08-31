@@ -74,7 +74,12 @@ def _sha_file(path: Path) -> str:
 
 def _tree_sha(path: Path) -> str:
     digest = hashlib.sha256()
-    for item in sorted(candidate for candidate in path.rglob("*") if candidate.is_file()):
+    for item in sorted(
+        candidate for candidate in path.rglob("*")
+        if candidate.is_file()
+        and "__pycache__" not in candidate.parts
+        and candidate.suffix not in {".pyc", ".pyo"}
+    ):
         relative = item.relative_to(path).as_posix().encode()
         digest.update(len(relative).to_bytes(4, "big"))
         digest.update(relative)
@@ -157,6 +162,7 @@ def _launcher(app: Path) -> bytes:
     module_root = app / "lib"
     return (
         "#!/bin/bash\nset -euo pipefail\n"
+        "export PYTHONDONTWRITEBYTECODE=1\n"
         f"export PYTHONPATH={shlex.quote(str(module_root))}\n"
         f"export PATH={shlex.quote(str(app / 'bin'))}:\"$PATH\"\n"
         "exec /usr/bin/python -m omasheets.cli \"$@\"\n"
@@ -235,7 +241,10 @@ def install(
     marketplace_before = paths.codex_marketplace.read_bytes() if paths.codex_marketplace.is_file() else None
     marketplace_after = _marketplace_after(marketplace_before)
     try:
-        shutil.copytree(source_root / "src/omasheets", stage / "lib/omasheets")
+        shutil.copytree(
+            source_root / "src/omasheets", stage / "lib/omasheets",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+        )
         build = paths.build
         if build.exists():
             shutil.rmtree(build)
