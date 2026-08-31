@@ -316,7 +316,7 @@ def _object_fingerprints(document, operations: list[dict[str, Any]]) -> dict[str
                 pivots.append({
                     "sheet": operation["sheet"], "name": operation["name"],
                     "source": [source.Sheet, source.StartColumn, source.StartRow, source.EndColumn, source.EndRow],
-                    "output": [output.Sheet, output.StartColumn, output.StartRow, output.EndColumn, output.EndRow],
+                    "output_start": [output.Sheet, output.StartColumn, output.StartRow],
                 })
     return {"charts": charts, "pivots": pivots}
 
