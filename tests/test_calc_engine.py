@@ -34,6 +34,8 @@ class CalcEngineTests(unittest.TestCase):
         self.assertNotIn("--share-net", command)
         self.assertNotIn(str(Path.home()), command)
         self.assertIn("/omasheets-worker.py", command)
+        if Path("/etc/passwd").exists():
+            self.assertIn("/etc/passwd", command)
 
     def test_missing_bubblewrap_fails_closed(self):
         config = CalcConfig(
