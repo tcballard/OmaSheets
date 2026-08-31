@@ -1,11 +1,14 @@
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from omasheets.calc_worker import (
     _apply,
     _column_index,
     _color,
+    _fill_direction,
     _matrix_values,
     _named_ranges,
     _style_color,
@@ -178,6 +181,14 @@ class FakeLegacyNamedDocument:
 
 
 class CalcWorkerTests(unittest.TestCase):
+    def test_fill_directions_are_uno_enums_not_constants(self):
+        fake_uno = SimpleNamespace(Enum=lambda type_name, member: (type_name, member))
+        with patch.dict("sys.modules", {"uno": fake_uno}):
+            self.assertEqual(
+                _fill_direction("TO_BOTTOM"),
+                ("com.sun.star.sheet.FillDirection", "TO_BOTTOM"),
+            )
+
     def test_bulk_values_are_typed_for_uno(self):
         self.assertEqual(
             _matrix_values([[None, True, False, 2, 2.5, "=literal"]]),
