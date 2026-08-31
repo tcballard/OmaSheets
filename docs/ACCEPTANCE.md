@@ -26,9 +26,19 @@ hashes before every mutation test.
 1. Build and install the helper from [`../spikes/libreofficekit/`](../spikes/libreofficekit/README.md).
 2. Run `omasheets lok status` and confirm all three checks are ready.
 3. Run `omasheets lok render sample.xls --output /tmp/sample-tile.ppm`.
-4. Open the PPM and compare the first visible region against Calc. Record load
+4. Run `omasheets window sample.xlsx` and verify the title bar identifies
+   OmaSheets rather than Calc.
+5. Select a cell and a dragged range; type a value and a formula; copy and
+   paste; undo and redo; toggle bold; and switch every sheet.
+6. Scroll horizontally and vertically with mouse, touchpad and keyboard. Check
+   that tiles repaint without stale seams and the address/formula surfaces track
+   the selected cell.
+7. Save a copy, reopen it in both OmaSheets and Calc, and confirm values,
+   formulas, formats and sheet inventory survive. Confirm an existing output is
+   never replaced without a separate explicit workflow.
+8. Open the PPM and compare the first visible region against Calc. Record load
    and render latency separately for cold and warm runs.
-5. Repeat with `.xlsx`, `.xlsm`, and `.ods`, a non-ASCII filename, and a broken
+9. Repeat with `.xlsx`, `.xlsm`, and `.ods`, a non-ASCII filename, and a broken
    workbook. Confirm failures never alter the source or an existing output.
 
 Passing this section proves only the rendering spike. It does not promote

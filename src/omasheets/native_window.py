@@ -1,0 +1,47 @@
+"""Launcher for the experimental OmaSheets-owned workbook window."""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Any
+
+from .errors import EngineError
+from .identity import identify_regular_file
+from .policy import workbook_format
+
+
+def window_executable() -> Path | None:
+    configured = os.environ.get("OMASHEETS_WINDOW")
+    if configured:
+        candidate = Path(configured).expanduser()
+        return candidate if candidate.is_file() and os.access(candidate, os.X_OK) else None
+    discovered = shutil.which("omasheets-window")
+    return Path(discovered) if discovered else None
+
+
+def status() -> dict[str, Any]:
+    executable = window_executable()
+    return {
+        "experimental": True,
+        "ready": executable is not None,
+        "executable": str(executable) if executable else None,
+        "detail": str(executable) if executable else "build and install spikes/libreofficekit",
+    }
+
+
+def open_window(path: Path) -> int:
+    source = path.expanduser().resolve(strict=True)
+    workbook_format(source)
+    identify_regular_file(source)
+    executable = window_executable()
+    if executable is None:
+        raise EngineError("omasheets-window is not installed; see spikes/libreofficekit/README.md")
+    process = subprocess.Popen(
+        [str(executable), str(source)],
+        close_fds=True,
+        start_new_session=True,
+    )
+    return process.pid

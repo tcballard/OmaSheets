@@ -56,6 +56,11 @@ Panel {
   }
 
   function openWorkbook() {
+    Quickshell.execDetached(["omasheets", "window-current"])
+    close()
+  }
+
+  function openWorkbookInCalc() {
     Quickshell.execDetached(["omasheets", "open-current"])
     close()
   }
@@ -201,10 +206,18 @@ Panel {
 
           Button {
             visible: root.selected
-            text: "Open in Calc"
+            text: "Open in OmaSheets"
             foreground: root.foreground
             fontFamily: root.fontFamily
             onClicked: root.openWorkbook()
+          }
+
+          Button {
+            visible: root.selected
+            text: "Calc fallback"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.openWorkbookInCalc()
           }
 
           Button {

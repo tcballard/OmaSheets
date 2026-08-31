@@ -22,6 +22,8 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn('command: ["omasheets", "status", "--json"]', qml)
         self.assertIn('"review-current"', qml)
         self.assertIn('"open-current"', qml)
+        self.assertIn('"window-current"', qml)
+        self.assertIn("Open in OmaSheets", qml)
         self.assertIn("Text.PlainText", qml)
 
 

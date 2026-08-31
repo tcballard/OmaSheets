@@ -345,7 +345,7 @@ void apply_style()
         "headerbar { background: #162019; color: #f4f8f5; border-bottom: 1px solid #2d3b31; }"
         ".omasheets-toolbar { background: #131a16; border-bottom: 1px solid #263129; padding: 6px; }"
         ".omasheets-formula { background: #0f1511; border-bottom: 1px solid #263129; padding: 6px; }"
-        ".omasheets-address { color: #7ee2a8; font-weight: 700; min-width: 72px; }"
+        ".omasheets-address { color: #7ee2a8; font-weight: bold; min-width: 72px; }"
         ".omasheets-status { color: #9fb1a5; padding: 5px 10px; }"
         "button { border-radius: 7px; }"
         "combobox button { background: #1a251e; color: #e7eee9; }";
@@ -472,6 +472,7 @@ int main(int argc, char** argv)
 {
     gtk_init(&argc, &argv);
     WindowState state;
+    std::string stage = "arguments";
     int source_index = 1;
     if (argc == 4 && std::string_view(argv[1]) == "--smoke-test") {
         state.smoke = true;
@@ -482,6 +483,7 @@ int main(int argc, char** argv)
         return 2;
     }
     try {
+        stage = "workbook validation";
         state.source = fs::canonical(argv[source_index]);
         if (!fs::is_regular_file(state.source) || !supported(state.source))
             throw std::runtime_error("input must be a regular .xls, .xlsx, .xlsm, or .ods workbook");
@@ -492,33 +494,41 @@ int main(int argc, char** argv)
         const fs::path program = configured != nullptr ? fs::path(configured) : fs::path(kProgram);
         if (!fs::is_directory(program))
             throw std::runtime_error("LibreOffice program directory was not found");
+        stage = "profile creation";
         GError* error = nullptr;
         gchar* profile = g_dir_make_tmp("omasheets-window-XXXXXX", &error);
         if (profile == nullptr)
             throw std::runtime_error(error != nullptr ? error->message : "cannot create isolated profile");
         state.profile = profile;
         g_free(profile);
+        stage = "profile URI";
         gchar* profile_uri = g_filename_to_uri(state.profile.c_str(), nullptr, &error);
         if (profile_uri == nullptr)
             throw std::runtime_error(error != nullptr ? error->message : "cannot create profile URI");
+        stage = "LibreOfficeKitGTK initialization";
         state.view = lok_doc_view_new_from_user_profile(program.c_str(), profile_uri, nullptr, &error);
         g_free(profile_uri);
         if (state.view == nullptr)
             throw std::runtime_error(error != nullptr ? error->message : "LibreOfficeKitGTK initialization failed");
+        stage = "OmaSheets styling";
         apply_style();
+        stage = "window construction";
         GtkWidget* window = build_window(&state);
         gtk_widget_show_all(window);
+        stage = "workbook URI";
         gchar* source_uri = g_filename_to_uri(state.source.c_str(), nullptr, &error);
         if (source_uri == nullptr)
             throw std::runtime_error(error != nullptr ? error->message : "cannot create workbook URI");
+        stage = "asynchronous workbook open";
         lok_doc_view_open_document(
             LOK_DOC_VIEW(state.view), source_uri, nullptr, nullptr, on_opened, &state);
+        stage = "interactive event loop";
         gtk_main();
         std::error_code ignored;
         fs::remove_all(state.profile, ignored);
         return state.smoke && !state.loaded ? 1 : 0;
     } catch (const std::exception& exception) {
-        std::cerr << "omasheets-window: " << exception.what() << '\n';
+        std::cerr << "omasheets-window (" << stage << "): " << exception.what() << '\n';
         std::error_code ignored;
         if (!state.profile.empty())
             fs::remove_all(state.profile, ignored);

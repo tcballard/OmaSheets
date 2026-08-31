@@ -31,6 +31,7 @@ The product and safety contracts are in [`docs/`](docs/).
 ```bash
 omasheets doctor
 omasheets open workbook.xls
+omasheets window workbook.xlsx
 omasheets select workbook.xlsx
 omasheets convert workbook.xls
 omasheets status --json
@@ -42,10 +43,11 @@ omasheets lok render workbook.xls --output /tmp/workbook-tile.ppm
 Installation is documented in [`INSTALL.md`](INSTALL.md); the real Omarchy and
 LibreOffice release pass is in [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).
 
-An experimental native-rendering proof is in
-[`spikes/libreofficekit/`](spikes/libreofficekit/). It renders a real `.xls`
-through LibreOfficeKit into an OmaSheets-owned pixel buffer; it is not yet the
-default human workbook window.
+An experimental native workbook window is in
+[`spikes/libreofficekit/`](spikes/libreofficekit/). It embeds LibreOfficeKit's
+interactive tile engine in OmaSheets-owned GTK chrome with scrolling,
+selection, keyboard editing, sheets, zoom and save-copy controls. Calc remains
+the file-association fallback until real Omarchy/Wayland acceptance passes.
 
 ## Status
 
