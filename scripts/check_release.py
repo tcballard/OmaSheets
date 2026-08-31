@@ -23,8 +23,9 @@ def main() -> int:
     assert manifest["id"] == "io.github.tcballard.omasheets"
     for required in (
         "README.md", "INSTALL.md", "docs/ACCEPTANCE.md", "docs/SECURITY.md",
-        "docs/AGENT_PROTOCOL.md", "docs/AGENT_WORKFLOWS.md",
+        "docs/AGENT_PROTOCOL.md", "docs/AGENT_WORKFLOWS.md", "docs/PERFORMANCE.md",
         "bin/omasheets-plugin", "scripts/install.py", "scripts/build_native_bundle.py",
+        "scripts/performance.py", "src/omasheets/performance.py",
         "src/omasheets/native_bundle.py", ".github/workflows/release.yml",
         "native/libreofficekit/CMakeLists.txt", "plugins/omasheets/.codex-plugin/plugin.json",
     ):

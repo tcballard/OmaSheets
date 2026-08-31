@@ -120,3 +120,8 @@ Early development. v0.0.1 has an automated Arch install/native/agent/uninstall
 gate and has received maintainer hands-on testing. The repository does not yet
 record evidence for every item in the complete Omarchy/Wayland release runbook,
 and no perfect Excel compatibility claim is made.
+
+Large-workbook performance claims are likewise evidence-gated. The
+dependency-free [performance harness](docs/PERFORMANCE.md) generates truthful
+dense, sparse and formula workloads and records Linux process-tree RSS, PSS and
+USS rather than relying on a single sparse used-range smoke file.
