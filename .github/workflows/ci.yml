@@ -101,6 +101,8 @@ jobs:
           assert len(tile) == len(b"P6\n320 200\n255\n") + 320 * 200 * 3
           PY
       - name: Open the OmaSheets-owned interactive window
+        env:
+          G_MESSAGES_DEBUG: all
         run: |
           xvfb-run -a build/lok-spike/omasheets-window \
             --smoke-test "$RUNNER_TEMP/omasheets-window.png" "$RUNNER_TEMP/lok-input/smoke.xlsx" \
