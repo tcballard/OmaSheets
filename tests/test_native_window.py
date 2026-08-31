@@ -36,9 +36,14 @@ class NativeWindowTests(unittest.TestCase):
                 "omasheets.native_window.subprocess.Popen"
             ) as popen:
                 popen.return_value.pid = 85
-                open_window(workbook, context_path=context, session_id="a" * 32, revision=3)
+                bridge = Path(temporary) / "bridge.sock"
+                open_window(
+                    workbook, context_path=context, bridge_path=bridge,
+                    session_id="a" * 32, revision=3,
+                )
             self.assertEqual(popen.call_args.args[0], [
                 "/usr/bin/omasheets-window", "--context", str(context),
+                "--bridge", str(bridge),
                 "--session", "a" * 32, "--revision", "3", str(workbook),
             ])
 

@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import secrets
+from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Any, Protocol
 from . import __version__
 from .errors import ConflictError, EngineError
 from .identity import FileIdentity, identify_regular_file
+from .live_bridge import request_live_snapshot
 from .operations import SUPPORTED_OPERATIONS, destructive_operations, validate_operations
 from .paths import AppPaths
 from .policy import Actor, require_agent_readable, require_stageable, workbook_format
@@ -133,6 +135,12 @@ class OmaSheetsService:
                 "agent_control": False,
                 "selection_and_viewport_visible": True,
             },
+            "live_document_bridge": {
+                "transport": "private_same_user_unix_socket",
+                "source": "libreofficekit_save_copy",
+                "unsaved_state_visible": True,
+                "agent_mutates_open_document": False,
+            },
             "agent_operations": list(SUPPORTED_OPERATIONS),
             "agent_publish_authority": False,
             "local_review_required": True,
@@ -154,6 +162,7 @@ class OmaSheetsService:
             "sheet": 0,
             "address": "",
             "formula": "",
+            "live_document_bridge": False,
             "zoom": 1.0,
             "dirty": False,
             "visible": {"x": 0, "y": 0, "width": 0, "height": 0},
@@ -185,12 +194,15 @@ class OmaSheetsService:
             sheet = context.get("sheet")
             zoom = context.get("zoom")
             updated_at_ms = context.get("updated_at_ms")
+            live_document_bridge = context.get("live_document_bridge", False)
             if not isinstance(sheet, int) or isinstance(sheet, bool) or not 0 <= sheet <= 1024:
                 raise ValueError("invalid sheet")
             if not isinstance(zoom, (int, float)) or isinstance(zoom, bool) or not 0.25 <= zoom <= 5.0:
                 raise ValueError("invalid zoom")
             if not isinstance(updated_at_ms, int) or isinstance(updated_at_ms, bool) or updated_at_ms < 0:
                 raise ValueError("invalid timestamp")
+            if not isinstance(live_document_bridge, bool):
+                raise ValueError("invalid bridge status")
             return {
                 "active": context.get("active") is True,
                 "selected": True,
@@ -204,6 +216,7 @@ class OmaSheetsService:
                 "visible": visible,
                 "updated_at_ms": updated_at_ms,
                 "agent_control": False,
+                "live_document_bridge": live_document_bridge,
             }
         except (OSError, ValueError, TypeError):
             return {"active": False, "selected": True, "session_id": current["session_id"], "unavailable": True}
@@ -264,6 +277,35 @@ class OmaSheetsService:
         self._revalidate_source(session)
         return Path(session["source"])
 
+    @contextmanager
+    def _agent_source(self, session: dict[str, Any]):
+        """Yield the exact live or on-disk bytes agents are allowed to inspect."""
+
+        window = self.window_context_resource()
+        if window.get("active") and window.get("session_id") == session["session_id"]:
+            if not window.get("live_document_bridge"):
+                raise EngineError("native window is active but its live document bridge is unavailable")
+            snapshot = request_live_snapshot(
+                self.paths, session["session_id"], Path(session["source"]).suffix,
+            )
+            try:
+                yield snapshot.path, {"kind": "live_window", "sha256": snapshot.semantic_sha256}
+            finally:
+                snapshot.path.unlink(missing_ok=True)
+            return
+        yield Path(session["source"]), {
+            "kind": "selected_file",
+            "sha256": session["source_identity"]["sha256"],
+        }
+
+    def _revalidate_plan_base(self, plan: dict[str, Any], session: dict[str, Any]) -> None:
+        base = plan.get("base_source") or {
+            "kind": "selected_file", "sha256": plan["source_sha256"],
+        }
+        with self._agent_source(session) as (_, current):
+            if current != base:
+                raise ConflictError("workbook state changed after the agent plan was verified")
+
     def convert_legacy_local(self, source: Path) -> dict[str, Any]:
         """Convert an explicitly chosen `.xls` to an adjacent, new `.xlsx`."""
 
@@ -297,7 +339,9 @@ class OmaSheetsService:
 
     def describe_workbook(self, session_id: str, include_formulas: bool = False) -> dict[str, Any]:
         session = self._session(session_id)
-        result = self.engine.describe(Path(session["source"]), include_formulas=include_formulas)
+        with self._agent_source(session) as (source, base):
+            result = self.engine.describe(source, include_formulas=include_formulas)
+        result["document_source"] = base["kind"]
         result.update(self._public_session(session))
         result["formula_records_included"] = include_formulas
         if not include_formulas:
@@ -306,30 +350,34 @@ class OmaSheetsService:
 
     def read_range(self, session_id: str, **arguments: Any) -> dict[str, Any]:
         session = self._session(session_id)
-        return self.engine.read_range(Path(session["source"]), **arguments)
+        with self._agent_source(session) as (source, base):
+            result = self.engine.read_range(source, **arguments)
+        return {**result, "document_source": base["kind"]}
 
     def search_workbook(self, session_id: str, **arguments: Any) -> dict[str, Any]:
         session = self._session(session_id)
-        return self.engine.search(Path(session["source"]), **arguments)
+        with self._agent_source(session) as (source, base):
+            result = self.engine.search(source, **arguments)
+        return {**result, "document_source": base["kind"]}
 
     def trace_formula(self, session_id: str, **arguments: Any) -> dict[str, Any]:
         session = self._session(session_id)
-        return self.engine.trace(Path(session["source"]), **arguments)
+        with self._agent_source(session) as (source, base):
+            result = self.engine.trace(source, **arguments)
+        return {**result, "document_source": base["kind"]}
 
     def render_workbook(self, session_id: str, format: str = "pdf") -> dict[str, Any]:
         del format
         session = self._session(session_id)
-        output = self.paths.cache / "previews" / f"{session['source_identity']['sha256']}.pdf"
+        output = self.paths.cache / "previews" / f"{secrets.token_hex(16)}.pdf"
         output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        result = self.engine.render(Path(session["source"]), output=output)
+        with self._agent_source(session) as (source, base):
+            result = self.engine.render(source, output=output)
         preview_identity = identify_regular_file(output)
-        return {**result, "artifact": str(output), "artifact_sha256": preview_identity.sha256}
+        return {**result, "artifact": str(output), "artifact_sha256": preview_identity.sha256, "document_source": base["kind"]}
 
     def plan_changes(self, session_id: str, expected_revision: int, operations: list[dict[str, Any]]) -> dict[str, Any]:
         session = self._session(session_id)
-        window = self.window_context_resource()
-        if window.get("active") and window.get("session_id") == session_id and window.get("dirty"):
-            raise ConflictError("native window has unsaved changes; save a copy or close it before staging agent changes")
         if session["revision"] != expected_revision:
             raise ConflictError("workbook revision is stale")
         require_stageable(Path(session["source"]), actor=Actor.AGENT)
@@ -340,7 +388,8 @@ class OmaSheetsService:
         extension = Path(session["source"]).suffix.lower()
         staged = plan_dir / f"staged{extension}"
         preview = plan_dir / "preview.pdf"
-        evidence = self.engine.stage(Path(session["source"]), normalized, output=staged, preview=preview)
+        with self._agent_source(session) as (source, base):
+            evidence = self.engine.stage(source, normalized, output=staged, preview=preview)
         staged_identity = identify_regular_file(staged)
         preview_identity = identify_regular_file(preview)
         plan = {
@@ -350,6 +399,7 @@ class OmaSheetsService:
             "status": "verified",
             "created_at": _now(),
             "source_sha256": session["source_identity"]["sha256"],
+            "base_source": base,
             "staged_artifact": str(staged),
             "staged_sha256": staged_identity.sha256,
             "preview_artifact": str(preview),
@@ -394,6 +444,7 @@ class OmaSheetsService:
         session = self._session(plan["session_id"])
         if session["revision"] != expected_revision:
             raise ConflictError("workbook revision changed")
+        self._revalidate_plan_base(plan, session)
         if identify_regular_file(Path(plan["staged_artifact"])).sha256 != plan["staged_sha256"]:
             raise ConflictError("staged artifact changed")
         if identify_regular_file(Path(plan["preview_artifact"])).sha256 != plan["preview_sha256"]:
@@ -423,6 +474,7 @@ class OmaSheetsService:
             if plan["revision"] != expected_revision:
                 raise ConflictError("plan revision is stale")
             session = self._session(plan["session_id"])
+            self._revalidate_plan_base(plan, session)
             source = Path(session["source"])
             receipt_id = plan.get("receipt_id") or secrets.token_hex(16)
             if mode == "copy":
@@ -434,6 +486,8 @@ class OmaSheetsService:
                     raise ConflictError("copy target must retain the workbook format")
                 backup = None
             elif mode == "replace":
+                if (plan.get("base_source") or {}).get("kind") == "live_window":
+                    raise ConflictError("live-window agent plans can publish only to a new copy")
                 if destination is not None and destination.expanduser().resolve(strict=False) != source:
                     raise ConflictError("replace target must be the selected workbook")
                 target = source
@@ -477,6 +531,7 @@ class OmaSheetsService:
             if plan["revision"] != expected_revision:
                 raise ConflictError("plan revision is stale")
             session = self._session(plan["session_id"])
+            self._revalidate_plan_base(plan, session)
             plan["status"] = "approved"
             plan["approved_at"] = _now()
             self._save_plan(plan)

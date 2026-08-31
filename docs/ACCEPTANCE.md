@@ -63,12 +63,17 @@ LibreOfficeKit to the default human editor.
 2. Read `omasheets://window` while changing cells and sheets in the native
    window. Confirm address, formula, sheet, zoom and visible rectangle follow
    within 100 ms, and confirm the resource contains no filesystem path.
-3. Describe the workbook, read a range, search, and trace one formula.
-4. Stage a scalar value or formula change. Confirm the original hash is
+3. Make an unsaved value and formula edit, then use `read_range`. Confirm the
+   result reports `document_source: live_window` and contains both edits while
+   the source file hash remains unchanged.
+4. Describe the workbook, read a range, search, and trace one formula.
+5. Stage a scalar value or formula change. Confirm the original hash is
    unchanged and the panel reports the operation count.
-5. Invoke the MCP apply handoff. Confirm it returns local review instructions
+6. Change a different live cell after staging and invoke the MCP apply handoff;
+   confirm semantic fingerprint drift rejects the plan. Restage without further
+   edits and confirm the handoff returns local review instructions
    and still does not write a workbook.
-6. Click **Review in terminal**. Type a wrong token first and confirm no output
+7. Click **Review in terminal**. Type a wrong token first and confirm no output
    file appears. Repeat and type the exact token; confirm a new `-omasheets`
    copy appears and the original remains unchanged.
 

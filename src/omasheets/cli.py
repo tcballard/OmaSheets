@@ -86,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if arguments.command in {"window", "window-current"}:
         from .native_window import open_window
+        from .live_bridge import bridge_path
 
         service = _service()
         if arguments.command == "window":
@@ -101,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
             context_path=context,
             session_id=session["session_id"],
             revision=session["revision"],
+            bridge_path=bridge_path(service.paths),
         )
         print(json.dumps({"pid": pid, "session_id": session["session_id"], "window": "omasheets"}, sort_keys=True))
         return 0
