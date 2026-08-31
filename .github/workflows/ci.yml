@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "feat/**", "codex/**"]
+    branches: [main, "feat/**"]
   pull_request:
 
 permissions:
@@ -67,7 +67,12 @@ jobs:
   production-install:
     name: Arch production install and native acceptance
     runs-on: ubuntu-latest
-    container: archlinux:base-devel
+    container:
+      image: archlinux:base-devel
+      # The production worker still uses Bubblewrap with --unshare-all. The
+      # outer hosted container needs namespace authority so that inner sandbox
+      # can be created instead of failing closed before Calc starts.
+      options: --privileged
     env:
       HOME: /tmp/omasheets-home
       XDG_DATA_HOME: /tmp/omasheets-home/.local/share
