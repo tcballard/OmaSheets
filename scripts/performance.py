@@ -31,14 +31,16 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="action", required=True)
 
     specs = commands.add_parser("specs", help="Print exact fixture sizes without generating files")
-    specs.add_argument("--profile", choices=("smoke", "standard"), default="standard")
+    specs.add_argument("--profile", choices=("smoke", "ci", "standard"), default="standard")
     specs.add_argument("--output", type=Path)
 
     fixtures = commands.add_parser("fixtures", help="Generate deterministic FODS fixtures")
-    fixtures.add_argument("--profile", choices=("smoke", "standard"), default="standard")
+    fixtures.add_argument("--profile", choices=("smoke", "ci", "standard"), default="standard")
     fixtures.add_argument("--directory", type=Path, required=True)
 
-    run = commands.add_parser("run", help="Measure one foreground command and its process group")
+    run = commands.add_parser(
+        "run", help="Measure one foreground command, its process group, and descendants",
+    )
     run.add_argument("--name", required=True)
     run.add_argument("--output", type=Path)
     run.add_argument("--interval", type=float, default=0.1)

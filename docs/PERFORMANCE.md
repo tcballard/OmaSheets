@@ -8,7 +8,10 @@ It runs on Linux using only Python's standard library.
 ## What is measured
 
 `run` starts one foreground command in a new process group and samples that
-group from `/proc`. Every observation records process count plus:
+group plus its descendant processes from `/proc`. Descendants remain in scope
+if they create another process group or session, including the Calc worker
+behind Bubblewrap's `--new-session`. Every observation records process count
+plus:
 
 - RSS, the resident total which double-counts shared pages;
 - PSS, the resident total with shared pages apportioned among users; and
@@ -20,8 +23,9 @@ an estimate. A `VmRSS` fallback can still supply RSS. Reports retain at most
 2,048 samples, are capped at 1 MiB, discard command output, and omit argv by
 default so a token in an argument is not copied into benchmark evidence.
 
-The measured program must remain in the foreground, with its workers inheriting
-the process group. A command which daemonises or joins another process group is
+The measured program must remain in the foreground. Its live descendants are
+followed through their parent links even when they change process group; a
+daemon which outlives and detaches from the measured parent tree remains
 outside the report. Run the native executable directly rather than a launcher
 which exits immediately. PSS also depends on what else shares each page during
 the sample, so record the machine, kernel, installed LibreOffice build, and
@@ -46,11 +50,12 @@ Inspect the exact specifications without allocating workbook data:
 python3 scripts/performance.py specs --profile standard
 ```
 
-Generate the quick integration set or the large standard set into a new or
-empty directory:
+Generate the quick integration set, bounded hosted-CI set, or large standard
+set into a new or empty directory:
 
 ```bash
 python3 scripts/performance.py fixtures --profile smoke --directory /tmp/omasheets-smoke
+python3 scripts/performance.py fixtures --profile ci --directory /tmp/omasheets-ci
 python3 scripts/performance.py fixtures --profile standard --directory /tmp/omasheets-standard
 ```
 
@@ -73,6 +78,34 @@ Headers are counted separately in the manifest. Sparse values occur at exact
 row and column strides and include the final row and column, so the dimensions
 and the low density are both real. Formula inputs and cached values are derived
 from row numbers with no random seed or wall-clock data.
+
+The `ci` profile is moderate enough to traverse the installed agent-analysis
+path. Its dimensions count the header row because the worker's 250,000-cell
+limit applies to the complete used range:
+
+| Fixture | Used-range cells | Values | Formulas | Shape |
+|---|---:|---:|---:|---|
+| `dense-ci` | 240,020 | 240,000 | 0 | Fully populated scan |
+| `sparse-ci` | 240,020 | 605 | 0 | Same coordinate space, less than 1% populated |
+| `formula-ci` | 20,010 | 4,000 | 16,000 | Under both cell and 20,000-formula limits |
+
+## Hosted agent-analysis evidence
+
+The compiler-free production-install job generates all three `ci` FODS
+sources, converts them to XLSX with the job's installed LibreOffice, and runs
+`analyze_workbook` on `dense-ci.xlsx` through the installed `omasheets`
+launcher. The harness measures the launcher, Bubblewrap boundary, Python/UNO
+worker, and LibreOffice descendants as one foreground tree. It fails the job
+unless the command exits successfully without timing out and Linux supplies
+non-null positive peak RSS, PSS, and USS plus at least two observed processes.
+
+The `omasheets-agent-performance-linux-x86_64` artifact contains the bounded
+measurement JSON and a fixture manifest. The manifest records deterministic
+source hashes and the exact observed hashes, sizes, format-conversion tool, and
+filenames for the generated XLSX files. LibreOffice conversion output is
+treated as an observed artifact, not claimed to be byte-reproducible. This job
+provides a comparable historical evidence stream; it does not by itself turn
+one hosted-run result into a production performance guarantee.
 
 ## Baseline matrix
 
