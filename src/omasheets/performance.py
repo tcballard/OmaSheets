@@ -63,6 +63,7 @@ class ProcProcessGroupSampler:
 
     def __init__(self, proc_root: Path = Path("/proc")) -> None:
         self.proc_root = proc_root
+        self.last_members: tuple[int, ...] = ()
 
     @staticmethod
     def _process_identity(stat: str) -> tuple[int, int] | None:
@@ -159,6 +160,7 @@ class ProcProcessGroupSampler:
 
     def sample(self, process_group: int, at_seconds: float) -> MemorySample:
         members = self._members(process_group)
+        self.last_members = tuple(members)
         rows = [self._memory(pid) for pid in members]
         readable = sum(row[0] is not None for row in rows)
         rss = sum(row[0] for row in rows if row[0] is not None) if readable == len(members) and members else None
@@ -238,21 +240,81 @@ def _bounded_command(command: Sequence[str], include_command: bool) -> dict:
     return result
 
 
-def _terminate(process: subprocess.Popen, grace_seconds: float = 1.0) -> None:
+def _process_group_exists(process_group: int) -> bool:
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        os.killpg(process_group, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _signal_process_tree(process_group: int, members: set[int], requested: signal.Signals) -> None:
+    group_signaled = False
+    try:
+        os.killpg(process_group, requested)
+        group_signaled = True
     except (ProcessLookupError, PermissionError):
         pass
-    try:
-        process.wait(timeout=grace_seconds)
-        return
-    except subprocess.TimeoutExpired:
-        pass
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
-    process.wait()
+    # Descendants that called setsid() left the original process group. Signal
+    # every such PID observed by the Linux tree sampler as well, without
+    # delivering the same signal twice to ordinary group members.
+    for pid in sorted(members):
+        try:
+            if group_signaled and os.getpgid(pid) == process_group:
+                continue
+            os.kill(pid, requested)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def _wait_for_process_tree(
+    process: subprocess.Popen,
+    process_group: int,
+    members: set[int],
+    timeout_seconds: float,
+) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        process.poll()  # Reap the session leader as soon as it exits.
+        remaining = any(_process_exists(pid) for pid in members)
+        if not _process_group_exists(process_group) and not remaining:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+
+
+def _terminate(
+    process: subprocess.Popen,
+    members: set[int] | None = None,
+    grace_seconds: float = 1.0,
+) -> bool:
+    process_group = process.pid
+    observed = set(members or ())
+    observed.add(process.pid)
+    _signal_process_tree(process_group, observed, signal.SIGTERM)
+    if _wait_for_process_tree(process, process_group, observed, grace_seconds):
+        return True
+    _signal_process_tree(process_group, observed, signal.SIGKILL)
+    if process.poll() is None:
+        try:
+            process.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+    return _wait_for_process_tree(process, process_group, observed, grace_seconds)
 
 
 def measure_command(
@@ -286,14 +348,17 @@ def measure_command(
         start_new_session=True,
     )
     timed_out = False
+    termination_complete: bool | None = None
+    observed_members: set[int] = {process.pid}
     while True:
         elapsed = time.monotonic() - started
         observations.add(memory_sampler.sample(process.pid, elapsed))
+        observed_members.update(getattr(memory_sampler, "last_members", ()))
         if process.poll() is not None:
             break
         if timeout_seconds is not None and elapsed >= timeout_seconds:
             timed_out = True
-            _terminate(process)
+            termination_complete = _terminate(process, observed_members)
             break
         sleep_for = interval_seconds
         if timeout_seconds is not None:
@@ -308,6 +373,7 @@ def measure_command(
         "wall_seconds": round(duration, 6),
         "exit_code": exit_code,
         "timed_out": timed_out,
+        "termination_complete": termination_complete,
         "command": command_record,
         "sampling": {
             "interval_seconds": interval_seconds,

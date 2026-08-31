@@ -2,8 +2,8 @@
 
 OmaSheets does not yet claim a production memory or large-workbook profile.
 The dependency-free harness in `scripts/performance.py` establishes a
-repeatable baseline without adding anything to the installed v0.0.1 runtime.
-It runs on Linux using only Python's standard library.
+repeatable baseline without adding a third-party runtime dependency or resident
+process. It runs on Linux using only Python's standard library.
 
 ## What is measured
 
@@ -34,13 +34,18 @@ whether the run was cold or warm beside any published result.
 ```bash
 python3 scripts/performance.py run \
   --name native-idle-small \
-  --timeout 10 \
+  --timeout 15 \
   --output /tmp/native-idle-small.json \
-  -- ~/.local/lib/omasheets/bin/omasheets-window /tmp/small.fods
+  -- ~/.local/share/omasheets/app/bin/omasheets-window \
+    --smoke-test /tmp/native-idle-small.png /tmp/small.fods
 ```
 
-The timeout terminates only the isolated command process group. A non-zero exit
-or timeout makes the script fail while still writing the bounded report.
+The smoke window exits after capturing its first useful render; run it from a
+graphical session (or under Xvfb in CI). The timeout terminates only the
+isolated command tree observed by the sampler, including descendants that
+create another process group or session. The report records whether termination
+completed. A non-zero exit or timeout makes the script fail while still writing
+the bounded report.
 
 ## Truthful deterministic fixtures
 
@@ -93,11 +98,12 @@ limit applies to the complete used range:
 
 The compiler-free production-install job generates all three `ci` FODS
 sources, converts them to XLSX with the job's installed LibreOffice, and runs
-`analyze_workbook` on `dense-ci.xlsx` through the installed `omasheets`
-launcher. The harness measures the launcher, Bubblewrap boundary, Python/UNO
-worker, and LibreOffice descendants as one foreground tree. It fails the job
-unless the command exits successfully without timing out and Linux supplies
-non-null positive peak RSS, PSS, and USS plus at least two observed processes.
+`analyze_workbook` on the dense, sparse, and formula workbooks through the
+installed `omasheets` launcher. The harness measures the launcher, Bubblewrap
+boundary, Python/UNO worker, and LibreOffice descendants as one foreground
+tree. It fails the job unless each command exits successfully without timing
+out and Linux supplies non-null positive peak RSS, PSS, and USS plus at least
+two observed processes.
 
 The `omasheets-agent-performance-linux-x86_64` artifact contains the bounded
 measurement JSON and a fixture manifest. The manifest records deterministic
