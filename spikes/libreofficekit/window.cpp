@@ -9,12 +9,17 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
+#include <map>
 #include <mutex>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <stdexcept>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <unistd.h>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -31,11 +36,18 @@ struct WindowState {
     GtkWidget* zoom = nullptr;
     GtkWidget* spinner = nullptr;
     GtkWidget* save = nullptr;
+    GtkWidget* diff_button = nullptr;
+    GtkWidget* diff_revealer = nullptr;
+    GtkWidget* diff_summary = nullptr;
+    GtkWidget* diff_list = nullptr;
+    GtkWidget* diff_approve = nullptr;
     fs::path source;
     fs::path profile;
     fs::path smoke_screenshot;
     fs::path context_path;
     fs::path bridge_path;
+    fs::path diff_path;
+    fs::path cli_path;
     std::string session_id;
     int revision = 0;
     int sheet = 0;
@@ -53,10 +65,16 @@ struct WindowState {
     bool editable = false;
     guint visible_area_source = 0;
     guint context_source = 0;
+    guint diff_source = 0;
     unsigned visible_area_requests = 0;
     unsigned visible_area_updates = 0;
     unsigned scroll_events = 0;
     bool first_paint_seen = false;
+    std::string diff_plan_id;
+    unsigned diff_change_count = 0;
+    unsigned diff_operation_count = 0;
+    unsigned diff_destructive_count = 0;
+    bool diff_overlay_loaded = false;
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point loaded_at{};
     long load_ms = 0;
@@ -128,6 +146,112 @@ bool lowercase_hex(std::string_view value)
     return value.size() == 32 && std::all_of(value.begin(), value.end(), [](unsigned char character) {
         return std::isdigit(character) != 0 || (character >= 'a' && character <= 'f');
     });
+}
+
+struct DiffItem {
+    std::string kind;
+    std::string sheet;
+    std::string range;
+    std::string before;
+    std::string after;
+};
+
+struct DiffOverlay {
+    std::string plan_id;
+    std::string status;
+    unsigned operation_count = 0;
+    unsigned destructive_count = 0;
+    unsigned warning_count = 0;
+    unsigned total_changes = 0;
+    bool truncated = false;
+    std::vector<DiffItem> items;
+};
+
+std::vector<std::string> split_fields(const std::string& line)
+{
+    std::vector<std::string> fields;
+    std::size_t start = 0;
+    while (true) {
+        const std::size_t end = line.find('\t', start);
+        fields.push_back(line.substr(start, end == std::string::npos ? end : end - start));
+        if (end == std::string::npos)
+            return fields;
+        start = end + 1;
+    }
+}
+
+std::string percent_decode(const std::string& value)
+{
+    gchar* decoded = g_uri_unescape_string(value.c_str(), nullptr);
+    if (decoded == nullptr)
+        throw std::runtime_error("invalid diff field encoding");
+    std::string result(decoded);
+    g_free(decoded);
+    return result;
+}
+
+unsigned bounded_unsigned(const std::map<std::string, std::string>& metadata, const char* key, unsigned maximum)
+{
+    const auto found = metadata.find(key);
+    if (found == metadata.end() || found->second.empty()
+        || !std::all_of(found->second.begin(), found->second.end(), [](unsigned char character) { return std::isdigit(character) != 0; }))
+        throw std::runtime_error("invalid diff metadata");
+    const unsigned long parsed = std::stoul(found->second);
+    if (parsed > maximum)
+        throw std::runtime_error("diff metadata exceeds limit");
+    return static_cast<unsigned>(parsed);
+}
+
+DiffOverlay read_diff_overlay(WindowState* state)
+{
+    struct stat details{};
+    if (stat(state->diff_path.c_str(), &details) != 0 || !S_ISREG(details.st_mode)
+        || details.st_uid != getuid() || (details.st_mode & 0077) != 0
+        || details.st_size < 1 || details.st_size > 256 * 1024)
+        throw std::runtime_error("unsafe diff overlay file");
+    std::ifstream input(state->diff_path, std::ios::binary);
+    std::string payload((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    std::istringstream stream(payload);
+    std::string line;
+    if (!std::getline(stream, line) || line != "OMASHEETS_DIFF_V1")
+        throw std::runtime_error("unsupported diff overlay");
+    std::map<std::string, std::string> metadata;
+    DiffOverlay overlay;
+    while (std::getline(stream, line)) {
+        if (line.empty())
+            continue;
+        const auto fields = split_fields(line);
+        if (fields.size() == 3 && fields[0] == "meta") {
+            if (!metadata.emplace(fields[1], percent_decode(fields[2])).second)
+                throw std::runtime_error("duplicate diff metadata");
+        } else if (fields.size() == 6 && fields[0] == "item" && overlay.items.size() < 200) {
+            overlay.items.push_back({
+                percent_decode(fields[1]), percent_decode(fields[2]), percent_decode(fields[3]),
+                percent_decode(fields[4]), percent_decode(fields[5]),
+            });
+        } else {
+            throw std::runtime_error("malformed diff overlay");
+        }
+    }
+    const auto session = metadata.find("session_id");
+    const auto revision = metadata.find("revision");
+    const auto plan = metadata.find("plan_id");
+    const auto status = metadata.find("status");
+    const auto truncated = metadata.find("truncated");
+    if (metadata.size() != 9 || session == metadata.end() || session->second != state->session_id
+        || revision == metadata.end() || revision->second != std::to_string(state->revision)
+        || plan == metadata.end() || !lowercase_hex(plan->second)
+        || status == metadata.end() || status->second.size() > 32
+        || truncated == metadata.end() || (truncated->second != "true" && truncated->second != "false"))
+        throw std::runtime_error("diff overlay does not match this workbook session");
+    overlay.plan_id = plan->second;
+    overlay.status = status->second;
+    overlay.operation_count = bounded_unsigned(metadata, "operation_count", 100);
+    overlay.destructive_count = bounded_unsigned(metadata, "destructive_count", 100);
+    overlay.warning_count = bounded_unsigned(metadata, "warning_count", 1000);
+    overlay.total_changes = bounded_unsigned(metadata, "total_changes", 1'000'000);
+    overlay.truncated = truncated->second == "true";
+    return overlay;
 }
 
 void bridge_reply(GSocketConnection* connection, const std::string& response)
@@ -512,6 +636,10 @@ void on_destroy(GtkWidget*, gpointer data)
         g_source_remove(state->context_source);
         state->context_source = 0;
     }
+    if (state->diff_source != 0) {
+        g_source_remove(state->diff_source);
+        state->diff_source = 0;
+    }
     write_context_now(state);
     std::error_code ignored;
     if (!state->bridge_path.empty())
@@ -616,6 +744,8 @@ gboolean capture_smoke(gpointer data)
                   << ",\"engine\":\"libreofficekitgtk\",\"loaded\":true,\"parts\":"
                   << lok_doc_view_get_parts(LOK_DOC_VIEW(state->view))
                   << ",\"scrolling\":true,\"selection\":true,\"window_owned_by\":\"omasheets\""
+                  << ",\"diff_overlay\":" << (state->diff_overlay_loaded ? "true" : "false")
+                  << ",\"diff_change_count\":" << state->diff_change_count
                   << ",\"performance\":{\"load_ms\":" << state->load_ms
                   << ",\"first_paint_ms\":" << state->first_paint_ms
                   << ",\"first_paint_observed\":" << (state->first_paint_seen ? "true" : "false")
@@ -691,6 +821,180 @@ void on_opened(GObject* object, GAsyncResult* result, gpointer data)
     }
 }
 
+void destroy_child(GtkWidget* widget, gpointer)
+{
+    gtk_widget_destroy(widget);
+}
+
+GtkWidget* diff_text(const std::string& text, const char* style)
+{
+    GtkWidget* label = gtk_label_new(text.c_str());
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0F);
+    gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
+    gtk_label_set_line_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
+    gtk_label_set_max_width_chars(GTK_LABEL(label), 46);
+    gtk_label_set_selectable(GTK_LABEL(label), TRUE);
+    gtk_style_context_add_class(gtk_widget_get_style_context(label), style);
+    return label;
+}
+
+void show_diff_overlay(WindowState* state, const DiffOverlay& overlay)
+{
+    gtk_container_foreach(GTK_CONTAINER(state->diff_list), destroy_child, nullptr);
+    for (const DiffItem& item : overlay.items) {
+        GtkWidget* card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+        gtk_style_context_add_class(gtk_widget_get_style_context(card), "omasheets-diff-card");
+        const std::string location = item.sheet + " · " + item.range;
+        GtkWidget* title = diff_text(location, "omasheets-diff-location");
+        GtkWidget* before = diff_text("− " + item.before, "omasheets-diff-before");
+        GtkWidget* after = diff_text("+ " + item.after, "omasheets-diff-after");
+        gtk_widget_set_tooltip_text(title, item.kind.c_str());
+        gtk_box_pack_start(GTK_BOX(card), title, FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(card), before, FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(card), after, FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(state->diff_list), card, FALSE, FALSE, 0);
+    }
+    std::ostringstream summary;
+    summary << overlay.total_changes << (overlay.total_changes == 1 ? " verified change" : " verified changes")
+            << " from " << overlay.operation_count << (overlay.operation_count == 1 ? " operation" : " operations");
+    if (overlay.destructive_count != 0)
+        summary << " · " << overlay.destructive_count << " destructive";
+    if (overlay.warning_count != 0)
+        summary << " · " << overlay.warning_count << " warnings";
+    if (overlay.truncated)
+        summary << " · showing first 200";
+    gtk_label_set_text(GTK_LABEL(state->diff_summary), summary.str().c_str());
+    const std::string button = "Review " + std::to_string(overlay.total_changes) + " agent changes";
+    gtk_button_set_label(GTK_BUTTON(state->diff_button), button.c_str());
+    gtk_widget_show(state->diff_button);
+    gtk_widget_show_all(state->diff_list);
+    gtk_revealer_set_reveal_child(GTK_REVEALER(state->diff_revealer), TRUE);
+    state->diff_plan_id = overlay.plan_id;
+    state->diff_change_count = overlay.total_changes;
+    state->diff_operation_count = overlay.operation_count;
+    state->diff_destructive_count = overlay.destructive_count;
+    state->diff_overlay_loaded = true;
+    set_status(state, "Agent proposal ready — review overlay is read-only");
+}
+
+gboolean poll_diff_overlay(gpointer data)
+{
+    auto* state = static_cast<WindowState*>(data);
+    if (state->diff_path.empty())
+        return G_SOURCE_CONTINUE;
+    if (!fs::exists(state->diff_path)) {
+        if (state->diff_overlay_loaded) {
+            gtk_revealer_set_reveal_child(GTK_REVEALER(state->diff_revealer), FALSE);
+            gtk_widget_hide(state->diff_button);
+            state->diff_plan_id.clear();
+            state->diff_change_count = 0;
+            state->diff_operation_count = 0;
+            state->diff_destructive_count = 0;
+            state->diff_overlay_loaded = false;
+        }
+        return G_SOURCE_CONTINUE;
+    }
+    try {
+        const DiffOverlay overlay = read_diff_overlay(state);
+        if (!state->diff_overlay_loaded || overlay.plan_id != state->diff_plan_id)
+            show_diff_overlay(state, overlay);
+    } catch (const std::exception&) {
+        // An atomic replacement can be observed between stat and open. Invalid
+        // or foreign payloads remain invisible and are retried on the next tick.
+    }
+    return G_SOURCE_CONTINUE;
+}
+
+void on_diff_toggle(GtkButton*, gpointer data)
+{
+    auto* state = static_cast<WindowState*>(data);
+    const gboolean shown = gtk_revealer_get_reveal_child(GTK_REVEALER(state->diff_revealer));
+    gtk_revealer_set_reveal_child(GTK_REVEALER(state->diff_revealer), !shown);
+}
+
+void on_diff_dismiss(GtkButton*, gpointer data)
+{
+    auto* state = static_cast<WindowState*>(data);
+    gtk_revealer_set_reveal_child(GTK_REVEALER(state->diff_revealer), FALSE);
+    set_status(state, "Agent proposal hidden — workbook remains unchanged");
+}
+
+void on_diff_approve(GtkButton*, gpointer data)
+{
+    auto* state = static_cast<WindowState*>(data);
+    if (!state->diff_overlay_loaded || state->cli_path.empty())
+        return;
+    GtkWidget* chooser = gtk_file_chooser_dialog_new(
+        "Save the approved agent copy", GTK_WINDOW(state->window), GTK_FILE_CHOOSER_ACTION_SAVE,
+        "Cancel", GTK_RESPONSE_CANCEL, "Choose Copy", GTK_RESPONSE_ACCEPT, nullptr);
+    gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(chooser), FALSE);
+    const std::string suggested = state->source.stem().string() + "-agent-reviewed" + state->source.extension().string();
+    gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(chooser), suggested.c_str());
+    if (gtk_dialog_run(GTK_DIALOG(chooser)) != GTK_RESPONSE_ACCEPT) {
+        gtk_widget_destroy(chooser);
+        return;
+    }
+    gchar* selected = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(chooser));
+    const fs::path destination = selected != nullptr ? fs::path(selected) : fs::path();
+    g_free(selected);
+    gtk_widget_destroy(chooser);
+    if (destination.empty() || destination == state->source
+        || destination.extension() != state->source.extension() || fs::exists(destination)) {
+        GtkWidget* error = gtk_message_dialog_new(
+            GTK_WINDOW(state->window), GTK_DIALOG_MODAL, GTK_MESSAGE_WARNING, GTK_BUTTONS_CLOSE,
+            "Choose a new, unused %s file. The open workbook cannot be replaced.",
+            state->source.extension().string().c_str());
+        gtk_dialog_run(GTK_DIALOG(error));
+        gtk_widget_destroy(error);
+        return;
+    }
+    std::ostringstream detail;
+    detail << state->diff_change_count << " verified changes from " << state->diff_operation_count
+           << " operations will be written to a new workbook copy.";
+    if (state->diff_destructive_count != 0)
+        detail << " The proposal contains " << state->diff_destructive_count << " destructive operations.";
+    GtkWidget* confirmation = gtk_message_dialog_new(
+        GTK_WINDOW(state->window), GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE,
+        "Approve this agent proposal?");
+    gtk_message_dialog_format_secondary_text(
+        GTK_MESSAGE_DIALOG(confirmation), "%s\n\nThe open workbook remains unchanged.", detail.str().c_str());
+    gtk_dialog_add_button(GTK_DIALOG(confirmation), "Cancel", GTK_RESPONSE_CANCEL);
+    gtk_dialog_add_button(GTK_DIALOG(confirmation), "Approve & Save Copy", GTK_RESPONSE_ACCEPT);
+    const bool approved = gtk_dialog_run(GTK_DIALOG(confirmation)) == GTK_RESPONSE_ACCEPT;
+    gtk_widget_destroy(confirmation);
+    if (!approved)
+        return;
+    set_status(state, "Publishing verified agent copy…");
+    const std::string revision = std::to_string(state->revision);
+    const std::string target = destination.string();
+    gchar* arguments[] = {
+        const_cast<gchar*>(state->cli_path.c_str()), const_cast<gchar*>("plan"),
+        const_cast<gchar*>("publish-copy-native"), const_cast<gchar*>(state->diff_plan_id.c_str()),
+        const_cast<gchar*>("--revision"), const_cast<gchar*>(revision.c_str()),
+        const_cast<gchar*>("--destination"), const_cast<gchar*>(target.c_str()), nullptr,
+    };
+    GError* error = nullptr;
+    gint wait_status = 0;
+    const gboolean spawned = g_spawn_sync(
+        nullptr, arguments, nullptr,
+        static_cast<GSpawnFlags>(G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL),
+        nullptr, nullptr, nullptr, nullptr, &wait_status, &error);
+    const gboolean succeeded = spawned && g_spawn_check_wait_status(wait_status, &error);
+    if (succeeded) {
+        gtk_revealer_set_reveal_child(GTK_REVEALER(state->diff_revealer), FALSE);
+        set_status(state, "Approved agent proposal saved as a new copy");
+    } else {
+        GtkWidget* failure = gtk_message_dialog_new(
+            GTK_WINDOW(state->window), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
+            "The verified copy was not published");
+        gtk_message_dialog_format_secondary_text(
+            GTK_MESSAGE_DIALOG(failure), "%s", error != nullptr ? error->message : "OmaSheets rejected the review");
+        gtk_dialog_run(GTK_DIALOG(failure));
+        gtk_widget_destroy(failure);
+    }
+    g_clear_error(&error);
+}
+
 void apply_style()
 {
     const char* css =
@@ -700,6 +1004,14 @@ void apply_style()
         ".omasheets-formula { background: #0f1511; border-bottom: 1px solid #263129; padding: 6px; }"
         ".omasheets-address { color: #7ee2a8; font-weight: bold; min-width: 72px; }"
         ".omasheets-status { color: #9fb1a5; padding: 5px 10px; }"
+        ".omasheets-diff-panel { background: #111814; border-left: 1px solid #34453a; padding: 14px; }"
+        ".omasheets-diff-title { font-size: 18px; font-weight: bold; color: #f4f8f5; }"
+        ".omasheets-diff-summary { color: #aebdb3; padding-bottom: 8px; }"
+        ".omasheets-diff-card { background: #18221c; border: 1px solid #2b3a30; border-radius: 8px; padding: 10px; margin: 0 0 8px 0; }"
+        ".omasheets-diff-location { color: #dce7df; font-weight: bold; }"
+        ".omasheets-diff-before { color: #ef9a9a; background: #291718; padding: 4px 6px; }"
+        ".omasheets-diff-after { color: #8fe4ae; background: #102619; padding: 4px 6px; }"
+        ".omasheets-review-button { background: #275f3d; color: #f7fff9; font-weight: bold; }"
         "button { border-radius: 7px; }"
         "combobox button { background: #1a251e; color: #e7eee9; }";
     GtkCssProvider* provider = gtk_css_provider_new();
@@ -728,6 +1040,13 @@ GtkWidget* build_window(WindowState* state)
     gtk_widget_set_sensitive(state->save, FALSE);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header), state->save);
     g_signal_connect(state->save, "clicked", G_CALLBACK(on_save_copy), state);
+    state->diff_button = gtk_button_new_with_label("Review agent changes");
+    gtk_style_context_add_class(gtk_widget_get_style_context(state->diff_button), "omasheets-review-button");
+    gtk_widget_set_tooltip_text(state->diff_button, "Show the verified agent proposal without changing the workbook");
+    gtk_widget_set_no_show_all(state->diff_button, TRUE);
+    gtk_widget_hide(state->diff_button);
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(header), state->diff_button);
+    g_signal_connect(state->diff_button, "clicked", G_CALLBACK(on_diff_toggle), state);
     state->spinner = gtk_spinner_new();
     gtk_spinner_start(GTK_SPINNER(state->spinner));
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header), state->spinner);
@@ -783,7 +1102,47 @@ GtkWidget* build_window(WindowState* state)
     gtk_widget_set_hexpand(state->scroller, TRUE);
     gtk_widget_set_vexpand(state->scroller, TRUE);
     gtk_container_add(GTK_CONTAINER(state->scroller), state->view);
-    gtk_box_pack_start(GTK_BOX(root), state->scroller, TRUE, TRUE, 0);
+    GtkWidget* canvas = gtk_overlay_new();
+    gtk_container_add(GTK_CONTAINER(canvas), state->scroller);
+    state->diff_revealer = gtk_revealer_new();
+    gtk_revealer_set_transition_type(GTK_REVEALER(state->diff_revealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_LEFT);
+    gtk_revealer_set_transition_duration(GTK_REVEALER(state->diff_revealer), 180);
+    gtk_widget_set_halign(state->diff_revealer, GTK_ALIGN_END);
+    gtk_widget_set_valign(state->diff_revealer, GTK_ALIGN_FILL);
+    GtkWidget* diff_panel = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_size_request(diff_panel, 420, -1);
+    gtk_style_context_add_class(gtk_widget_get_style_context(diff_panel), "omasheets-diff-panel");
+    GtkWidget* diff_header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget* diff_title = gtk_label_new("Agent proposal");
+    gtk_label_set_xalign(GTK_LABEL(diff_title), 0.0F);
+    gtk_style_context_add_class(gtk_widget_get_style_context(diff_title), "omasheets-diff-title");
+    GtkWidget* diff_close = icon_button("window-close-symbolic", "Hide proposal");
+    gtk_box_pack_start(GTK_BOX(diff_header), diff_title, TRUE, TRUE, 0);
+    gtk_box_pack_end(GTK_BOX(diff_header), diff_close, FALSE, FALSE, 0);
+    state->diff_summary = gtk_label_new("No proposal");
+    gtk_label_set_xalign(GTK_LABEL(state->diff_summary), 0.0F);
+    gtk_label_set_line_wrap(GTK_LABEL(state->diff_summary), TRUE);
+    gtk_style_context_add_class(gtk_widget_get_style_context(state->diff_summary), "omasheets-diff-summary");
+    GtkWidget* diff_scroll = gtk_scrolled_window_new(nullptr, nullptr);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(diff_scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    state->diff_list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_container_add(GTK_CONTAINER(diff_scroll), state->diff_list);
+    gtk_box_pack_start(GTK_BOX(diff_panel), diff_header, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(diff_panel), state->diff_summary, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(diff_panel), diff_scroll, TRUE, TRUE, 0);
+    GtkWidget* boundary = gtk_label_new("Review only · the open workbook is unchanged");
+    gtk_label_set_xalign(GTK_LABEL(boundary), 0.0F);
+    gtk_style_context_add_class(gtk_widget_get_style_context(boundary), "omasheets-diff-summary");
+    state->diff_approve = gtk_button_new_with_label("Approve & Save a Copy…");
+    gtk_style_context_add_class(gtk_widget_get_style_context(state->diff_approve), "omasheets-review-button");
+    gtk_widget_set_tooltip_text(state->diff_approve, "Confirm and publish the verified proposal to a new workbook file");
+    gtk_box_pack_end(GTK_BOX(diff_panel), state->diff_approve, FALSE, FALSE, 0);
+    gtk_box_pack_end(GTK_BOX(diff_panel), boundary, FALSE, FALSE, 0);
+    gtk_container_add(GTK_CONTAINER(state->diff_revealer), diff_panel);
+    gtk_overlay_add_overlay(GTK_OVERLAY(canvas), state->diff_revealer);
+    gtk_box_pack_start(GTK_BOX(root), canvas, TRUE, TRUE, 0);
+    g_signal_connect(diff_close, "clicked", G_CALLBACK(on_diff_dismiss), state);
+    g_signal_connect(state->diff_approve, "clicked", G_CALLBACK(on_diff_approve), state);
 
     GtkWidget* footer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     state->sheets = gtk_combo_box_text_new();
@@ -837,6 +1196,10 @@ int main(int argc, char** argv)
             state.context_path = fs::absolute(argv[++index]);
         } else if (argument == "--bridge" && index + 1 < argc) {
             state.bridge_path = fs::absolute(argv[++index]);
+        } else if (argument == "--diff" && index + 1 < argc) {
+            state.diff_path = fs::absolute(argv[++index]);
+        } else if (argument == "--cli" && index + 1 < argc) {
+            state.cli_path = fs::absolute(argv[++index]);
         } else if (argument == "--session" && index + 1 < argc) {
             state.session_id = argv[++index];
         } else if (argument == "--revision" && index + 1 < argc) {
@@ -848,9 +1211,9 @@ int main(int argc, char** argv)
             break;
         }
     }
-    const bool any_context = !state.context_path.empty() || !state.bridge_path.empty() || !state.session_id.empty() || state.revision != 0;
-    if (source_index < 0 || (any_context && (state.context_path.empty() || state.bridge_path.empty() || !lowercase_hex(state.session_id) || state.revision < 1))) {
-        std::cerr << "usage: omasheets-window [--smoke-test SCREENSHOT.png] [--context FILE --bridge SOCKET --session ID --revision N] WORKBOOK\n";
+    const bool any_context = !state.context_path.empty() || !state.bridge_path.empty() || !state.diff_path.empty() || !state.cli_path.empty() || !state.session_id.empty() || state.revision != 0;
+    if (source_index < 0 || (any_context && (state.context_path.empty() || state.bridge_path.empty() || state.diff_path.empty() || state.cli_path.empty() || !lowercase_hex(state.session_id) || state.revision < 1))) {
+        std::cerr << "usage: omasheets-window [--smoke-test SCREENSHOT.png] [--context FILE --bridge SOCKET --diff OVERLAY --cli EXECUTABLE --session ID --revision N] WORKBOOK\n";
         return 2;
     }
     try {
@@ -858,6 +1221,8 @@ int main(int argc, char** argv)
         state.source = fs::canonical(argv[source_index]);
         if (!fs::is_regular_file(state.source) || !supported(state.source))
             throw std::runtime_error("input must be a regular .xls, .xlsx, .xlsm, or .ods workbook");
+        if (any_context && (!fs::is_regular_file(state.cli_path) || access(state.cli_path.c_str(), X_OK) != 0))
+            throw std::runtime_error("OmaSheets CLI executable was not found");
         std::string extension = state.source.extension().string();
         std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         state.editable = extension == ".xlsx" || extension == ".ods";
@@ -886,6 +1251,11 @@ int main(int argc, char** argv)
         stage = "window construction";
         GtkWidget* window = build_window(&state);
         gtk_widget_show_all(window);
+        gtk_revealer_set_reveal_child(GTK_REVEALER(state.diff_revealer), FALSE);
+        if (!state.diff_path.empty()) {
+            poll_diff_overlay(&state);
+            state.diff_source = g_timeout_add(200, poll_diff_overlay, &state);
+        }
         stage = "workbook URI";
         gchar* source_uri = g_filename_to_uri(state.source.c_str(), nullptr, &error);
         if (source_uri == nullptr)

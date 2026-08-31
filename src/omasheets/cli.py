@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 
 from . import __version__
 
@@ -47,6 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
     approve.add_argument("--revision", required=True, type=int)
     approve.add_argument("--replace", action="store_true")
     approve.add_argument("--destination", type=Path)
+    publish_copy = plan_commands.add_parser("publish-copy-native", help=argparse.SUPPRESS)
+    publish_copy.add_argument("plan_id")
+    publish_copy.add_argument("--revision", required=True, type=int)
+    publish_copy.add_argument("--destination", required=True, type=Path)
     undo = commands.add_parser("undo", help="Undo a replacement receipt locally")
     undo.add_argument("receipt_id")
     integrate = commands.add_parser("integrate", help="Manage user-local desktop and MIME integration")
@@ -85,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"pid": open_workbooks(paths), "opened": len(paths)}, sort_keys=True))
         return 0
     if arguments.command in {"window", "window-current"}:
+        from .diff_overlay import overlay_path
         from .native_window import open_window
         from .live_bridge import bridge_path
 
@@ -103,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
             session_id=session["session_id"],
             revision=session["revision"],
             bridge_path=bridge_path(service.paths),
+            diff_path=overlay_path(service.paths.runtime),
+            cli_path=Path(sys.argv[0]).resolve(),
         )
         print(json.dumps({"pid": pid, "session_id": session["session_id"], "window": "omasheets"}, sort_keys=True))
         return 0
@@ -148,6 +156,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(review, indent=2, sort_keys=True))
         supplied = input(f"Type {review['approval_token']} to publish: ")
         receipt = service.commit_local_review(arguments.plan_id, arguments.revision, supplied)
+        print(json.dumps(receipt, indent=2, sort_keys=True))
+        return 0
+    if arguments.command == "plan" and arguments.plan_command == "publish-copy-native":
+        service = _service()
+        receipt = service.commit_native_overlay(
+            arguments.plan_id, arguments.revision, arguments.destination,
+        )
         print(json.dumps(receipt, indent=2, sort_keys=True))
         return 0
     if arguments.command == "undo":

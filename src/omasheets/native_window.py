@@ -39,6 +39,8 @@ def open_window(
     session_id: str | None = None,
     revision: int | None = None,
     bridge_path: Path | None = None,
+    diff_path: Path | None = None,
+    cli_path: Path | None = None,
 ) -> int:
     source = path.expanduser().resolve(strict=True)
     workbook_format(source)
@@ -47,12 +49,16 @@ def open_window(
     if executable is None:
         raise EngineError("omasheets-window is not installed; see spikes/libreofficekit/README.md")
     argv = [str(executable)]
-    supplied = (context_path is not None, session_id is not None, revision is not None, bridge_path is not None)
+    supplied = (
+        context_path is not None, session_id is not None, revision is not None,
+        bridge_path is not None, diff_path is not None, cli_path is not None,
+    )
     if any(supplied) and not all(supplied):
-        raise EngineError("window context requires context, bridge, session and revision")
+        raise EngineError("window context requires context, bridge, diff, CLI, session and revision")
     if context_path is not None:
         argv.extend([
             "--context", str(context_path), "--bridge", str(bridge_path),
+            "--diff", str(diff_path), "--cli", str(cli_path),
             "--session", session_id, "--revision", str(revision),
         ])
     argv.append(str(source))
