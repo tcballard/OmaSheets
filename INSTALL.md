@@ -27,6 +27,8 @@ agent access:
 ```bash
 omasheets open ./book.xls
 omasheets select ./book.xlsx
+omasheets convert ./legacy-book.xls
+omasheets doctor
 ```
 
 The bar widget can open the selected workbook and display staged-plan status.
