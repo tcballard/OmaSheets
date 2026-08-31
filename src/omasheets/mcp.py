@@ -351,4 +351,3 @@ def serve_stdio(service: AgentService, stdin: TextIO = sys.stdin, stdout: TextIO
             stdout.write(json.dumps(response, separators=(",", ":")) + "\n")
             stdout.flush()
     return 0
-

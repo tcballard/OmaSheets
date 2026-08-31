@@ -38,4 +38,3 @@ def write_json_atomic(path: Path, value: dict[str, Any]) -> None:
             os.close(directory)
     finally:
         temporary.unlink(missing_ok=True)
-

@@ -25,4 +25,3 @@ class AppPaths:
         for directory in (self.state, self.cache, self.runtime):
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             directory.chmod(0o700)
-
