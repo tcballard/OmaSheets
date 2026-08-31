@@ -60,11 +60,14 @@ omasheets --version
 desktop integration and the Omarchy plugin. Restart or refresh Codex after the
 first installation so it discovers the new personal plugin and MCP server.
 
-Open or select a workbook, then choose **Ask Codex** from either the native
-window header or Omarchy bar. This starts Codex with a fixed path-free prompt;
-the installed OmaSheets plugin reads the workbook session and live selection
-through MCP. If Codex is not on `PATH`, the native window reports that the
-agent entry point is unavailable while spreadsheet editing remains functional.
+Open or select a workbook, then choose **Ask Agent** from either the native
+window header or Omarchy bar. OmaSheets passes a fixed path-free prompt to
+`omarchy agent prompt`, which launches the default agent selected in Omarchy.
+The Codex plugin supplies native MCP discovery when Codex is that default; other
+agents can use their own MCP configuration or the prompt's provider-neutral
+`omasheets agent-session` JSON command bridge. If the Omarchy launcher is not
+on `PATH`, the command reports that the agent entry point is unavailable while
+spreadsheet editing remains functional.
 
 ## Removal
 

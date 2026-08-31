@@ -156,14 +156,14 @@ class OmaSheetsService:
             "local_review_required": True,
         }
 
-    def agent_context_resource(self) -> dict[str, Any]:
+    def agent_session_resource(self) -> dict[str, Any]:
         """Give a newly opened agent a path-free, selection-aware starting point."""
 
         current = self.current_resource()
         if not current.get("selected"):
             return {
                 "ready": False,
-                "instruction": "Select a workbook locally in OmaSheets before starting an agent workflow.",
+                "instruction": "Select a workbook locally in OmaSheets before starting an agent session.",
                 "agent_publish_authority": False,
             }
         window = self.window_context_resource()

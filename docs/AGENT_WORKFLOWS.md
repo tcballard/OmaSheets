@@ -4,7 +4,8 @@ OmaSheets treats an agent run as a reviewable workbook workflow, not a chat box
 with ambient write access.
 
 The person opens or selects a workbook, focuses a cell or range, and starts
-**Ask Codex**. The agent reads `omasheets://agent`, inspects only the workbook
+**Ask Agent**. Omarchy launches the user's configured default agent for an
+agent session. The agent reads `omasheets://session`, inspects only the workbook
 regions needed for the goal, and retains the sealed `evidence_id` from each
 read. A proposal must include:
 

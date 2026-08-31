@@ -82,6 +82,11 @@ closed. A clearly labelled development override may exist for tests only.
 - No custom verification scripts run inside the sandbox in v0.0.1.
 - Worker failures expose only the bounded structured error written to the
   private job result; process stderr and the inherited environment remain hidden.
-- Starting Codex is an explicit local UI action. The fixed entry prompt contains
-  no workbook path or cell content; Codex still has the authority of the local
-  user account and is outside Calc's networkless worker sandbox.
+- Starting an agent session is an explicit local UI action. OmaSheets passes a
+  fixed prompt to `omarchy agent prompt`, so Omarchy—not OmaSheets—selects the
+  configured default agent. The prompt contains no workbook path or cell
+  content; the selected agent still has the authority of the local user account
+  and is outside Calc's networkless worker sandbox.
+- The provider-neutral `agent-session` command bridge validates calls against
+  the same allowlisted schemas as MCP. It exposes no approval, commit, replace,
+  copy-publication or undo operation.
