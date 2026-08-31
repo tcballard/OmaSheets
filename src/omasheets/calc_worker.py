@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -111,7 +112,30 @@ def _used_range(sheet):
     return address, sheet.getCellRangeByPosition(0, 0, address.EndColumn, address.EndRow)
 
 
-def _formula_errors(sheet_name: str, area, formulas, values, limit: int) -> list[dict[str, Any]]:
+def _bounded_sheet_ranges(document, limits: dict[str, int]):
+    """Resolve used ranges and enforce workbook limits before materializing cells."""
+
+    sheets = document.getSheets()
+    names = list(sheets.getElementNames())
+    if len(names) > limits["max_sheets"]:
+        raise RuntimeError("workbook exceeds the sheet limit")
+    ranges = []
+    total_cells = 0
+    for name in names:
+        sheet = sheets.getByName(name)
+        address, area = _used_range(sheet)
+        rows = address.EndRow + 1
+        columns = address.EndColumn + 1
+        total_cells += rows * columns
+        if total_cells > limits["max_cells"]:
+            raise RuntimeError("workbook exceeds the inspected-cell limit")
+        ranges.append((name, sheet, address, area, rows, columns))
+    return ranges, total_cells
+
+
+def _formula_errors(sheet_name: str, area, formulas, limit: int) -> list[dict[str, Any]]:
+    if limit <= 0:
+        return []
     errors = []
     for row_index, row in enumerate(formulas):
         for column_index, formula in enumerate(row):
@@ -151,30 +175,18 @@ def _named_ranges(document, limit: int) -> dict[str, Any]:
 
 
 def _inspect(document, limits: dict[str, int], *, include_formulas: bool) -> dict[str, Any]:
-    sheets = document.getSheets()
-    names = list(sheets.getElementNames())
-    if len(names) > limits["max_sheets"]:
-        raise RuntimeError("workbook exceeds the sheet limit")
+    sheet_ranges, total_cells = _bounded_sheet_ranges(document, limits)
     result_sheets = []
     formula_records = []
     errors = []
-    total_cells = 0
     formula_count = 0
-    for name in names:
-        sheet = sheets.getByName(name)
-        address, area = _used_range(sheet)
-        rows = address.EndRow + 1
-        columns = address.EndColumn + 1
-        total_cells += rows * columns
-        if total_cells > limits["max_cells"]:
-            raise RuntimeError("workbook exceeds the inspected-cell limit")
+    for name, _sheet, _address, area, rows, columns in sheet_ranges:
         formulas = area.getFormulaArray()
-        values = area.getDataArray()
         sheet_formula_count = sum(1 for row in formulas for formula in row if str(formula).startswith("="))
         formula_count += sheet_formula_count
         if formula_count > limits["max_formulas"]:
             raise RuntimeError("workbook exceeds the formula limit")
-        errors.extend(_formula_errors(name, area, formulas, values, limits["max_results"] - len(errors)))
+        errors.extend(_formula_errors(name, area, formulas, limits["max_results"] - len(errors)))
         if include_formulas:
             for row_index, row in enumerate(formulas):
                 for column_index, formula in enumerate(row):
@@ -340,7 +352,7 @@ def _analyze(document, arguments: dict[str, Any], limits: dict[str, int]) -> dic
 
     maximum = min(int(arguments.get("max_findings", 50)), 100)
     focus = arguments.get("focus", "all")
-    inspection = _inspect(document, limits, include_formulas=False)
+    sheet_ranges, inspected_cells = _bounded_sheet_ranges(document, limits)
     findings: list[dict[str, Any]] = []
     finding_total = 0
     profiles = []
@@ -355,12 +367,13 @@ def _analyze(document, arguments: dict[str, Any], limits: dict[str, int]) -> dic
             })
 
     total_rows = 0
-    for sheet_info in inspection["sheets"]:
-        name = sheet_info["name"]
-        sheet = document.getSheets().getByName(name)
-        address, area = _used_range(sheet)
-        values = [list(row) for row in area.getDataArray()]
-        formulas = [list(row) for row in area.getFormulaArray()]
+    formula_count = 0
+    formula_errors: list[dict[str, Any]] = []
+    for name, _sheet, _address, area, _bounded_rows, _bounded_columns in sheet_ranges:
+        # UNO has already materialized these matrices. Keep them in their
+        # immutable tuple form and derive every audit statistic in one pass.
+        values = area.getDataArray()
+        formulas = area.getFormulaArray()
         rows = len(values)
         columns = len(values[0]) if values else 0
         total_rows += max(rows - 1, 0)
@@ -368,54 +381,123 @@ def _analyze(document, arguments: dict[str, Any], limits: dict[str, int]) -> dic
         if rows > 1 and any(not header for header in headers):
             blanks = [_column_name(index) for index, header in enumerate(headers) if not header]
             add("warning", "missing_header", name, f"A1:{_column_name(columns - 1)}1", "The table has blank header cells.", {"blank_columns": blanks[:20]})
-        normalized_headers = [header.casefold() for header in headers if header]
-        duplicates = sorted({header for header in normalized_headers if normalized_headers.count(header) > 1})
+        header_counts: dict[str, int] = {}
+        for header in headers:
+            if header:
+                normalized = header.casefold()
+                header_counts[normalized] = header_counts.get(normalized, 0) + 1
+        duplicates = sorted(header for header, count in header_counts.items() if count > 1)
         if duplicates:
             add("warning", "duplicate_header", name, f"A1:{_column_name(columns - 1)}1", "The table has duplicate column names.", {"headers": duplicates[:20]})
 
-        seen_rows: dict[str, int] = {}
+        check_duplicates = focus in ("all", "quality")
+        seen_rows: dict[bytes, int] = {}
         duplicate_examples = []
         duplicate_count = 0
-        for row_index, row in enumerate(values[1:], start=2):
-            key = json.dumps(row, sort_keys=True, default=str)
-            if any(value not in ("", None) for value in row):
+        column_stats = [{
+            "populated": 0,
+            "blanks": 0,
+            "distinct": set(),
+            "numeric": [],
+            "numeric_sum": 0.0,
+            "numeric_min": None,
+            "numeric_max": None,
+            "formula_cells": 0,
+        } for _ in range(columns)]
+        for row_offset, (value_row, formula_row) in enumerate(zip(values, formulas)):
+            is_data_row = row_offset > 0
+            has_data = False
+            for column, (value, raw_formula) in enumerate(zip(value_row, formula_row)):
+                formula = str(raw_formula)
+                if formula.startswith("="):
+                    formula_count += 1
+                    if formula_count > limits["max_formulas"]:
+                        raise RuntimeError("workbook exceeds the formula limit")
+                    if is_data_row:
+                        column_stats[column]["formula_cells"] += 1
+                    if len(formula_errors) < limits["max_results"]:
+                        cell = area.getCellByPosition(column, row_offset)
+                        code = int(cell.getError())
+                        displayed = str(cell.getString())
+                        if code or displayed.startswith("#"):
+                            formula_errors.append({
+                                "sheet": name,
+                                "row": row_offset + 1,
+                                "column": column + 1,
+                                "formula": formula,
+                                "error_code": code,
+                                "displayed": displayed,
+                            })
+                if not is_data_row:
+                    continue
+                stats = column_stats[column]
+                if value in ("", None):
+                    stats["blanks"] += 1
+                    continue
+                has_data = True
+                stats["populated"] += 1
+                if stats["populated"] <= 10_000:
+                    stats["distinct"].add(str(value))
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    number = float(value)
+                    if math.isfinite(number):
+                        if not stats["numeric"]:
+                            stats["numeric_min"] = number
+                            stats["numeric_max"] = number
+                        else:
+                            if number < stats["numeric_min"]:
+                                stats["numeric_min"] = number
+                            # The old stable sort selected the last of equal
+                            # maxima, which matters only for signed zero.
+                            if number >= stats["numeric_max"]:
+                                stats["numeric_max"] = number
+                        stats["numeric"].append(number)
+                        stats["numeric_sum"] += number
+            if check_duplicates and has_data:
+                # Retaining a fixed-size digest avoids holding a second,
+                # serialized copy of every distinct row for duplicate checks.
+                serialized = json.dumps(value_row, sort_keys=True, default=str, separators=(",", ":"))
+                key = hashlib.sha256(serialized.encode("utf-8")).digest()
+                row_number = row_offset + 1
                 if key in seen_rows:
                     duplicate_count += 1
                     if len(duplicate_examples) < 10:
-                        duplicate_examples.append({"row": row_index, "matches_row": seen_rows[key]})
+                        duplicate_examples.append({"row": row_number, "matches_row": seen_rows[key]})
                 else:
-                    seen_rows[key] = row_index
-        if duplicate_examples and focus in ("all", "quality"):
+                    seen_rows[key] = row_number
+        if duplicate_examples and check_duplicates:
             add("warning", "duplicate_rows", name, f"A1:{_column_name(columns - 1)}{rows}", "Duplicate data rows may distort totals.", {"duplicate_count": duplicate_count, "examples": duplicate_examples})
 
         column_profiles = []
-        for column in range(columns):
-            data = [row[column] for row in values[1:]]
-            populated = [value for value in data if value not in ("", None)]
-            numeric = [float(value) for value in populated if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))]
-            blank_count = len(data) - len(populated)
+        data_row_count = max(rows - 1, 0)
+        for column, stats in enumerate(column_stats):
+            numeric = stats["numeric"]
+            blank_count = stats["blanks"]
             header = headers[column] or f"Column {_column_name(column)}"
             profile: dict[str, Any] = {
-                "column": _column_name(column), "header": header, "populated": len(populated),
-                "blanks": blank_count, "distinct": len({str(value) for value in populated[:10_000]}),
-                "numeric": len(numeric), "formula_cells": sum(1 for row in formulas[1:] if str(row[column]).startswith("=")),
+                "column": _column_name(column), "header": header, "populated": stats["populated"],
+                "blanks": blank_count, "distinct": len(stats["distinct"]),
+                "numeric": len(numeric), "formula_cells": stats["formula_cells"],
             }
             if numeric:
-                ordered = sorted(numeric)
-                profile.update({"min": ordered[0], "max": ordered[-1], "sum": sum(numeric), "mean": sum(numeric) / len(numeric)})
-                if len(ordered) >= 8:
+                profile.update({
+                    "min": stats["numeric_min"], "max": stats["numeric_max"],
+                    "sum": stats["numeric_sum"], "mean": stats["numeric_sum"] / len(numeric),
+                })
+                if len(numeric) >= 8 and focus in ("all", "quality", "management"):
+                    ordered = sorted(numeric)
                     q1 = ordered[len(ordered) // 4]
                     q3 = ordered[(len(ordered) * 3) // 4]
                     low, high = q1 - 1.5 * (q3 - q1), q3 + 1.5 * (q3 - q1)
                     outliers = [value for value in numeric if value < low or value > high]
-                    if outliers and focus in ("all", "quality", "management"):
+                    if outliers:
                         add("notice", "numeric_outliers", name, f"{_column_name(column)}2:{_column_name(column)}{rows}", f"{header} contains values outside the IQR range.", {"count": len(outliers), "low": low, "high": high, "examples": outliers[:5]})
-            if data and blank_count / len(data) >= 0.25 and focus in ("all", "quality"):
-                add("notice", "sparse_column", name, f"{_column_name(column)}2:{_column_name(column)}{rows}", f"{header} is at least 25% blank.", {"blank_count": blank_count, "row_count": len(data)})
+            if data_row_count and blank_count / data_row_count >= 0.25 and focus in ("all", "quality"):
+                add("notice", "sparse_column", name, f"{_column_name(column)}2:{_column_name(column)}{rows}", f"{header} is at least 25% blank.", {"blank_count": blank_count, "row_count": data_row_count})
             column_profiles.append(profile)
         profiles.append({"sheet": name, "table_range": f"A1:{_column_name(max(columns - 1, 0))}{max(rows, 1)}", "headers": headers, "columns": column_profiles})
 
-    for error in inspection["formula_errors"]:
+    for error in formula_errors:
         add("error", "formula_error", error["sheet"], f"{_column_name(error['column'] - 1)}{error['row']}", "A formula currently evaluates to an error.", {"displayed": error["displayed"], "error_code": error["error_code"]})
     objects = _object_inventory(document)
     opportunities = []
@@ -431,9 +513,9 @@ def _analyze(document, arguments: dict[str, Any], limits: dict[str, int]) -> dic
     return {
         "focus": focus,
         "summary": {
-            "sheet_count": inspection["sheet_count"], "inspected_cells": inspection["inspected_cells"],
-            "data_rows": total_rows, "formula_count": inspection["formula_count"],
-            "formula_error_count": len(inspection["formula_errors"]), "finding_count": len(findings),
+            "sheet_count": len(sheet_ranges), "inspected_cells": inspected_cells,
+            "data_rows": total_rows, "formula_count": formula_count,
+            "formula_error_count": len(formula_errors), "finding_count": len(findings),
             "finding_total": finding_total, "truncated": finding_total > len(findings),
         },
         "sheets": profiles, "findings": findings, "objects": objects,
@@ -509,9 +591,11 @@ def _search(document, arguments: dict[str, Any], limits: dict[str, int]) -> dict
     scope = arguments.get("scope", "both")
     maximum = min(arguments.get("max_results", 50), limits["max_results"])
     matches = []
-    for sheet_name in document.getSheets().getElementNames():
-        sheet = document.getSheets().getByName(sheet_name)
-        address, area = _used_range(sheet)
+    # Preflight every used range before UNO materializes even the first cell
+    # matrix. A later oversized sheet must not make search partially consume an
+    # otherwise over-budget workbook.
+    sheet_ranges, _total_cells = _bounded_sheet_ranges(document, limits)
+    for sheet_name, _sheet, address, area, _rows, _columns in sheet_ranges:
         values = area.getDataArray()
         formulas = area.getFormulaArray()
         for row in range(address.EndRow + 1):

@@ -5,16 +5,19 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from omasheets.calc_worker import (
+    _analyze,
     _apply,
     _column_index,
     _color,
     _fill_direction,
+    _inspect,
     _matrix_values,
     _named_ranges,
     _object_fingerprints,
     _style_color,
     _style_table,
     _startup_diagnostic,
+    _search,
     _target_fingerprints,
 )
 
@@ -181,7 +184,257 @@ class FakeLegacyNamedDocument:
         return FakeNamedRanges()
 
 
+class CountingArea:
+    def __init__(self, values, formulas=None, *, cell_errors=None, cell_strings=None):
+        self.values = tuple(tuple(row) for row in values)
+        self.formulas = tuple(tuple(row) for row in (formulas or values))
+        self.cell_errors = dict(cell_errors or {})
+        self.cell_strings = dict(cell_strings or {})
+        self.data_reads = 0
+        self.formula_reads = 0
+
+    def getDataArray(self):
+        self.data_reads += 1
+        return self.values
+
+    def getFormulaArray(self):
+        self.formula_reads += 1
+        return self.formulas
+
+    def getCellByPosition(self, column, row):
+        value = self.values[row][column]
+        key = (column, row)
+        return SimpleNamespace(
+            getError=lambda: self.cell_errors.get(key, 0),
+            getString=lambda: self.cell_strings.get(key, str(value)),
+        )
+
+
+class CountingSheet:
+    def __init__(self, area, rows, columns):
+        self.area = area
+        self.address = SimpleNamespace(EndRow=rows - 1, EndColumn=columns - 1)
+
+    def createCursor(self):
+        address = self.address
+        return SimpleNamespace(gotoEndOfUsedArea=lambda expand: None, getRangeAddress=lambda: address)
+
+    def getCellRangeByPosition(self, start_column, start_row, end_column, end_row):
+        self.requested_range = (start_column, start_row, end_column, end_row)
+        return self.area
+
+    def getCharts(self):
+        return SimpleNamespace(getElementNames=lambda: ())
+
+    def getDataPilotTables(self):
+        return SimpleNamespace(getElementNames=lambda: ())
+
+
+class CountingWorkbook:
+    NamedRanges = FakeNamedRanges()
+
+    def __init__(self, items):
+        self.items = dict(items)
+        self.sheets = SimpleNamespace(
+            getElementNames=lambda: tuple(self.items),
+            getByName=lambda name: self.items[name],
+        )
+
+    def getSheets(self):
+        return self.sheets
+
+
 class CalcWorkerTests(unittest.TestCase):
+    def test_inspect_reads_only_formulas_and_preserves_formula_errors(self):
+        area = CountingArea(
+            (("Metric",), ("#DIV/0!",)),
+            (("Metric",), ("=1/0",)),
+            cell_errors={(0, 1): 532},
+            cell_strings={(0, 1): "#DIV/0!"},
+        )
+        document = CountingWorkbook({"Data": CountingSheet(area, rows=2, columns=1)})
+        limits = {"max_sheets": 10, "max_cells": 10, "max_formulas": 10, "max_results": 10}
+
+        result = _inspect(document, limits, include_formulas=False)
+
+        self.assertEqual((area.data_reads, area.formula_reads), (0, 1))
+        self.assertEqual(result["formula_count"], 1)
+        self.assertEqual(result["formula_errors"], [{
+            "sheet": "Data", "row": 2, "column": 1, "formula": "=1/0",
+            "error_code": 532, "displayed": "#DIV/0!",
+        }])
+
+    def test_analyze_preserves_formula_error_profiles_and_enforces_formula_limit(self):
+        first = CountingArea(
+            (("Metric",), ("#DIV/0!",)),
+            (("Metric",), ("=1/0",)),
+            cell_errors={(0, 1): 532},
+            cell_strings={(0, 1): "#DIV/0!"},
+        )
+        document = CountingWorkbook({"Data": CountingSheet(first, rows=2, columns=1)})
+        limits = {"max_sheets": 10, "max_cells": 10, "max_formulas": 1, "max_results": 10}
+
+        result = _analyze(document, {"focus": "all", "max_findings": 50}, limits)
+
+        self.assertEqual(result["summary"]["formula_count"], 1)
+        self.assertEqual(result["summary"]["formula_error_count"], 1)
+        self.assertEqual(result["sheets"][0]["columns"][0]["formula_cells"], 1)
+        formula_findings = [item for item in result["findings"] if item["category"] == "formula_error"]
+        self.assertEqual(len(formula_findings), 1)
+        self.assertEqual(formula_findings[0]["range"], "A2")
+        self.assertEqual(formula_findings[0]["metrics"], {"displayed": "#DIV/0!", "error_code": 532})
+
+        second = CountingArea((("Other",), (2.0,)), (("Other",), ("=1+1",)))
+        over_limit = CountingWorkbook({
+            "Data": CountingSheet(first, rows=2, columns=1),
+            "Other": CountingSheet(second, rows=2, columns=1),
+        })
+        with self.assertRaisesRegex(RuntimeError, "formula limit"):
+            _analyze(over_limit, {"focus": "all", "max_findings": 50}, limits)
+
+    def test_management_focus_keeps_numeric_outliers_but_gates_quality_findings(self):
+        values = (("Amount",),) + tuple((value,) for value in (1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 100.0))
+        area = CountingArea(values)
+        document = CountingWorkbook({"Data": CountingSheet(area, rows=len(values), columns=1)})
+        limits = {"max_sheets": 10, "max_cells": 100, "max_formulas": 10, "max_results": 10}
+
+        result = _analyze(document, {"focus": "management", "max_findings": 50}, limits)
+
+        self.assertEqual([item["category"] for item in result["findings"]], ["numeric_outliers"])
+        self.assertEqual(result["findings"][0]["metrics"], {
+            "count": 1, "low": 1.0, "high": 1.0, "examples": [100.0],
+        })
+        self.assertEqual(result["sheets"][0]["columns"][0]["sum"], 107.0)
+
+    def test_duplicate_headers_are_trimmed_and_casefolded(self):
+        area = CountingArea(((" Revenue ", "revenue"),))
+        document = CountingWorkbook({"Data": CountingSheet(area, rows=1, columns=2)})
+        limits = {"max_sheets": 10, "max_cells": 10, "max_formulas": 10, "max_results": 10}
+
+        result = _analyze(document, {"focus": "all", "max_findings": 50}, limits)
+
+        duplicate = [item for item in result["findings"] if item["category"] == "duplicate_header"]
+        self.assertEqual(len(duplicate), 1)
+        self.assertEqual(duplicate[0]["metrics"], {"headers": ["revenue"]})
+
+    def test_distinct_profile_samples_only_the_first_ten_thousand_populated_cells(self):
+        values = (("Identifier",),) + tuple((f"id-{index}",) for index in range(10_001))
+        area = CountingArea(values)
+        document = CountingWorkbook({"Data": CountingSheet(area, rows=len(values), columns=1)})
+        limits = {"max_sheets": 10, "max_cells": 20_000, "max_formulas": 10, "max_results": 10}
+
+        result = _analyze(document, {"focus": "management", "max_findings": 50}, limits)
+
+        profile = result["sheets"][0]["columns"][0]
+        self.assertEqual(profile["populated"], 10_001)
+        self.assertEqual(profile["distinct"], 10_000)
+
+    def test_search_rejects_an_over_budget_workbook_before_materializing_any_cells(self):
+        first = CountingArea((("needle", ""),))
+        second = CountingArea((("", "", ""),))
+        document = CountingWorkbook({
+            "First": CountingSheet(first, rows=1, columns=2),
+            "Second": CountingSheet(second, rows=1, columns=3),
+        })
+        limits = {"max_sheets": 10, "max_cells": 4, "max_results": 20}
+
+        with self.assertRaisesRegex(RuntimeError, "inspected-cell limit"):
+            _search(document, {"query": "needle", "scope": "both"}, limits)
+
+        self.assertEqual((first.data_reads, first.formula_reads), (0, 0))
+        self.assertEqual((second.data_reads, second.formula_reads), (0, 0))
+
+    def test_search_enforces_sheet_limit_before_reads_and_accepts_exact_cell_budget(self):
+        first = CountingArea((("needle", ""),))
+        second = CountingArea((("", "", ""),))
+        document = CountingWorkbook({
+            "First": CountingSheet(first, rows=1, columns=2),
+            "Second": CountingSheet(second, rows=1, columns=3),
+        })
+
+        with self.assertRaisesRegex(RuntimeError, "sheet limit"):
+            _search(document, {"query": "needle", "scope": "both"}, {
+                "max_sheets": 1, "max_cells": 5, "max_results": 20,
+            })
+        self.assertEqual((first.data_reads, second.data_reads), (0, 0))
+
+        result = _search(document, {"query": "needle", "scope": "both"}, {
+            "max_sheets": 2, "max_cells": 5, "max_results": 20,
+        })
+        self.assertFalse(result["truncated"])
+        self.assertEqual(result["matches"][0]["sheet"], "First")
+        self.assertEqual((first.data_reads, second.data_reads), (1, 1))
+
+    def test_search_returns_deterministic_matches_and_truncates_at_result_limit(self):
+        area = CountingArea(
+            (("Needle one", "plain"), ("needle two", "value")),
+            (("Needle one", "=\"needle formula\""), ("needle two", "value")),
+        )
+        document = CountingWorkbook({"Data": CountingSheet(area, rows=2, columns=2)})
+
+        result = _search(document, {"query": "NEEDLE", "scope": "both", "max_results": 2}, {
+            "max_sheets": 1, "max_cells": 4, "max_results": 10,
+        })
+
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["matches"], [
+            {"sheet": "Data", "row": 1, "column": 1, "value": "Needle one", "formula": None},
+            {"sheet": "Data", "row": 1, "column": 2, "value": "plain", "formula": "=\"needle formula\""},
+        ])
+
+    def test_analyze_materializes_each_sheet_once_and_preserves_profile_findings(self):
+        area = CountingArea(
+            (
+                ("Region", "Revenue"),
+                ("North", 10.0),
+                ("North", 10.0),
+                ("South", ""),
+            ),
+            (
+                ("Region", "Revenue"),
+                ("North", "10"),
+                ("North", "10"),
+                ("South", ""),
+            ),
+        )
+        document = CountingWorkbook({"Data": CountingSheet(area, rows=4, columns=2)})
+        limits = {"max_sheets": 10, "max_cells": 100, "max_formulas": 20, "max_results": 20}
+
+        result = _analyze(document, {"focus": "all", "max_findings": 50}, limits)
+
+        self.assertEqual((area.data_reads, area.formula_reads), (1, 1))
+        self.assertEqual(result["summary"], {
+            "sheet_count": 1,
+            "inspected_cells": 8,
+            "data_rows": 3,
+            "formula_count": 0,
+            "formula_error_count": 0,
+            "finding_count": 2,
+            "finding_total": 2,
+            "truncated": False,
+        })
+        self.assertEqual(
+            [finding["category"] for finding in result["findings"]],
+            ["duplicate_rows", "sparse_column"],
+        )
+        self.assertEqual(result["findings"][0]["metrics"], {
+            "duplicate_count": 1,
+            "examples": [{"row": 3, "matches_row": 2}],
+        })
+        self.assertEqual(result["sheets"][0]["columns"][1], {
+            "column": "B",
+            "header": "Revenue",
+            "populated": 2,
+            "blanks": 1,
+            "distinct": 1,
+            "numeric": 2,
+            "formula_cells": 0,
+            "min": 10.0,
+            "max": 10.0,
+            "sum": 20.0,
+            "mean": 10.0,
+        })
+
     def test_xlsx_embedded_chart_fallback_uses_the_visible_title(self):
         model = SimpleNamespace(HasMainTitle=True, Title=SimpleNamespace(String="Revenue by region"))
 
