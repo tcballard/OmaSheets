@@ -15,7 +15,6 @@ from typing import Any
 from xml.etree import ElementTree
 
 from .errors import EngineError
-from .identity import FileIdentity, identify_regular_file
 from .paths import AppPaths
 
 MAX_RESPONSE_BYTES = 4096
@@ -26,7 +25,6 @@ _IGNORED_VIEW_ELEMENTS = frozenset({"sheetViews", "bookViews"})
 @dataclass(frozen=True, slots=True)
 class LiveSnapshot:
     path: Path
-    identity: FileIdentity
     format: str
     semantic_sha256: str
 
@@ -112,7 +110,59 @@ def _member_digest(archive: zipfile.ZipFile, name: str) -> tuple[bytes, bytes]:
             return b"B", _stream_digest(handle)
 
 
-def semantic_snapshot_hash(path: Path, format_name: str) -> str:
+def _status_identity(status: os.stat_result) -> tuple[int, ...]:
+    """Return the metadata that must remain stable across one fingerprint."""
+
+    return (
+        status.st_dev,
+        status.st_ino,
+        status.st_size,
+        status.st_mtime_ns,
+        status.st_ctime_ns,
+        status.st_uid,
+        stat.S_IMODE(status.st_mode),
+    )
+
+
+def _validate_private_snapshot(status: os.stat_result) -> None:
+    if status.st_uid != os.getuid() or stat.S_IMODE(status.st_mode) != 0o600:
+        raise EngineError("live workbook snapshot permissions are invalid")
+
+
+def _hash_opened_snapshot(handle: Any, format_name: str) -> str:
+    if format_name == "xls":
+        return _stream_digest(handle).hex()
+
+    digest = hashlib.sha256()
+    digest.update(b"OMASHEETS_SEMANTIC_HASH_V2\0")
+    with zipfile.ZipFile(handle) as archive:
+        archive_names = archive.namelist()
+        if format_name == "ods":
+            available = set(archive_names)
+            names = [name for name in ("content.xml", "styles.xml") if name in available]
+        else:
+            names = [
+                name for name in archive_names
+                if name.startswith("xl/")
+                and name not in {"xl/calcChain.xml"}
+                and not name.startswith("xl/printerSettings/")
+            ]
+        if not names:
+            raise EngineError("live workbook snapshot has no semantic content")
+        for name in sorted(names):
+            _hash_field(digest, b"N", name)
+            kind, member = _member_digest(archive, name)
+            digest.update(kind)
+            digest.update(member)
+    return digest.hexdigest()
+
+
+def semantic_snapshot_hash(
+    path: Path,
+    format_name: str,
+    *,
+    require_private: bool = False,
+) -> str:
     """Stream workbook semantics while excluding save/view metadata churn.
 
     XML members are reduced to a bounded event stream rather than read into a
@@ -121,37 +171,51 @@ def semantic_snapshot_hash(path: Path, format_name: str) -> str:
     parser; cell text and structural order remain conflict-sensitive.
     """
 
-    if format_name == "xls":
-        try:
-            with path.open("rb") as handle:
-                return _stream_digest(handle).hex()
-        except OSError as error:
-            raise EngineError("live workbook snapshot could not be hashed") from error
-    digest = hashlib.sha256()
-    digest.update(b"OMASHEETS_SEMANTIC_HASH_V2\0")
     try:
-        with zipfile.ZipFile(path) as archive:
-            archive_names = archive.namelist()
-            if format_name == "ods":
-                available = set(archive_names)
-                names = [name for name in ("content.xml", "styles.xml") if name in available]
-            else:
-                names = [
-                    name for name in archive_names
-                    if name.startswith("xl/")
-                    and name not in {"xl/calcChain.xml"}
-                    and not name.startswith("xl/printerSettings/")
-                ]
-            if not names:
-                raise EngineError("live workbook snapshot has no semantic content")
-            for name in sorted(names):
-                _hash_field(digest, b"N", name)
-                kind, member = _member_digest(archive, name)
-                digest.update(kind)
-                digest.update(member)
-    except (OSError, zipfile.BadZipFile) as error:
+        before = path.stat(follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode):
+            raise EngineError("live workbook snapshot is not a regular file")
+        if require_private:
+            _validate_private_snapshot(before)
+
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if not stat.S_ISREG(opened.st_mode) or _status_identity(opened) != _status_identity(before):
+                raise EngineError("live workbook snapshot changed while it was opened")
+            if require_private:
+                _validate_private_snapshot(opened)
+            try:
+                result = _hash_opened_snapshot(handle, format_name)
+            finally:
+                after = os.fstat(handle.fileno())
+                try:
+                    final = path.stat(follow_symlinks=False)
+                except OSError as error:
+                    raise EngineError("live workbook snapshot changed while it was hashed") from error
+                if (
+                    not stat.S_ISREG(after.st_mode)
+                    or not stat.S_ISREG(final.st_mode)
+                    or _status_identity(after) != _status_identity(opened)
+                    or _status_identity(final) != _status_identity(opened)
+                ):
+                    raise EngineError("live workbook snapshot changed while it was hashed")
+                if require_private:
+                    _validate_private_snapshot(after)
+                    _validate_private_snapshot(final)
+        return result
+    except EngineError:
+        raise
+    except zipfile.BadZipFile as error:
         raise EngineError("live workbook snapshot is not a valid workbook package") from error
-    return digest.hexdigest()
+    except OSError as error:
+        raise EngineError("live workbook snapshot could not be hashed") from error
 
 
 def request_live_snapshot(paths: AppPaths, session_id: str, suffix: str) -> LiveSnapshot:
@@ -186,14 +250,10 @@ def request_live_snapshot(paths: AppPaths, session_id: str, suffix: str) -> Live
         if payload != {"ok": True, "format": format_name}:
             detail = payload.get("error", "snapshot failed") if isinstance(payload, dict) else "snapshot failed"
             raise EngineError(f"live workbook snapshot failed: {detail}")
-        status = expected.stat(follow_symlinks=False)
-        if status.st_uid != os.getuid() or stat.S_IMODE(status.st_mode) != 0o600:
-            raise EngineError("live workbook snapshot permissions are invalid")
-        identity = identify_regular_file(expected)
-        semantic_sha256 = (
-            identity.sha256
-            if format_name == "xls"
-            else semantic_snapshot_hash(expected, format_name)
+        semantic_sha256 = semantic_snapshot_hash(
+            expected,
+            format_name,
+            require_private=True,
         )
     except Exception:
         try:
@@ -201,4 +261,4 @@ def request_live_snapshot(paths: AppPaths, session_id: str, suffix: str) -> Live
         except OSError:
             pass
         raise
-    return LiveSnapshot(expected, identity, format_name, semantic_sha256)
+    return LiveSnapshot(expected, format_name, semantic_sha256)
