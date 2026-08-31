@@ -52,7 +52,10 @@ window, Python service, Codex plugin, MCP server, desktop entry and MIME
 associations. The bootstrap downloads the native executables built by the
 matching GitHub release and verifies their checksum, version, architecture,
 source commit, tracked-source digest and individual file hashes before
-installation. Users do not need a compiler, CMake, `pkgconf`, or the
+installation. Automatic download is available only when the installed checkout
+is exactly the matching `v<version>` release tag; a newer development checkout
+fails before network access unless its operator supplies an explicitly built,
+source-matching bundle. Users do not need a compiler, CMake, `pkgconf`, or the
 LibreOffice SDK. Omarchy intentionally runs no plugin install hooks; missing
 runtime dependencies are reported with an explicit `omarchy pkg add` command
 for the user to approve. Full installation and reversible removal details are in

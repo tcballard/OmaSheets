@@ -3,15 +3,31 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
+import sys
 import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from omasheets.native_bundle import require_exact_version_tag  # noqa: E402
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--require-exact-version-tag",
+        action="store_true",
+        help="also require HEAD to be exactly tagged v<product-version>",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = build_parser().parse_args(argv)
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
     manifest = json.loads((ROOT / "manifest.json").read_text())
     plugin_manifest = json.loads((ROOT / "plugins/omasheets/.codex-plugin/plugin.json").read_text())
@@ -39,11 +55,24 @@ def main() -> int:
     assert "cmake" not in install_job.split("      - name: Install through", 1)[0]
     assert "OMASHEETS_NATIVE_BUNDLE_PATH" in install_job
     assert "Exercise the installed agentic workbook loop" in workflow
-    assert '"agent-session", "call", "describe_workbook"' in workflow
+    assert '"agent-session", "call", "query_workbook"' in workflow
     assert "omasheets://session" in (ROOT / "README.md").read_text()
     assert "Ask Agent" in (ROOT / "README.md").read_text()
     assert "omarchy agent prompt" in (ROOT / "README.md").read_text()
-    print(f"release contract ok: v{versions.pop()}")
+    release_workflow = (ROOT / ".github/workflows/release.yml").read_text()
+    release_tag_gate = "python scripts/check_release.py --require-exact-version-tag"
+    native_bundle_build = "python scripts/build_native_bundle.py"
+    assert release_tag_gate in release_workflow
+    assert release_workflow.index(release_tag_gate) < release_workflow.index(native_bundle_build)
+    version = versions.pop()
+    print(f"source tree contract ok: v{version}")
+    if arguments.require_exact_version_tag:
+        try:
+            require_exact_version_tag(ROOT, version)
+        except RuntimeError as error:
+            print(f"exact version tag contract failed: {error}", file=sys.stderr)
+            return 1
+        print(f"exact version tag contract ok: v{version}")
     return 0
 
 

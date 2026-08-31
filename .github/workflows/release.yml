@@ -23,7 +23,7 @@ jobs:
           test "$GITHUB_REF_NAME" = "v$version"
           PYTHONPATH=src python -m unittest discover -s tests -q
           python -m compileall -q src tests scripts
-          python scripts/check_release.py
+          python scripts/check_release.py --require-exact-version-tag
       - run: python scripts/build_native_bundle.py --output dist-native
       - uses: actions/upload-artifact@v4
         with:

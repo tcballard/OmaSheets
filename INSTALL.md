@@ -30,6 +30,13 @@ the user to approve and run:
 omarchy pkg add gtk3 libreoffice-fresh bubblewrap
 ```
 
+Automatic bundle download additionally requires checkout `HEAD` to be exactly
+the matching `v<version>` tag. A source checkout ahead of the published release
+fails before downloading anything. CI and development builds can instead set
+`OMASHEETS_NATIVE_BUNDLE_PATH` to an explicit bundle built from that exact
+checkout; the normal source-identity and executable-provenance checks still
+apply.
+
 Current Arch `libreoffice-fresh` ships the system Python `uno` module and
 `libpyuno`; there is no separate `python-uno` package. The bootstrap still
 checks `import uno` explicitly. Then run the **Install OmaSheets** action again.
