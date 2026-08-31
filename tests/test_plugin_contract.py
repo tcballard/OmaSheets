@@ -19,7 +19,9 @@ class PluginContractTests(unittest.TestCase):
         for forbidden in ("bar.run(", "bash", '"sh"', '"-c"'):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, qml)
-        self.assertIn('command: ["omasheets", "status", "--json"]', qml)
+        self.assertIn('command: [root.pluginLauncher, "status"]', qml)
+        self.assertIn('root.manifest.__sourceDir', qml)
+        self.assertIn('"Install OmaSheets"', qml)
         self.assertIn('"review-current"', qml)
         self.assertIn('"open-current"', qml)
         self.assertIn('"window-current"', qml)

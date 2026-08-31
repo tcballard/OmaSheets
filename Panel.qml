@@ -13,6 +13,7 @@ Panel {
   ipcTarget: "io.github.tcballard.omasheets"
 
   property bool statusRunning: false
+  property bool installed: false
   property string statusError: ""
   property bool selected: false
   property string workbookName: "No workbook selected"
@@ -23,6 +24,9 @@ Panel {
   property int destructiveCount: 0
   property int warningCount: 0
   property int formulaErrorCount: 0
+
+  readonly property string pluginRoot: String(root.manifest.__sourceDir || "")
+  readonly property string pluginLauncher: pluginRoot + "/bin/omasheets-plugin"
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.55)
@@ -39,6 +43,7 @@ Panel {
   function applyStatus(payload) {
     var current = payload.current || {}
     var review = payload.review || {}
+    installed = payload.installed !== false
     selected = current.selected === true
     workbookName = selected ? String(current.display_name || "Selected workbook") : "No workbook selected"
     workbookFormat = selected ? String(current.format || "").toUpperCase() : ""
@@ -56,12 +61,12 @@ Panel {
   }
 
   function openWorkbook() {
-    Quickshell.execDetached(["omasheets", "window-current"])
+    Quickshell.execDetached([root.pluginLauncher, "run", "window-current"])
     close()
   }
 
   function openWorkbookInCalc() {
-    Quickshell.execDetached(["omasheets", "open-current"])
+    Quickshell.execDetached([root.pluginLauncher, "run", "open-current"])
     close()
   }
 
@@ -71,8 +76,19 @@ Panel {
     Quickshell.execDetached([
       "omarchy-launch-tui",
       "--app-id=org.omarchy.omasheets-review",
-      "omasheets",
+      root.pluginLauncher,
+      "run",
       "review-current"
+    ])
+    close()
+  }
+
+  function installProduct() {
+    Quickshell.execDetached([
+      "omarchy-launch-tui",
+      "--app-id=org.omarchy.omasheets-setup",
+      root.pluginLauncher,
+      "install"
     ])
     close()
   }
@@ -84,7 +100,7 @@ Panel {
 
   Process {
     id: statusProcess
-    command: ["omasheets", "status", "--json"]
+    command: [root.pluginLauncher, "status"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
@@ -99,7 +115,7 @@ Panel {
     }
     onExited: function(exitCode) {
       root.statusRunning = false
-      if (exitCode !== 0) root.statusError = "Install or start OmaSheets to see workbook status"
+      if (exitCode !== 0) root.statusError = "OmaSheets status unavailable"
     }
   }
 
@@ -145,8 +161,10 @@ Panel {
 
         PanelHero {
           width: parent.width
-          title: root.workbookName
-          meta: root.workbookFormat === "" ? "Native Linux spreadsheets" : root.workbookFormat + " · selected locally"
+          title: root.installed ? root.workbookName : "Finish OmaSheets setup"
+          meta: root.installed
+            ? (root.workbookFormat === "" ? "Native Linux spreadsheets" : root.workbookFormat + " · selected locally")
+            : "Dependencies are explicit; installation stays user-local"
           foreground: root.foreground
           fontFamily: root.fontFamily
         }
@@ -203,6 +221,14 @@ Panel {
         Row {
           width: parent.width
           spacing: Style.space(8)
+
+          Button {
+            visible: !root.installed
+            text: "Install OmaSheets"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.installProduct()
+          }
 
           Button {
             visible: root.selected
