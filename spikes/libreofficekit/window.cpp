@@ -521,7 +521,9 @@ int main(int argc, char** argv)
             throw std::runtime_error(error != nullptr ? error->message : "cannot create workbook URI");
         stage = "asynchronous workbook open";
         lok_doc_view_open_document(
-            LOK_DOC_VIEW(state.view), source_uri, nullptr, nullptr, on_opened, &state);
+            // LibreOfficeKitGTK's post-load path always parses this argument as
+            // JSON (including when no rendering options are needed).
+            LOK_DOC_VIEW(state.view), source_uri, "{}", nullptr, on_opened, &state);
         stage = "interactive event loop";
         gtk_main();
         std::error_code ignored;
