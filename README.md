@@ -40,6 +40,11 @@ omasheets mcp serve
 Installation is documented in [`INSTALL.md`](INSTALL.md); the real Omarchy and
 LibreOffice release pass is in [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).
 
+An experimental native-rendering proof is in
+[`spikes/libreofficekit/`](spikes/libreofficekit/). It renders a real `.xls`
+through LibreOfficeKit into an OmaSheets-owned pixel buffer; it is not yet the
+default human workbook window.
+
 ## Status
 
 Early development. The `main` branch remains the minimal bootstrap; v0.0.1 is
