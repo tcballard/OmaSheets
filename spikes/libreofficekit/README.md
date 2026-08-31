@@ -11,20 +11,25 @@ OmaSheets shell.
 
 ## Build on Omarchy
 
-Arch's `libreoffice-fresh` package supplies both the headers and runtime used by
-the spike.
+Arch's `libreoffice-fresh` package supplies the runtime and
+`libreoffice-fresh-sdk` supplies the headers used by the spike.
 
 ```bash
-sudo pacman -S --needed cmake libreoffice-fresh
+sudo pacman -S --needed cmake libreoffice-fresh libreoffice-fresh-sdk
 cmake -S spikes/libreofficekit -B build/lok-spike
 cmake --build build/lok-spike
 build/lok-spike/omasheets-lok-render workbook.xls /tmp/omasheets-tile.ppm
+sudo cmake --install build/lok-spike
+omasheets lok status
+omasheets lok render workbook.xls --output /tmp/omasheets-cli-tile.ppm
 ```
 
 Set `OMASHEETS_LOK_PROGRAM` only when LibreOffice's `program` directory is not
 `/usr/lib/libreoffice/program`. Each invocation creates a new temporary user
 profile and removes it on exit; the helper never reuses the person's normal
 LibreOffice profile.
+The output path must be new: both the native helper and Python launcher refuse
+to replace an existing file.
 
 The PR smoke test runs in Arch Linux, creates a genuine Excel 97 `.xls` from
 [`fixtures/smoke.fods`](fixtures/smoke.fods), loads it through LibreOfficeKit,
@@ -34,7 +39,7 @@ renders a 320×200 tile, and validates the output header and byte count.
 
 | Question | Spike evidence |
 | --- | --- |
-| Can Omarchy package the headers and runtime? | `libreoffice-fresh` exposes both through official Arch packages. |
+| Can Omarchy package the headers and runtime? | `libreoffice-fresh` and `libreoffice-fresh-sdk` expose both through official Arch packages. |
 | Can OmaSheets initialize without UNO? | The helper calls `lok::lok_cpp_init` directly. |
 | Can it recognize a Calc document? | Non-spreadsheet document types are rejected. |
 | Can it render into an OmaSheets-owned buffer? | `paintTile` fills a bounded RGBA/BGRA buffer which is exported as PPM. |

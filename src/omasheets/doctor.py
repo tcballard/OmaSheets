@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .integration import DESKTOP_ID, IntegrationPaths
+from .lok_spike import status as lok_status
 
 
 def _executable(name: str, expected: Path | None = None) -> dict[str, Any]:
@@ -47,6 +48,13 @@ def diagnose() -> dict[str, Any]:
         "name": "omarchy-plugin",
         "ok": plugin.is_file(),
         "detail": str(plugin) if plugin.is_file() else "install with: omarchy plugin add <repository> --enable",
+        "required": False,
+    })
+    lok = lok_status()
+    checks.append({
+        "name": "libreofficekit-spike",
+        "ok": lok["ready"],
+        "detail": "ready" if lok["ready"] else "optional: run omasheets lok status",
         "required": False,
     })
     required = [check for check in checks if check.get("required", True)]

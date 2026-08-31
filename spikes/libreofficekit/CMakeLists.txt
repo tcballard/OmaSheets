@@ -9,7 +9,7 @@ find_path(
 )
 
 if(NOT LIBREOFFICEKIT_INCLUDE_DIR)
-  message(FATAL_ERROR "LibreOfficeKit headers were not found; install libreoffice-fresh or libreoffice-still")
+  message(FATAL_ERROR "LibreOfficeKit headers were not found; install libreoffice-fresh-sdk or libreoffice-still-sdk")
 endif()
 
 add_executable(omasheets-lok-render lok_render.cpp)
