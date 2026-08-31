@@ -875,7 +875,13 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
             or not comparison["target_ranges_match"]
             or not comparison["workbook_objects_match"]
         ):
-            raise RuntimeError("staged workbook did not survive save and reopen verification")
+            failed = sorted(
+                key for key, value in comparison.items()
+                if key != "new_formula_errors" and value is not True
+            )
+            raise RuntimeError(
+                "staged workbook did not survive save and reopen verification: " + ", ".join(failed)
+            )
         status = "manual_review_required" if action == "convert_xls" else "verified"
         result = {
             "semantic_diff": {
