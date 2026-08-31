@@ -82,7 +82,8 @@ jobs:
           test -n "$archive"
           mkdir "$RUNNER_TEMP/native-smoke"
           tar -xzf "$archive" -C "$RUNNER_TEMP/native-smoke"
-          sha256sum --check "$archive.sha256"
+          checksum=$(basename "$archive").sha256
+          (cd dist-native && sha256sum --check "$checksum")
           "$RUNNER_TEMP/native-smoke/bin/omasheets-window" --provenance
           "$RUNNER_TEMP/native-smoke/bin/omasheets-lok-render" --provenance
       - uses: actions/upload-artifact@v4
