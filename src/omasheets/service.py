@@ -240,4 +240,3 @@ class OmaSheetsService:
         return {key: value for key, value in plan.items() if key not in {
             "staged_artifact", "preview_artifact"
         }}
-

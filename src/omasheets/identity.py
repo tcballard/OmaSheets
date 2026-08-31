@@ -48,4 +48,3 @@ def identify_regular_file(path: Path) -> FileIdentity:
         mtime_ns=after.st_mtime_ns,
         sha256=digest.hexdigest(),
     )
-

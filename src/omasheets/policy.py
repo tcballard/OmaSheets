@@ -86,4 +86,3 @@ def conversion_destination(source: Path) -> Path:
     if workbook_format(source) is not WorkbookFormat.XLS:
         raise PolicyError("only .xls inputs use the legacy conversion flow")
     return source.with_suffix(".xlsx")
-

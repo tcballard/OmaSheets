@@ -15,4 +15,3 @@ class ConflictError(OmaSheetsError):
 
 class EngineError(OmaSheetsError):
     """The isolated Calc engine could not complete a requested operation."""
-

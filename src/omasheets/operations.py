@@ -69,4 +69,3 @@ def validate_operations(operations: list[dict[str, Any]]) -> list[dict[str, Any]
 def destructive_operations(operations: list[dict[str, Any]]) -> list[int]:
     destructive = {"clear_range", "delete_sheet"}
     return [index for index, operation in enumerate(operations) if operation["type"] in destructive]
-

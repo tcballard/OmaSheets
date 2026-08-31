@@ -17,4 +17,3 @@ local OmaSheets application.
 Never ask for or pass an arbitrary local path. Never claim a plan has been
 applied until a local commit receipt is present. `.xlsm` is read-only and `.xls`
 must be converted to a separate `.xlsx` through the local conversion workflow.
-
