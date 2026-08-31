@@ -6,7 +6,8 @@ Protocol. The server advertises a fixed protocol version and strict tool schemas
 ## Read tools
 
 - `describe_workbook`: sheets, used ranges, names, formula/error summary.
-- `read_range`: bounded values and optionally formulas.
+- `read_range`: bounded values and optionally formulas plus a deduplicated style
+  table for ranges of up to 1,000 cells.
 - `search_workbook`: bounded literal search over displayed values or formulas.
 - `trace_formula`: bounded precedents, dependents, or both.
 - `render_workbook`: produce a verified PDF preview.

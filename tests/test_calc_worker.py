@@ -1,6 +1,14 @@
 import unittest
 
-from omasheets.calc_worker import _apply, _color, _matrix_values, _target_fingerprints
+from omasheets.calc_worker import (
+    _apply,
+    _color,
+    _matrix_values,
+    _named_ranges,
+    _style_color,
+    _style_table,
+    _target_fingerprints,
+)
 
 
 class FakeArea:
@@ -63,6 +71,65 @@ class FakeDocument:
         return self.sheets
 
 
+class FakeFormatProperties:
+    def getPropertyValue(self, name):
+        self.assert_name = name
+        return "0.00%"
+
+
+class FakeFormats:
+    def getByKey(self, key):
+        self.key = key
+        return FakeFormatProperties()
+
+
+class FakeStyleCell:
+    CellStyle = "Default"
+    NumberFormat = 7
+    CharWeight = 150.0
+    CharColor = -1
+    CellBackColor = 0x112233
+    IsTextWrapped = True
+
+
+class FakeStyleArea:
+    def getCellByPosition(self, column, row):
+        del column, row
+        return FakeStyleCell()
+
+
+class FakeStyleDocument:
+    def getNumberFormats(self):
+        return FakeFormats()
+
+
+class FakeNamedRange:
+    def __init__(self, content):
+        self.content = content
+
+    def getContent(self):
+        return self.content
+
+
+class FakeNamedRanges:
+    def __init__(self):
+        self.items = {
+            "External": FakeNamedRange("'file:///home/tom/private.xlsx'#$Sheet1.$A$1"),
+            "Local": FakeNamedRange("$Sheet1.$B$2"),
+        }
+
+    def getElementNames(self):
+        return tuple(self.items)
+
+    def getByName(self, name):
+        return self.items[name]
+
+
+class FakeNamedDocument:
+    def getNamedRanges(self):
+        return FakeNamedRanges()
+
+
 class CalcWorkerTests(unittest.TestCase):
     def test_bulk_values_are_typed_for_uno(self):
         self.assertEqual(
@@ -110,6 +177,20 @@ class CalcWorkerTests(unittest.TestCase):
         }]
         _apply(document, operations)
         self.assertEqual(document.area.formulas[1][1], "=4+4")
+
+    def test_styles_are_deduplicated_and_automatic_colours_are_explicit(self):
+        table = _style_table(FakeStyleDocument(), FakeStyleArea(), 2, 2)
+        self.assertEqual(len(table["styles"]), 1)
+        self.assertEqual(table["style_ids"], [[0, 0], [0, 0]])
+        self.assertEqual(table["styles"][0]["text_color"], "automatic")
+        self.assertEqual(_style_color(0xAABBCC), "#AABBCC")
+
+    def test_named_ranges_are_bounded_and_external_paths_are_redacted(self):
+        result = _named_ranges(FakeNamedDocument(), 10)
+        self.assertEqual(result["total"], 2)
+        self.assertTrue(result["items"][0]["content_redacted"])
+        self.assertNotIn("/home/tom", str(result))
+        self.assertEqual(result["items"][1]["content"], "$Sheet1.$B$2")
 
 
 if __name__ == "__main__":

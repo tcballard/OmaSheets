@@ -10,7 +10,8 @@ workbook changes without receiving silent write authority.
 ## v0.0.1 scope
 
 - Open `.xls`, `.xlsx`, `.xlsm`, and `.ods` in LibreOffice Calc.
-- Inspect workbook structure, values, formulas, names, and formula errors.
+- Inspect workbook structure, values, formulas, named ranges, deduplicated cell
+  styles, and formula errors.
 - Trace formula precedents and dependents within a bounded request.
 - Stage cell-value and formula changes against an immutable source hash.
 - Stage bounded bulk values, bulk formulas, and typed cell formatting.
