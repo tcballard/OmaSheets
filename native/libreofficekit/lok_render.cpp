@@ -1,5 +1,12 @@
 #define LOK_USE_UNSTABLE_API
 
+#ifndef OMASHEETS_SOURCE_SHA256
+#define OMASHEETS_SOURCE_SHA256 "unknown"
+#endif
+#ifndef OMASHEETS_SOURCE_COMMIT
+#define OMASHEETS_SOURCE_COMMIT "unknown"
+#endif
+
 #include <LibreOfficeKit/LibreOfficeKit.hxx>
 
 #include <algorithm>
@@ -159,6 +166,12 @@ std::string office_error(lok::Office& office)
 int main(int argc, char** argv)
 {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--provenance") {
+            std::cout << "{\"component\":\"omasheets-lok-render\",\"source_commit\":\""
+                      << OMASHEETS_SOURCE_COMMIT << "\",\"source_sha256\":\""
+                      << OMASHEETS_SOURCE_SHA256 << "\"}\n";
+            return 0;
+        }
         if (argc < 3 || argc > 5) {
             std::cerr << "usage: omasheets-lok-render INPUT.{xls,xlsx,xlsm,ods} OUTPUT.ppm [WIDTH HEIGHT]\n";
             return 2;

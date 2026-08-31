@@ -9,14 +9,14 @@ from omasheets.lok_spike import render_workbook, status
 
 
 class LibreOfficeKitSpikeTests(unittest.TestCase):
-    def test_status_is_explicitly_experimental(self):
+    def test_status_reports_the_production_install_boundary(self):
         with patch("omasheets.lok_spike.Path.is_dir", return_value=True), patch(
             "omasheets.lok_spike.Path.is_file", return_value=True
         ), patch("omasheets.lok_spike.os.access", return_value=True), patch(
             "omasheets.lok_spike.shutil.which", return_value="/usr/bin/omasheets-lok-render"
         ):
             result = status()
-        self.assertTrue(result["experimental"])
+        self.assertFalse(result["experimental"])
         self.assertTrue(result["ready"])
 
     def test_render_uses_an_argv_vector_and_validates_the_report(self):
@@ -37,7 +37,7 @@ class LibreOfficeKitSpikeTests(unittest.TestCase):
             self.assertEqual(report["engine"], "libreofficekit")
             argv = run.call_args.args[0]
             self.assertEqual(argv, [
-                "/usr/bin/omasheets-lok-render", str(source), str(destination), "320", "200"
+                "/usr/bin/omasheets-lok-render", str(source.resolve()), str(destination.resolve()), "320", "200"
             ])
             self.assertNotIn("shell", run.call_args.kwargs)
 

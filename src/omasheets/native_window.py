@@ -1,4 +1,4 @@
-"""Launcher for the experimental OmaSheets-owned workbook window."""
+"""Launcher for the production-installed OmaSheets-owned workbook window."""
 
 from __future__ import annotations
 
@@ -25,10 +25,10 @@ def window_executable() -> Path | None:
 def status() -> dict[str, Any]:
     executable = window_executable()
     return {
-        "experimental": True,
+        "experimental": False,
         "ready": executable is not None,
         "executable": str(executable) if executable else None,
-        "detail": str(executable) if executable else "build and install spikes/libreofficekit",
+        "detail": str(executable) if executable else "run the OmaSheets user-local installer",
     }
 
 
@@ -47,7 +47,7 @@ def open_window(
     identify_regular_file(source)
     executable = window_executable()
     if executable is None:
-        raise EngineError("omasheets-window is not installed; see spikes/libreofficekit/README.md")
+        raise EngineError("omasheets-window is not installed; run OmaSheets setup from the Omarchy widget")
     argv = [str(executable)]
     supplied = (
         context_path is not None, session_id is not None, revision is not None,

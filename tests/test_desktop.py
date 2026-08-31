@@ -18,7 +18,7 @@ class DesktopTests(unittest.TestCase):
                 popen.return_value.pid = 42
                 self.assertEqual(open_workbooks([workbook]), 42)
             args, kwargs = popen.call_args
-            self.assertEqual(args[0], ["/usr/bin/libreoffice", "--calc", "--", str(workbook)])
+            self.assertEqual(args[0], ["/usr/bin/libreoffice", "--calc", "--", str(workbook.resolve())])
             self.assertNotIn("shell", kwargs)
 
     def test_open_rejects_unsupported_files(self):

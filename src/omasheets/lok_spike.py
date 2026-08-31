@@ -1,4 +1,4 @@
-"""Local launcher for the optional LibreOfficeKit rendering spike."""
+"""Local launcher for the installed LibreOfficeKit rendering engine."""
 
 from __future__ import annotations
 
@@ -40,10 +40,10 @@ def status() -> dict[str, Any]:
         {
             "name": "omasheets-lok-render",
             "ok": renderer is not None,
-            "detail": str(renderer) if renderer else "build and install spikes/libreofficekit",
+            "detail": str(renderer) if renderer else "run the OmaSheets user-local installer",
         },
     ]
-    return {"experimental": True, "ready": all(check["ok"] for check in checks), "checks": checks}
+    return {"experimental": False, "ready": all(check["ok"] for check in checks), "checks": checks}
 
 
 def render_workbook(source: Path, destination: Path, *, width: int = 1024, height: int = 640) -> dict[str, Any]:
@@ -55,15 +55,15 @@ def render_workbook(source: Path, destination: Path, *, width: int = 1024, heigh
 
     resolved_destination = destination.expanduser().resolve(strict=False)
     if resolved_destination.suffix != ".ppm":
-        raise EngineError("LibreOfficeKit spike output must use the .ppm extension")
+        raise EngineError("LibreOfficeKit output must use the .ppm extension")
     if resolved_destination.exists():
-        raise EngineError("LibreOfficeKit spike output already exists")
+        raise EngineError("LibreOfficeKit output already exists")
     if not resolved_destination.parent.is_dir():
-        raise EngineError("LibreOfficeKit spike output directory does not exist")
+        raise EngineError("LibreOfficeKit output directory does not exist")
 
     renderer = renderer_executable()
     if renderer is None:
-        raise EngineError("omasheets-lok-render is not installed; see spikes/libreofficekit/README.md")
+        raise EngineError("omasheets-lok-render is not installed; run OmaSheets setup from the Omarchy widget")
     completed = subprocess.run(
         [str(renderer), str(resolved_source), str(resolved_destination), str(width), str(height)],
         check=False,
@@ -74,11 +74,11 @@ def render_workbook(source: Path, destination: Path, *, width: int = 1024, heigh
     )
     if completed.returncode != 0:
         detail = completed.stderr.strip()[:2000] or "renderer exited without an error message"
-        raise EngineError(f"LibreOfficeKit spike failed: {detail}")
+        raise EngineError(f"LibreOfficeKit renderer failed: {detail}")
     try:
         report = json.loads(completed.stdout)
     except (json.JSONDecodeError, TypeError) as exc:
-        raise EngineError("LibreOfficeKit spike returned an invalid report") from exc
+        raise EngineError("LibreOfficeKit renderer returned an invalid report") from exc
     if report.get("engine") != "libreofficekit" or not resolved_destination.is_file():
-        raise EngineError("LibreOfficeKit spike did not produce a verified tile")
+        raise EngineError("LibreOfficeKit renderer did not produce a verified tile")
     return report

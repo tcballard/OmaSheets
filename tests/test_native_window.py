@@ -8,10 +8,10 @@ from omasheets.native_window import open_window, status
 
 
 class NativeWindowTests(unittest.TestCase):
-    def test_status_is_explicitly_experimental(self):
+    def test_status_reports_the_production_install_boundary(self):
         with patch("omasheets.native_window.window_executable", return_value=Path("/usr/bin/omasheets-window")):
             result = status()
-        self.assertTrue(result["experimental"])
+        self.assertFalse(result["experimental"])
         self.assertTrue(result["ready"])
 
     def test_launch_uses_fixed_argv_without_a_shell(self):
@@ -23,7 +23,7 @@ class NativeWindowTests(unittest.TestCase):
             ) as popen:
                 popen.return_value.pid = 84
                 self.assertEqual(open_window(workbook), 84)
-            self.assertEqual(popen.call_args.args[0], ["/usr/bin/omasheets-window", str(workbook)])
+            self.assertEqual(popen.call_args.args[0], ["/usr/bin/omasheets-window", str(workbook.resolve())])
             self.assertNotIn("shell", popen.call_args.kwargs)
             self.assertTrue(popen.call_args.kwargs["close_fds"])
 
@@ -46,7 +46,7 @@ class NativeWindowTests(unittest.TestCase):
             self.assertEqual(popen.call_args.args[0], [
                 "/usr/bin/omasheets-window", "--context", str(context),
                 "--bridge", str(bridge), "--diff", str(diff), "--cli", str(cli),
-                "--session", "a" * 32, "--revision", "3", str(workbook),
+                "--session", "a" * 32, "--revision", "3", str(workbook.resolve()),
             ])
 
     def test_launch_rejects_unsupported_files(self):
