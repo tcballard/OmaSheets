@@ -365,18 +365,22 @@ def _fill_direction(name: str):
     return uno.Enum("com.sun.star.sheet.FillDirection", name)
 
 
+def _sort_field(column: int, ascending: bool):
+    import uno
+
+    field = uno.createUnoStruct("com.sun.star.util.SortField")
+    field.Field = column
+    field.SortAscending = ascending
+    return field
+
+
 def _sort(area, operation: dict[str, Any]) -> None:
     descriptor = area.createSortDescriptor()
     for item in descriptor:
         if item.Name == "ContainsHeader":
             item.Value = operation["has_header"]
         elif item.Name == "SortFields":
-            fields = item.Value
-            if not fields:
-                raise RuntimeError("Calc did not provide a sort-field descriptor")
-            fields[0].Field = operation["key_column"] - 1
-            fields[0].IsAscending = operation["ascending"]
-            item.Value = fields[:1]
+            item.Value = (_sort_field(operation["key_column"] - 1, operation["ascending"]),)
     area.sort(descriptor)
 
 
