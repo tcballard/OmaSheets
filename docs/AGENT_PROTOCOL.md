@@ -69,9 +69,13 @@ the semantic diff and reopened workbook evidence remain authoritative.
 - `omasheets://window`: the active native window's bounded sheet, cell/formula,
   zoom, dirty state, and visible rectangle. It contains no source path and
   grants no pointer, keyboard, save, or publication authority.
-- `omasheets://agent`: the selection-aware entry resource used by **Ask Codex**.
+- `omasheets://session`: the selection-aware entry resource used by **Ask Agent**.
   It combines the public workbook session, live focus when available, suggested
   workflows and the non-publication contract without exposing a source path.
+
+The equivalent provider-neutral command surface is `omasheets agent-session
+resource`, `omasheets agent-session tools`, and `omasheets agent-session call`.
+It validates against the same schemas and does not add publication authority.
 
 Resources are convenience pointers, not ambient authority. A client cannot
 change the selected workbook by constructing a URI or passing a path.

@@ -720,34 +720,22 @@ void on_save_copy(GtkButton*, gpointer data)
 void on_ask_agent(GtkButton*, gpointer data)
 {
     auto* state = static_cast<WindowState*>(data);
-    gchar* terminal = g_find_program_in_path("omarchy-launch-tui");
-    gchar* codex = g_find_program_in_path("codex");
-    if (terminal == nullptr || codex == nullptr) {
-        set_status(state, "Codex or the Omarchy terminal launcher is unavailable");
-        g_free(terminal);
-        g_free(codex);
+    if (state->cli_path.empty()) {
+        set_status(state, "The OmaSheets agent-session launcher is unavailable");
         return;
     }
-    const char* prompt =
-        "Use the OmaSheets plugin to help with my locally selected workbook. "
-        "Start from omasheets://agent, inspect the bounded evidence you need, "
-        "clarify material ambiguity, and propose a verified plan. Never publish workbook bytes.";
     gchar* arguments[] = {
-        terminal,
-        const_cast<gchar*>("--app-id=org.omarchy.omasheets-agent"),
-        codex,
-        const_cast<gchar*>(prompt),
+        const_cast<gchar*>(state->cli_path.c_str()),
+        const_cast<gchar*>("agent-session"),
         nullptr,
     };
     GError* error = nullptr;
     if (!g_spawn_async(nullptr, arguments, nullptr, G_SPAWN_DEFAULT, nullptr, nullptr, nullptr, &error)) {
-        set_status(state, "Could not open the Codex agent entry point");
+        set_status(state, "Could not open the agent session");
         g_clear_error(&error);
     } else {
-        set_status(state, "Codex opened with this workbook's live selection context");
+        set_status(state, "Omarchy opened its default agent for this workbook session");
     }
-    g_free(terminal);
-    g_free(codex);
 }
 
 gboolean on_delete(GtkWidget*, GdkEvent*, gpointer data)
@@ -1116,8 +1104,8 @@ GtkWidget* build_window(WindowState* state)
     gtk_widget_set_sensitive(state->save, FALSE);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header), state->save);
     g_signal_connect(state->save, "clicked", G_CALLBACK(on_save_copy), state);
-    GtkWidget* ask_agent = gtk_button_new_with_label("Ask Codex");
-    gtk_widget_set_tooltip_text(ask_agent, "Start a selection-aware OmaSheets workflow in Codex");
+    GtkWidget* ask_agent = gtk_button_new_with_label("Ask Agent");
+    gtk_widget_set_tooltip_text(ask_agent, "Start an OmaSheets session with Omarchy's default agent");
     gtk_header_bar_pack_start(GTK_HEADER_BAR(header), ask_agent);
     g_signal_connect(ask_agent, "clicked", G_CALLBACK(on_ask_agent), state);
     state->diff_button = gtk_button_new_with_label("Review agent changes");

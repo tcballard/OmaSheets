@@ -136,6 +136,18 @@ jobs:
 
           launcher = Path(os.environ["HOME"], ".local/bin/omasheets")
           session = json.loads(Path(os.environ["RUNNER_TEMP"], "session.json").read_text())
+          agent_resource = json.loads(subprocess.run(
+              [launcher, "agent-session", "resource"], text=True, capture_output=True, check=True,
+          ).stdout)
+          agent_tools = json.loads(subprocess.run(
+              [launcher, "agent-session", "tools"], text=True, capture_output=True, check=True,
+          ).stdout)["tools"]
+          assert agent_resource["ready"] is True
+          assert not ({"approve", "commit", "publish", "replace", "undo"} & {tool["name"] for tool in agent_tools})
+          observed = json.loads(subprocess.run([
+              launcher, "agent-session", "call", "describe_workbook", "--arguments",
+              json.dumps({"session_id": session["session_id"], "include_formulas": True}),
+          ], text=True, capture_output=True, check=True).stdout)
           process = subprocess.Popen(
               [launcher, "mcp", "serve"], text=True,
               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -156,9 +168,6 @@ jobs:
               assert "error" not in response, response
               return response["result"]["structuredContent"]
 
-          observed = call(1, "describe_workbook", {
-              "session_id": session["session_id"], "include_formulas": True,
-          })
           operations = [
               {"type": "insert_rows", "sheet": "Revenue", "row": 3, "count": 2},
               {"type": "set_range_values", "sheet": "Revenue", "range": "A3:B4", "values": [[10, 12], [15, 18]]},
@@ -177,19 +186,19 @@ jobs:
                   {"title": "Order results", "purpose": "Present the largest revenue first.", "operation_indexes": [4]},
               ],
           }
-          first = call(2, "plan_changes", {
+          first = call(1, "plan_changes", {
               "session_id": session["session_id"], "expected_revision": 1,
               "operations": operations, "workflow": workflow,
           })
           assert first["workflow"]["evidence"][0]["tool"] == "describe_workbook"
           workflow["goal"] = "Create the corrected checked revenue input"
           workflow["summary"] = "Revise the proposal while retaining evidence and exact operation groups."
-          revised = call(3, "revise_plan", {
+          revised = call(2, "revise_plan", {
               "plan_id": first["plan_id"], "expected_revision": 1,
               "operations": operations, "workflow": workflow,
           })
           assert revised["supersedes_plan_id"] == first["plan_id"]
-          handoff = call(4, "apply_plan", {"plan_id": revised["plan_id"], "expected_revision": 1})
+          handoff = call(3, "apply_plan", {"plan_id": revised["plan_id"], "expected_revision": 1})
           assert handoff["status"] == "local_review_required"
           process.stdin.close()
           assert process.wait(timeout=10) == 0, process.stderr.read()

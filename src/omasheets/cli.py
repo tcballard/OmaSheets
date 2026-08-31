@@ -10,6 +10,16 @@ import sys
 from . import __version__
 
 
+def _json_object(value: str) -> dict:
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError("arguments must be valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise argparse.ArgumentTypeError("arguments must be a JSON object")
+    return payload
+
+
 def _service():
     from .calc_engine import CalcEngine
     from .paths import AppPaths
@@ -41,6 +51,15 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = commands.add_parser("doctor", help="Check the local OmaSheets runtime")
     doctor.add_argument("--json", action="store_true", help="Emit JSON")
     commands.add_parser("review-current", help="Review the newest staged plan in this terminal")
+    agent_session = commands.add_parser(
+        "agent-session", help="Open or interact with an OmaSheets agent session",
+    )
+    agent_session_commands = agent_session.add_subparsers(dest="agent_session_command")
+    agent_session_commands.add_parser("resource", help="Read the path-free current session")
+    agent_session_commands.add_parser("tools", help="List bounded agent tool schemas")
+    agent_call = agent_session_commands.add_parser("call", help="Call one bounded agent tool")
+    agent_call.add_argument("tool")
+    agent_call.add_argument("--arguments", type=_json_object, default={})
     plan = commands.add_parser("plan", help="Review a staged plan")
     plan_commands = plan.add_subparsers(dest="plan_command")
     approve = plan_commands.add_parser("approve", help="Review and publish a plan locally")
@@ -144,6 +163,27 @@ def main(argv: list[str] | None = None) -> int:
         supplied = input(f"Type {review['approval_token']} to publish a new copy: ")
         receipt = service.commit_local_review(status["plan_id"], status["revision"], supplied)
         print(json.dumps(receipt, indent=2, sort_keys=True))
+        return 0
+    if arguments.command == "agent-session":
+        if arguments.agent_session_command == "resource":
+            print(json.dumps(_service().agent_session_resource(), indent=2, sort_keys=True))
+            return 0
+        if arguments.agent_session_command == "tools":
+            from .mcp import TOOLS
+
+            print(json.dumps({"tools": TOOLS}, indent=2, sort_keys=True))
+            return 0
+        if arguments.agent_session_command == "call":
+            from .mcp import validate_tool_arguments
+
+            tool_arguments = validate_tool_arguments(arguments.tool, arguments.arguments)
+            method_name = "apply_plan_handoff" if arguments.tool == "apply_plan" else arguments.tool
+            result = getattr(_service(), method_name)(**tool_arguments)
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
+        from .agent_session import launch_agent_session
+
+        print(json.dumps({"pid": launch_agent_session(), "session": "agent"}, sort_keys=True))
         return 0
     if arguments.command == "plan" and arguments.plan_command == "approve":
         service = _service()

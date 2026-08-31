@@ -83,15 +83,10 @@ Panel {
     close()
   }
 
-  function askCodex() {
-    // The prompt is product-owned and path-free. Codex discovers the installed
-    // OmaSheets plugin, then obtains live selection context through MCP.
-    Quickshell.execDetached([
-      "omarchy-launch-tui",
-      "--app-id=org.omarchy.omasheets-agent",
-      "codex",
-      "Use the OmaSheets plugin to help with my locally selected workbook. Start from omasheets://agent, inspect the bounded evidence you need, clarify material ambiguity, and propose a verified plan. Never publish workbook bytes."
-    ])
+  function askAgent() {
+    // The installed CLI owns the fixed, path-free session prompt. Omarchy
+    // resolves and launches the user's configured default agent.
+    Quickshell.execDetached([root.pluginLauncher, "run", "agent-session"])
     close()
   }
 
@@ -164,7 +159,7 @@ Panel {
       onTextKey: function(textValue) {
         if (textValue === "r" || textValue === "R") root.refresh()
         else if ((textValue === "o" || textValue === "O") && root.selected) root.openWorkbook()
-        else if ((textValue === "a" || textValue === "A") && root.selected) root.askCodex()
+        else if ((textValue === "a" || textValue === "A") && root.selected) root.askAgent()
       }
 
       Column {
@@ -253,10 +248,10 @@ Panel {
 
           Button {
             visible: root.selected
-            text: "Ask Codex"
+            text: "Ask Agent"
             foreground: root.foreground
             fontFamily: root.fontFamily
-            onClicked: root.askCodex()
+            onClicked: root.askAgent()
           }
 
           Button {

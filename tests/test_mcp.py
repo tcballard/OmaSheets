@@ -34,7 +34,7 @@ class FakeService:
     def window_context_resource(self):
         return {"active": True, "address": "B7", "agent_control": False}
 
-    def agent_context_resource(self):
+    def agent_session_resource(self):
         return {"active": True, "selection": {"address": "B7"}}
 
 
@@ -168,8 +168,8 @@ class McpTests(unittest.TestCase):
         self.assertEqual(payload["address"], "B7")
         self.assertFalse(payload["agent_control"])
 
-    def test_agent_entry_resource_is_selection_aware(self) -> None:
-        response = self.server.handle(request("resources/read", {"uri": "omasheets://agent"}))
+    def test_agent_session_resource_is_selection_aware(self) -> None:
+        response = self.server.handle(request("resources/read", {"uri": "omasheets://session"}))
         payload = json.loads(response["result"]["contents"][0]["text"])
         self.assertEqual(payload["selection"]["address"], "B7")
 

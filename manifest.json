@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "OmaSheets",
-    "description": "Open a workbook, ask Codex, and review verified agent proposals locally",
+    "description": "Open a workbook, ask your default agent, and review verified proposals locally",
     "category": "Office",
     "defaultSection": "right",
     "allowMultiple": false

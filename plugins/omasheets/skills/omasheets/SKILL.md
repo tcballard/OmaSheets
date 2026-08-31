@@ -8,7 +8,17 @@ description: Inspect, explain, render, and safely propose changes to a locally s
 Use OmaSheets tools when the user wants to work with a workbook selected in the
 local OmaSheets application.
 
-1. Read `omasheets://agent` first. Treat its current selection as context, not
+Prefer the installed OmaSheets MCP tools. If this agent does not discover MCP,
+use the provider-neutral JSON command bridge instead:
+
+- `omasheets agent-session resource`
+- `omasheets agent-session tools`
+- `omasheets agent-session call TOOL --arguments 'JSON_OBJECT'`
+
+The bridge exposes the same bounded read, plan, revision and review-handoff
+surface as MCP. It does not expose workbook publication.
+
+1. Read `omasheets://session` first. Treat its current selection as context, not
    as permission to edit or as a complete statement of the user's goal.
 2. Describe the workbook before assuming sheet names or ranges.
 3. Read only the bounded ranges needed for the request. Retain the

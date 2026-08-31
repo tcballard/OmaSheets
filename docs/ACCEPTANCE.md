@@ -65,10 +65,14 @@ crash-containment limitations.
 
 ## Agent read and staged change
 
-1. Choose **Ask Codex** in the native header and Omarchy panel. Confirm each
-   opens Codex with no workbook path in its initial prompt.
-2. Read `omasheets://agent` and confirm it contains the selected workbook's
+1. Configure a non-Codex Omarchy default agent, then choose **Ask Agent** in the
+   native header and Omarchy panel. Confirm each opens that default agent with
+   no workbook path in its initial prompt. Repeat once with Codex as default.
+2. Read `omasheets://session` and confirm it contains the selected workbook's
    public session and current focus but no source path or publication authority.
+   With MCP discovery disabled, repeat the same bounded read
+   through `omasheets agent-session resource` and one tool call through
+   `omasheets agent-session call`; confirm no publication tool is listed.
 3. Start `omasheets mcp serve` through another MCP client if needed.
 4. Read `omasheets://window` while changing cells and sheets in the native
    window. Confirm address, formula, sheet, zoom and visible rectangle follow
