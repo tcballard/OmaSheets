@@ -79,7 +79,10 @@ fn run(arguments: impl IntoIterator<Item = String>) -> Result<Value, Box<dyn std
 fn main() -> ExitCode {
     match run(env::args().skip(1)) {
         Ok(report) => {
-            println!("{}", serde_json::to_string(&report).expect("JSON serialization"));
+            println!(
+                "{}",
+                serde_json::to_string(&report).expect("JSON serialization")
+            );
             ExitCode::SUCCESS
         }
         Err(error) => {
@@ -99,4 +102,3 @@ mod tests {
         assert!(error.to_string().contains("usage:"));
     }
 }
-

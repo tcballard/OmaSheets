@@ -107,4 +107,3 @@ formula import failure is a useful gate working as intended.
   claims.
 - A native grid is still substantial work. This decision makes its boundary
   explicit instead of hiding it inside a LibreOffice fork.
-
