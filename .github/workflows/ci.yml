@@ -220,9 +220,9 @@ jobs:
               {"type": "fill_down", "sheet": "Revenue", "range": "C3:C4", "source_rows": 1},
               {"type": "sort_range", "sheet": "Revenue", "range": "A2:C4", "key_column": 1, "ascending": False, "has_header": False},
               {"type": "add_sheet", "sheet": "Summary"},
-              {"type": "set_range_values", "sheet": "Revenue", "range": "D1:F4", "values": [["Region", "Period", "Revenue"], ["North", "Q1", 20], ["South", "Q1", 30], ["North", "Q2", 25]]},
+              {"type": "set_range_values", "sheet": "Revenue", "range": "D1:F4", "values": [["Region", "Revenue", "Period"], ["North", 20, "Q1"], ["South", 30, "Q1"], ["North", 25, "Q2"]]},
               {"type": "upsert_pivot", "sheet": "Summary", "name": "RevenuePivot", "source_sheet": "Revenue", "source_range": "D1:F4", "output_cell": "A2", "rows": ["Region"], "columns": [], "filters": ["Period"], "values": [{"field": "Revenue", "function": "sum", "label": "Total revenue"}]},
-              {"type": "upsert_chart", "sheet": "Summary", "name": "RevenueChart", "source_sheet": "Revenue", "source_range": "D1:F4", "anchor_range": "H2:P18", "chart_type": "column", "title": "Revenue by region", "has_column_headers": True, "has_row_headers": True, "legend": True},
+              {"type": "upsert_chart", "sheet": "Summary", "name": "RevenueChart", "source_sheet": "Revenue", "source_range": "D1:E4", "anchor_range": "H2:P18", "chart_type": "column", "title": "Revenue by region", "has_column_headers": True, "has_row_headers": True, "legend": True},
           ]
           workflow = {
               "goal": "Create a checked descending revenue variance input",
