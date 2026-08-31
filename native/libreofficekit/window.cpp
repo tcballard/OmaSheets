@@ -66,6 +66,8 @@ struct WindowState {
     GdkRectangle visible{};
     LibreOfficeKitDocument* document = nullptr;
     GSocketService* bridge_service = nullptr;
+    GFile* diff_file = nullptr;
+    GFileMonitor* diff_monitor = nullptr;
     std::mutex bridge_mutex;
     bool loaded = false;
     bool active = false;
@@ -74,11 +76,13 @@ struct WindowState {
     bool editable = false;
     guint visible_area_source = 0;
     guint context_source = 0;
-    guint diff_source = 0;
+    guint diff_fallback_source = 0;
+    gulong diff_monitor_handler = 0;
     unsigned visible_area_requests = 0;
     unsigned visible_area_updates = 0;
     unsigned scroll_events = 0;
     bool first_paint_seen = false;
+    std::string last_context_state;
     std::string diff_plan_id;
     unsigned diff_change_count = 0;
     unsigned diff_operation_count = 0;
@@ -91,6 +95,7 @@ struct WindowState {
 };
 
 constexpr const char* kProgram = "/usr/lib/libreoffice/program";
+constexpr guint kDiffFallbackSeconds = 5;
 
 std::string json_escape(std::string_view value)
 {
@@ -116,34 +121,45 @@ std::string json_escape(std::string_view value)
     return escaped.str();
 }
 
-void write_context_now(WindowState* state)
+std::string serialize_context(WindowState* state, gint64 updated_at_ms)
+{
+    std::ostringstream output;
+    output << "{\"active\":" << (state->active ? "true" : "false")
+           << ",\"address\":\"" << json_escape(state->selected_address.substr(0, 64)) << "\""
+           << ",\"dirty\":" << (state->dirty ? "true" : "false")
+           << ",\"formula\":\"" << json_escape(state->selected_formula.substr(0, 8192)) << "\""
+           << ",\"live_document_bridge\":" << (state->bridge_service != nullptr && state->active ? "true" : "false")
+           << ",\"revision\":" << state->revision
+           << ",\"session_id\":\"" << state->session_id << "\""
+           << ",\"sheet\":" << state->sheet
+           << ",\"updated_at_ms\":" << updated_at_ms
+           << ",\"version\":1"
+           << ",\"visible\":{\"height\":" << std::max(0, state->visible.height)
+           << ",\"width\":" << std::max(0, state->visible.width)
+           << ",\"x\":" << std::max(0, state->visible.x)
+           << ",\"y\":" << std::max(0, state->visible.y) << "}"
+           << ",\"zoom\":" << state->zoom_value << "}\n";
+    return output.str();
+}
+
+void write_context_now(WindowState* state, bool force = false)
 {
     if (state->context_path.empty())
+        return;
+    const std::string context_state = serialize_context(state, 0);
+    if (!force && context_state == state->last_context_state)
         return;
     const fs::path temporary = state->context_path.string() + ".tmp-" + std::to_string(getpid());
     try {
         std::ofstream output(temporary, std::ios::trunc);
-        output << "{\"active\":" << (state->active ? "true" : "false")
-               << ",\"address\":\"" << json_escape(state->selected_address.substr(0, 64)) << "\""
-               << ",\"dirty\":" << (state->dirty ? "true" : "false")
-               << ",\"formula\":\"" << json_escape(state->selected_formula.substr(0, 8192)) << "\""
-               << ",\"live_document_bridge\":" << (state->bridge_service != nullptr && state->active ? "true" : "false")
-               << ",\"revision\":" << state->revision
-               << ",\"session_id\":\"" << state->session_id << "\""
-               << ",\"sheet\":" << state->sheet
-               << ",\"updated_at_ms\":" << g_get_real_time() / 1000
-               << ",\"version\":1"
-               << ",\"visible\":{\"height\":" << std::max(0, state->visible.height)
-               << ",\"width\":" << std::max(0, state->visible.width)
-               << ",\"x\":" << std::max(0, state->visible.x)
-               << ",\"y\":" << std::max(0, state->visible.y) << "}"
-               << ",\"zoom\":" << state->zoom_value << "}\n";
+        output << serialize_context(state, g_get_real_time() / 1000);
         output.flush();
         if (!output)
             return;
         output.close();
         fs::permissions(temporary, fs::perms::owner_read | fs::perms::owner_write, fs::perm_options::replace);
         fs::rename(temporary, state->context_path);
+        state->last_context_state = context_state;
     } catch (const fs::filesystem_error&) {
         std::error_code ignored;
         fs::remove(temporary, ignored);
@@ -665,6 +681,27 @@ void on_command_result(LOKDocView*, const gchar* result, gpointer data)
         set_status(state, "LibreOfficeKit completed the save command");
 }
 
+void stop_diff_overlay_watch(WindowState* state)
+{
+    if (state->diff_fallback_source != 0) {
+        g_source_remove(state->diff_fallback_source);
+        state->diff_fallback_source = 0;
+    }
+    if (state->diff_monitor != nullptr) {
+        if (state->diff_monitor_handler != 0) {
+            g_signal_handler_disconnect(state->diff_monitor, state->diff_monitor_handler);
+            state->diff_monitor_handler = 0;
+        }
+        g_file_monitor_cancel(state->diff_monitor);
+        g_object_unref(state->diff_monitor);
+        state->diff_monitor = nullptr;
+    }
+    if (state->diff_file != nullptr) {
+        g_object_unref(state->diff_file);
+        state->diff_file = nullptr;
+    }
+}
+
 void on_destroy(GtkWidget*, gpointer data)
 {
     auto* state = static_cast<WindowState*>(data);
@@ -680,11 +717,8 @@ void on_destroy(GtkWidget*, gpointer data)
         g_source_remove(state->context_source);
         state->context_source = 0;
     }
-    if (state->diff_source != 0) {
-        g_source_remove(state->diff_source);
-        state->diff_source = 0;
-    }
-    write_context_now(state);
+    stop_diff_overlay_watch(state);
+    write_context_now(state, true);
     std::error_code ignored;
     if (!state->bridge_path.empty())
         fs::remove(state->bridge_path, ignored);
@@ -969,32 +1003,107 @@ void show_diff_overlay(WindowState* state, const DiffOverlay& overlay)
     set_status(state, "Agent proposal ready — review overlay is read-only");
 }
 
-gboolean poll_diff_overlay(gpointer data)
+void clear_diff_overlay(WindowState* state)
 {
-    auto* state = static_cast<WindowState*>(data);
+    if (!state->diff_overlay_loaded)
+        return;
+    gtk_revealer_set_reveal_child(GTK_REVEALER(state->diff_revealer), FALSE);
+    gtk_widget_hide(state->diff_button);
+    state->diff_plan_id.clear();
+    state->diff_change_count = 0;
+    state->diff_operation_count = 0;
+    state->diff_destructive_count = 0;
+    state->diff_overlay_loaded = false;
+}
+
+void refresh_diff_overlay(WindowState* state)
+{
     if (state->diff_path.empty())
-        return G_SOURCE_CONTINUE;
-    if (!fs::exists(state->diff_path)) {
-        if (state->diff_overlay_loaded) {
-            gtk_revealer_set_reveal_child(GTK_REVEALER(state->diff_revealer), FALSE);
-            gtk_widget_hide(state->diff_button);
-            state->diff_plan_id.clear();
-            state->diff_change_count = 0;
-            state->diff_operation_count = 0;
-            state->diff_destructive_count = 0;
-            state->diff_overlay_loaded = false;
-        }
-        return G_SOURCE_CONTINUE;
+        return;
+    std::error_code existence_error;
+    const bool exists = fs::exists(state->diff_path, existence_error);
+    if (existence_error)
+        return;
+    if (!exists) {
+        clear_diff_overlay(state);
+        return;
     }
     try {
         const DiffOverlay overlay = read_diff_overlay(state);
         if (!state->diff_overlay_loaded || overlay.plan_id != state->diff_plan_id)
             show_diff_overlay(state, overlay);
     } catch (const std::exception&) {
-        // An atomic replacement can be observed between stat and open. Invalid
-        // or foreign payloads remain invisible and are retried on the next tick.
+        // Direct writers can emit a change before the final bytes land. Their
+        // changes-done event retries the read. Invalid or foreign payloads stay
+        // invisible; atomic replacements are already complete at rename time.
     }
+}
+
+gboolean refresh_diff_overlay_fallback(gpointer data)
+{
+    refresh_diff_overlay(static_cast<WindowState*>(data));
     return G_SOURCE_CONTINUE;
+}
+
+bool diff_monitor_event_is_relevant(GFileMonitorEvent event)
+{
+    switch (event) {
+    case G_FILE_MONITOR_EVENT_CHANGED:
+    case G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT:
+    case G_FILE_MONITOR_EVENT_DELETED:
+    case G_FILE_MONITOR_EVENT_CREATED:
+    case G_FILE_MONITOR_EVENT_ATTRIBUTE_CHANGED:
+    case G_FILE_MONITOR_EVENT_RENAMED:
+    case G_FILE_MONITOR_EVENT_MOVED_IN:
+    case G_FILE_MONITOR_EVENT_MOVED_OUT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool diff_monitor_event_targets_overlay(WindowState* state, GFile* file, GFile* other_file)
+{
+    return state->diff_file != nullptr
+        && ((file != nullptr && g_file_equal(file, state->diff_file))
+            || (other_file != nullptr && g_file_equal(other_file, state->diff_file)));
+}
+
+void on_diff_overlay_changed(
+    GFileMonitor*, GFile* file, GFile* other_file, GFileMonitorEvent event, gpointer data)
+{
+    auto* state = static_cast<WindowState*>(data);
+    if (!diff_monitor_event_is_relevant(event)
+        || !diff_monitor_event_targets_overlay(state, file, other_file))
+        return;
+    refresh_diff_overlay(state);
+}
+
+void start_diff_overlay_watch(WindowState* state)
+{
+    if (state->diff_path.empty())
+        return;
+
+    state->diff_file = g_file_new_for_path(state->diff_path.c_str());
+    GFile* directory = g_file_new_for_path(state->diff_path.parent_path().c_str());
+    GError* error = nullptr;
+    state->diff_monitor = g_file_monitor_directory(
+        directory, G_FILE_MONITOR_WATCH_MOVES, nullptr, &error);
+    g_object_unref(directory);
+    if (state->diff_monitor != nullptr) {
+        state->diff_monitor_handler = g_signal_connect(
+            state->diff_monitor, "changed", G_CALLBACK(on_diff_overlay_changed), state);
+    } else {
+        // Monitoring can be unavailable on unusual filesystems. Poll slowly in
+        // that failure mode so review remains functional without 5 Hz wakeups.
+        g_clear_error(&error);
+        state->diff_fallback_source = g_timeout_add_seconds(
+            kDiffFallbackSeconds, refresh_diff_overlay_fallback, state);
+    }
+
+    // Load an already-published proposal after the watcher is armed, closing
+    // the setup race while preserving the original initial-overlay behaviour.
+    refresh_diff_overlay(state);
 }
 
 void on_diff_toggle(GtkButton*, gpointer data)
@@ -1367,10 +1476,7 @@ int main(int argc, char** argv)
         GtkWidget* window = build_window(&state);
         gtk_widget_show_all(window);
         gtk_revealer_set_reveal_child(GTK_REVEALER(state.diff_revealer), FALSE);
-        if (!state.diff_path.empty()) {
-            poll_diff_overlay(&state);
-            state.diff_source = g_timeout_add(200, poll_diff_overlay, &state);
-        }
+        start_diff_overlay_watch(&state);
         stage = "workbook URI";
         gchar* source_uri = g_filename_to_uri(state.source.c_str(), nullptr, &error);
         if (source_uri == nullptr)
@@ -1382,11 +1488,13 @@ int main(int argc, char** argv)
             LOK_DOC_VIEW(state.view), source_uri, "{}", nullptr, on_opened, &state);
         stage = "interactive event loop";
         gtk_main();
+        stop_diff_overlay_watch(&state);
         std::error_code ignored;
         fs::remove_all(state.profile, ignored);
         return state.smoke && !state.loaded ? 1 : 0;
     } catch (const std::exception& exception) {
         std::cerr << "omasheets-window (" << stage << "): " << exception.what() << '\n';
+        stop_diff_overlay_watch(&state);
         std::error_code ignored;
         if (!state.profile.empty())
             fs::remove_all(state.profile, ignored);
