@@ -39,6 +39,28 @@ class AgentSessionTests(unittest.TestCase):
         service.get_plan.assert_called_once_with(plan_id="a" * 32)
         self.assertEqual(json.loads(output.getvalue())["status"], "verified")
 
+    def test_provider_neutral_bridge_exposes_the_same_batched_read_tool(self):
+        service = Mock()
+        service.query_workbook.return_value = {
+            "items": [{"id": "structure", "tool": "describe_workbook", "result": {"sheet_count": 1}}],
+            "evidence_id": "b" * 32,
+        }
+        arguments = {
+            "session_id": "a" * 32,
+            "queries": [{"id": "structure", "tool": "describe_workbook", "arguments": {}}],
+        }
+        output = StringIO()
+        with patch("omasheets.cli._service", return_value=service), redirect_stdout(output):
+            self.assertEqual(main([
+                "agent-session", "call", "query_workbook",
+                "--arguments", json.dumps(arguments, separators=(",", ":")),
+            ]), 0)
+
+        called = service.query_workbook.call_args.kwargs
+        self.assertEqual(called["session_id"], "a" * 32)
+        self.assertEqual(called["queries"][0]["arguments"], {"include_formulas": False})
+        self.assertEqual(json.loads(output.getvalue())["evidence_id"], "b" * 32)
+
 
 if __name__ == "__main__":
     unittest.main()

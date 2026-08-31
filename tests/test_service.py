@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-from omasheets.errors import ConflictError
+from omasheets.errors import ConflictError, EngineError
 from omasheets.diff_overlay import decode_overlay, overlay_path
 from omasheets.identity import identify_regular_file
 from omasheets.live_bridge import LiveSnapshot
@@ -14,6 +14,9 @@ from omasheets.service import OmaSheetsService
 
 
 class FakeEngine:
+    def __init__(self):
+        self.query_calls = []
+
     def describe(self, source, *, include_formulas):
         return {"sheets": [{"name": "Sheet1"}], "formulas": ["=1+1"]}
 
@@ -25,6 +28,13 @@ class FakeEngine:
 
     def trace(self, source, **arguments):
         return {"nodes": [], **arguments}
+
+    def query(self, source, queries):
+        self.query_calls.append((source, queries))
+        return {"items": [
+            {"id": query["id"], "tool": query["tool"], "result": {"ok": query["id"]}}
+            for query in queries
+        ]}
 
     def analyze(self, source, **arguments):
         return {
@@ -64,7 +74,8 @@ class ServiceTests(unittest.TestCase):
         self.paths = AppPaths(root / "state", root / "cache", root / "runtime")
         self.source = root / "book.xlsx"
         self.source.write_bytes(b"workbook")
-        self.service = OmaSheetsService(self.paths, FakeEngine())
+        self.engine = FakeEngine()
+        self.service = OmaSheetsService(self.paths, self.engine)
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -204,6 +215,98 @@ class ServiceTests(unittest.TestCase):
             self.service.describe_workbook(session["session_id"])
         self.assertEqual(request.call_count, 2)
         self.assertFalse(any(snapshot.path.exists() for snapshot in snapshots))
+
+    def test_read_query_batch_uses_one_live_snapshot_one_engine_call_and_one_evidence_record(self):
+        session = self.service.select_workbook(self.source)
+        context_path = self.service.prepare_window_context(session["session_id"])
+        context = json.loads(context_path.read_text())
+        context.update({
+            "active": True,
+            "dirty": True,
+            "live_document_bridge": True,
+            "updated_at_ms": 4,
+        })
+        context_path.write_text(json.dumps(context))
+        snapshot = self.source.with_name("batch-live.xlsx")
+        snapshot.write_bytes(b"live-workbook")
+        live = LiveSnapshot(snapshot, identify_regular_file(snapshot), "xlsx", "c" * 64)
+        queries = [
+            {"id": "structure", "tool": "describe_workbook", "arguments": {"include_formulas": False}},
+            {
+                "id": "cells", "tool": "read_range",
+                "arguments": {
+                    "sheet": "Sheet1", "range": "A1:B2",
+                    "include_formulas": True, "include_styles": False,
+                },
+            },
+        ]
+
+        with patch("omasheets.service.request_live_snapshot", return_value=live) as request:
+            result = self.service.query_workbook(session["session_id"], queries)
+
+        request.assert_called_once()
+        self.assertEqual(len(self.engine.query_calls), 1)
+        self.assertEqual(self.engine.query_calls[0], (snapshot, queries))
+        self.assertEqual([item["id"] for item in result["items"]], ["structure", "cells"])
+        self.assertFalse(result["items"][0]["result"]["formula_records_included"])
+        self.assertEqual(result["document_source"], "live_window")
+        records = list(self.service.evidence.glob("*.json"))
+        self.assertEqual(len(records), 1)
+        record = self.service._load_evidence(result["evidence_id"])
+        self.assertEqual(record["tool"], "query_workbook")
+        self.assertEqual(record["arguments"], {"queries": queries})
+        self.assertFalse(snapshot.exists())
+
+        plan_snapshot = self.source.with_name("batch-plan-live.xlsx")
+        plan_snapshot.write_bytes(b"same-semantic-live-workbook")
+        plan_live = LiveSnapshot(
+            plan_snapshot, identify_regular_file(plan_snapshot), "xlsx", live.semantic_sha256,
+        )
+        with patch("omasheets.service.request_live_snapshot", return_value=plan_live):
+            plan = self.service.plan_changes(
+                session["session_id"], 1,
+                [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}],
+                {
+                    "goal": "Use the batch observation",
+                    "summary": "Make one reviewed change from the batched reads.",
+                    "evidence_ids": [result["evidence_id"]],
+                    "groups": [{
+                        "title": "Update cell", "purpose": "Use the sealed batch evidence.",
+                        "operation_indexes": [0],
+                    }],
+                },
+            )
+        self.assertEqual(plan["workflow"]["evidence"][0]["tool"], "query_workbook")
+
+    def test_failed_read_query_batch_creates_no_evidence_or_plan(self):
+        session = self.service.select_workbook(self.source)
+        queries = [{
+            "id": "cells", "tool": "read_range",
+            "arguments": {
+                "sheet": "Sheet1", "range": "A1",
+                "include_formulas": True, "include_styles": False,
+            },
+        }]
+        with patch.object(self.engine, "query", side_effect=EngineError("subquery failed")):
+            with self.assertRaisesRegex(EngineError, "subquery failed"):
+                self.service.query_workbook(session["session_id"], queries)
+        self.assertEqual(list(self.service.evidence.glob("*.json")), [])
+        self.assertEqual(list(self.service.plans.glob("*.json")), [])
+
+    def test_mismatched_read_query_worker_output_is_not_sealed(self):
+        session = self.service.select_workbook(self.source)
+        queries = [
+            {"id": "first", "tool": "describe_workbook", "arguments": {"include_formulas": False}},
+            {"id": "second", "tool": "describe_workbook", "arguments": {"include_formulas": False}},
+        ]
+        reversed_items = {"items": [
+            {"id": "second", "tool": "describe_workbook", "result": {}},
+            {"id": "first", "tool": "describe_workbook", "result": {}},
+        ]}
+        with patch.object(self.engine, "query", return_value=reversed_items):
+            with self.assertRaisesRegex(EngineError, "mismatched query batch"):
+                self.service.query_workbook(session["session_id"], queries)
+        self.assertEqual(list(self.service.evidence.glob("*.json")), [])
 
     def test_native_overlay_confirmation_publishes_only_a_new_copy(self):
         session = self.service.select_workbook(self.source)

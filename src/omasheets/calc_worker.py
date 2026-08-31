@@ -641,6 +641,107 @@ def _trace(document, arguments: dict[str, Any], limits: dict[str, int]) -> dict[
     }
 
 
+def _validated_read_queries(queries: Any) -> list[dict[str, Any]]:
+    """Validate the complete batch before any workbook query is evaluated."""
+
+    if not isinstance(queries, list) or not 1 <= len(queries) <= 8:
+        raise RuntimeError("query batch must contain between 1 and 8 items")
+    specifications = {
+        "describe_workbook": (
+            {"include_formulas"}, set(), {"include_formulas": False},
+        ),
+        "read_range": (
+            {"sheet", "range", "include_formulas", "include_styles"},
+            {"sheet", "range"},
+            {"include_formulas": True, "include_styles": False},
+        ),
+        "search_workbook": (
+            {"query", "scope", "max_results"}, {"query"},
+            {"scope": "both", "max_results": 50},
+        ),
+        "trace_formula": (
+            {"sheet", "cell", "direction", "max_depth"}, {"sheet", "cell"},
+            {"direction": "both", "max_depth": 5},
+        ),
+    }
+    identifiers: set[str] = set()
+    normalized = []
+    for index, item in enumerate(queries):
+        if not isinstance(item, dict) or set(item) != {"id", "tool", "arguments"}:
+            raise RuntimeError(f"query batch item {index + 1} has an invalid shape")
+        identifier = item["id"]
+        if (
+            not isinstance(identifier, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", identifier) is None
+            or identifier in identifiers
+        ):
+            raise RuntimeError(f"query batch item {index + 1} has an invalid or duplicate id")
+        identifiers.add(identifier)
+        tool = item["tool"]
+        if not isinstance(tool, str) or tool not in specifications:
+            raise RuntimeError(f"query batch item {index + 1} uses an unsupported read tool")
+        arguments = item["arguments"]
+        if not isinstance(arguments, dict):
+            raise RuntimeError(f"query batch item {index + 1} arguments must be an object")
+        allowed, required, defaults = specifications[tool]
+        unknown = set(arguments) - allowed
+        missing = required - set(arguments)
+        if unknown or missing:
+            raise RuntimeError(f"query batch item {index + 1} has invalid arguments")
+        values = {**defaults, **arguments}
+        if tool == "describe_workbook":
+            valid = isinstance(values["include_formulas"], bool)
+        elif tool == "read_range":
+            valid = (
+                isinstance(values["sheet"], str) and 1 <= len(values["sheet"]) <= 128
+                and isinstance(values["range"], str) and 1 <= len(values["range"]) <= 64
+                and isinstance(values["include_formulas"], bool)
+                and isinstance(values["include_styles"], bool)
+            )
+        elif tool == "search_workbook":
+            maximum = values["max_results"]
+            valid = (
+                isinstance(values["query"], str) and 1 <= len(values["query"]) <= 256
+                and isinstance(values["scope"], str)
+                and values["scope"] in {"values", "formulas", "both"}
+                and isinstance(maximum, int) and not isinstance(maximum, bool)
+                and 1 <= maximum <= 200
+            )
+        else:
+            depth = values["max_depth"]
+            valid = (
+                isinstance(values["sheet"], str) and 1 <= len(values["sheet"]) <= 128
+                and isinstance(values["cell"], str) and 1 <= len(values["cell"]) <= 64
+                and isinstance(values["direction"], str)
+                and values["direction"] in {"precedents", "dependents", "both"}
+                and isinstance(depth, int) and not isinstance(depth, bool)
+                and 1 <= depth <= 10
+            )
+        if not valid:
+            raise RuntimeError(f"query batch item {index + 1} has invalid arguments")
+        normalized.append({"id": identifier, "tool": tool, "arguments": values})
+    return normalized
+
+
+def _query_workbook(document, queries: Any, limits: dict[str, int]) -> dict[str, Any]:
+    """Run independent bounded reads in order against one loaded document."""
+
+    normalized = _validated_read_queries(queries)
+    handlers = {
+        "describe_workbook": lambda arguments: _inspect(
+            document, limits, include_formulas=arguments["include_formulas"],
+        ),
+        "read_range": lambda arguments: _read_range(document, arguments, limits),
+        "search_workbook": lambda arguments: _search(document, arguments, limits),
+        "trace_formula": lambda arguments: _trace(document, arguments, limits),
+    }
+    items = []
+    for query in normalized:
+        result = handlers[query["tool"]](query["arguments"])
+        items.append({"id": query["id"], "tool": query["tool"], "result": result})
+    return {"items": items}
+
+
 def _color(value: str) -> int:
     return int(value.removeprefix("#"), 16)
 
@@ -965,6 +1066,11 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
             return {"result": _search(document, request["arguments"], limits), "artifacts": {}}
         if action == "trace":
             return {"result": _trace(document, request["arguments"], limits), "artifacts": {}}
+        if action == "query":
+            return {
+                "result": _query_workbook(document, request["arguments"].get("queries"), limits),
+                "artifacts": {},
+            }
         if action == "analyze":
             return {"result": _analyze(document, request["arguments"], limits), "artifacts": {}}
         if action == "render":

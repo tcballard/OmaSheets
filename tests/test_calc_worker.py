@@ -14,11 +14,13 @@ from omasheets.calc_worker import (
     _matrix_values,
     _named_ranges,
     _object_fingerprints,
+    _query_workbook,
     _style_color,
     _style_table,
     _startup_diagnostic,
     _search,
     _target_fingerprints,
+    run,
 )
 
 
@@ -245,6 +247,94 @@ class CountingWorkbook:
 
 
 class CalcWorkerTests(unittest.TestCase):
+    def test_read_query_batch_preserves_order_and_uses_each_bounded_handler(self):
+        document = object()
+        limits = {"max_sheets": 10, "max_cells": 100, "max_formulas": 20, "max_results": 20}
+        queries = [
+            {"id": "structure", "tool": "describe_workbook", "arguments": {}},
+            {"id": "cells", "tool": "read_range", "arguments": {"sheet": "Data", "range": "A1:B2"}},
+            {"id": "needle", "tool": "search_workbook", "arguments": {"query": "total"}},
+            {"id": "formula", "tool": "trace_formula", "arguments": {"sheet": "Data", "cell": "B2"}},
+        ]
+        with (
+            patch("omasheets.calc_worker._inspect", return_value={"sheet_count": 1}) as inspect,
+            patch("omasheets.calc_worker._read_range", return_value={"values": [[1]]}) as read,
+            patch("omasheets.calc_worker._search", return_value={"matches": []}) as search,
+            patch("omasheets.calc_worker._trace", return_value={"precedents": []}) as trace,
+        ):
+            result = _query_workbook(document, queries, limits)
+
+        self.assertEqual(
+            [(item["id"], item["tool"]) for item in result["items"]],
+            [(item["id"], item["tool"]) for item in queries],
+        )
+        inspect.assert_called_once_with(document, limits, include_formulas=False)
+        self.assertEqual(read.call_args.args[1], {
+            "sheet": "Data", "range": "A1:B2",
+            "include_formulas": True, "include_styles": False,
+        })
+        self.assertEqual(search.call_args.args[1], {
+            "query": "total", "scope": "both", "max_results": 50,
+        })
+        self.assertEqual(trace.call_args.args[1], {
+            "sheet": "Data", "cell": "B2", "direction": "both", "max_depth": 5,
+        })
+
+    def test_read_query_batch_preflights_every_item_before_reading(self):
+        queries = [
+            {"id": "valid", "tool": "describe_workbook", "arguments": {}},
+            {
+                "id": "invalid", "tool": "read_range",
+                "arguments": {"sheet": "Data", "range": "A1", "session_id": "a" * 32},
+            },
+        ]
+        with patch("omasheets.calc_worker._inspect") as inspect:
+            with self.assertRaisesRegex(RuntimeError, "item 2 has invalid arguments"):
+                _query_workbook(object(), queries, {})
+        inspect.assert_not_called()
+
+    def test_read_query_batch_discards_partial_results_when_a_query_fails(self):
+        queries = [
+            {"id": "structure", "tool": "describe_workbook", "arguments": {}},
+            {"id": "cells", "tool": "read_range", "arguments": {"sheet": "Data", "range": "A1"}},
+            {"id": "later", "tool": "search_workbook", "arguments": {"query": "x"}},
+        ]
+        with (
+            patch("omasheets.calc_worker._inspect", return_value={"sheet_count": 1}),
+            patch("omasheets.calc_worker._read_range", side_effect=RuntimeError("read failed")),
+            patch("omasheets.calc_worker._search") as search,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "read failed"):
+                _query_workbook(object(), queries, {})
+        search.assert_not_called()
+
+    def test_read_query_action_loads_the_document_once_for_the_whole_batch(self):
+        process = SimpleNamespace(terminate=lambda: None, wait=lambda timeout: None)
+        document = SimpleNamespace(close=lambda deliver_ownership: None)
+        expected = {"items": [{
+            "id": "structure", "tool": "describe_workbook", "result": {"sheet_count": 1},
+        }]}
+        request = {
+            "action": "query",
+            "source": "input/workbook.xlsx",
+            "arguments": {"queries": [{
+                "id": "structure", "tool": "describe_workbook", "arguments": {},
+            }]},
+            "limits": {"max_sheets": 10, "max_cells": 100, "max_formulas": 20, "max_results": 20},
+            "soffice": "/usr/bin/soffice",
+        }
+        with (
+            patch.dict("sys.modules", {"uno": SimpleNamespace()}),
+            patch("omasheets.calc_worker._connect", return_value=(process, object())),
+            patch("omasheets.calc_worker._load", return_value=document) as load,
+            patch("omasheets.calc_worker._query_workbook", return_value=expected) as query,
+        ):
+            result = run(request)
+
+        load.assert_called_once()
+        query.assert_called_once_with(document, request["arguments"]["queries"], request["limits"])
+        self.assertEqual(result, {"result": expected, "artifacts": {}})
+
     def test_inspect_reads_only_formulas_and_preserves_formula_errors(self):
         area = CountingArea(
             (("Metric",), ("#DIV/0!",)),

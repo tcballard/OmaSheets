@@ -51,6 +51,9 @@ A short-lived LibreOffice Calc/UNO process is the authority for importing,
 calculating, saving, reopening, inspecting, and rendering workbooks. Each job
 uses a fresh profile, a private UNO pipe, no network namespace, no home-directory
 mount, macro execution disabled, and document-update prompts disabled.
+`query_workbook` amortizes that fixed cost by running up to eight validated,
+independent read queries after one snapshot copy and one read-only document load.
+The batch returns no evidence unless every query succeeds.
 
 ### OmaSheets service
 
