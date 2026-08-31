@@ -198,9 +198,14 @@ class CalcEngine:
                 )
             except subprocess.TimeoutExpired as exc:
                 raise EngineError("Calc job exceeded its time limit") from exc
-            if completed.returncode != 0:
-                raise EngineError("isolated Calc job failed")
             result_path = job / "result.json"
+            if completed.returncode != 0:
+                if result_path.is_file() and result_path.stat().st_size <= 4 * 1024 * 1024:
+                    failed = read_json(result_path)
+                    detail = failed.get("error")
+                    if isinstance(detail, str) and detail:
+                        raise EngineError(detail[:512])
+                raise EngineError("isolated Calc job failed")
             if not result_path.is_file() or result_path.stat().st_size > 4 * 1024 * 1024:
                 raise EngineError("Calc worker returned no bounded result")
             result = read_json(result_path)

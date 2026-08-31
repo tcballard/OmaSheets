@@ -78,6 +78,8 @@ closed. A clearly labelled development override may exist for tests only.
 - Literal search is case-insensitive in v0.0.1; it is not a query language.
 - Formula tracing is bounded and cannot resolve every dynamic reference.
 - No custom verification scripts run inside the sandbox in v0.0.1.
+- Worker failures expose only the bounded structured error written to the
+  private job result; process stderr and the inherited environment remain hidden.
 - Starting Codex is an explicit local UI action. The fixed entry prompt contains
   no workbook path or cell content; Codex still has the authority of the local
   user account and is outside Calc's networkless worker sandbox.
