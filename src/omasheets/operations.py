@@ -250,7 +250,7 @@ def validate_operations(operations: list[dict[str, Any]]) -> list[dict[str, Any]
                     raise PolicyError(f"operation {index} chart anchor must span at least two rows and columns")
             if operation["chart_type"] not in {"column", "bar", "line", "pie", "scatter"}:
                 raise PolicyError(f"operation {index} has an invalid chart type")
-            if not isinstance(operation["title"], str) or len(operation["title"]) > 256:
+            if not isinstance(operation["title"], str) or not 1 <= len(operation["title"]) <= 256:
                 raise PolicyError(f"operation {index} has an invalid chart title")
             for key in ("has_column_headers", "has_row_headers", "legend"):
                 if not isinstance(operation[key], bool):

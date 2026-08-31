@@ -11,6 +11,7 @@ from omasheets.calc_worker import (
     _fill_direction,
     _matrix_values,
     _named_ranges,
+    _object_fingerprints,
     _style_color,
     _style_table,
     _startup_diagnostic,
@@ -181,6 +182,33 @@ class FakeLegacyNamedDocument:
 
 
 class CalcWorkerTests(unittest.TestCase):
+    def test_xlsx_embedded_chart_fallback_uses_the_visible_title(self):
+        model = SimpleNamespace(HasMainTitle=True, Title=SimpleNamespace(String="Revenue by region"))
+
+        class Charts:
+            def hasByName(self, name):
+                del name
+                return False
+
+        class DrawPage:
+            def getCount(self):
+                return 1
+
+            def getByIndex(self, index):
+                del index
+                return SimpleNamespace(Model=model)
+
+        sheet = SimpleNamespace(getCharts=lambda: Charts(), getDrawPage=lambda: DrawPage())
+        sheets = SimpleNamespace(getByName=lambda name: sheet)
+        document = SimpleNamespace(getSheets=lambda: sheets)
+        result = _object_fingerprints(document, [{
+            "type": "upsert_chart", "sheet": "Summary", "name": "RevenueChart",
+            "title": "Revenue by region",
+        }])
+        self.assertEqual(result["charts"], [{
+            "sheet": "Summary", "name": "RevenueChart", "title": "Revenue by region",
+        }])
+
     def test_fill_directions_are_uno_enums_not_constants(self):
         fake_uno = SimpleNamespace(Enum=lambda type_name, member: (type_name, member))
         with patch.dict("sys.modules", {"uno": fake_uno}):

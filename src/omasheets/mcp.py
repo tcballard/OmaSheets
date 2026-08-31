@@ -125,7 +125,7 @@ OPERATION_SCHEMA = _object(
         "source_range": RANGE,
         "anchor_range": RANGE,
         "chart_type": {"type": "string", "enum": ["column", "bar", "line", "pie", "scatter"]},
-        "title": {"type": "string", "maxLength": 256},
+        "title": {"type": "string", "minLength": 1, "maxLength": 256},
         "has_column_headers": {"type": "boolean"},
         "has_row_headers": {"type": "boolean"},
         "legend": {"type": "boolean"},
