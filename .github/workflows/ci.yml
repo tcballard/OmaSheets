@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "feat/**"]
+    branches: [main, "feat/**", "codex/**"]
   pull_request:
 
 permissions:
@@ -119,6 +119,77 @@ jobs:
           test -s "$RUNNER_TEMP/lok-input/smoke.xls"
           test -s "$RUNNER_TEMP/lok-input/smoke.xlsx"
           test -s "$RUNNER_TEMP/lok-input/large.xlsx"
+      - name: Exercise the installed agentic workbook loop
+        run: |
+          original_sha=$(sha256sum "$RUNNER_TEMP/lok-input/smoke.xlsx" | cut -d' ' -f1)
+          "$HOME/.local/bin/omasheets" select "$RUNNER_TEMP/lok-input/smoke.xlsx" > "$RUNNER_TEMP/session.json"
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          launcher = Path(os.environ["HOME"], ".local/bin/omasheets")
+          session = json.loads(Path(os.environ["RUNNER_TEMP"], "session.json").read_text())
+          process = subprocess.Popen(
+              [launcher, "mcp", "serve"], text=True,
+              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+          )
+          meta = {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {},
+          }
+
+          def call(request_id, name, arguments):
+              request = {
+                  "jsonrpc": "2.0", "id": request_id, "method": "tools/call",
+                  "params": {"name": name, "arguments": arguments, "_meta": meta},
+              }
+              process.stdin.write(json.dumps(request) + "\n")
+              process.stdin.flush()
+              response = json.loads(process.stdout.readline())
+              assert "error" not in response, response
+              return response["result"]["structuredContent"]
+
+          observed = call(1, "describe_workbook", {
+              "session_id": session["session_id"], "include_formulas": True,
+          })
+          operations = [
+              {"type": "insert_rows", "sheet": "Revenue", "row": 3, "count": 2},
+              {"type": "set_range_values", "sheet": "Revenue", "range": "A3:B4", "values": [[10, 12], [15, 18]]},
+              {"type": "set_formula", "sheet": "Revenue", "range": "C3", "formula": "=SUM(A3:B3)"},
+              {"type": "fill_down", "sheet": "Revenue", "range": "C3:C4", "source_rows": 1},
+              {"type": "sort_range", "sheet": "Revenue", "range": "A2:C4", "key_column": 1, "ascending": False, "has_header": False},
+          ]
+          workflow = {
+              "goal": "Create a checked descending revenue variance input",
+              "summary": "Insert two data rows, calculate totals, fill the formula, and order the inspected range.",
+              "assumptions": ["The source figures are comparable."],
+              "evidence_ids": [observed["evidence_id"]],
+              "groups": [
+                  {"title": "Add inputs", "purpose": "Add the requested revenue observations.", "operation_indexes": [0, 1]},
+                  {"title": "Calculate totals", "purpose": "Use reference-aware formula filling.", "operation_indexes": [2, 3]},
+                  {"title": "Order results", "purpose": "Present the largest revenue first.", "operation_indexes": [4]},
+              ],
+          }
+          first = call(2, "plan_changes", {
+              "session_id": session["session_id"], "expected_revision": 1,
+              "operations": operations, "workflow": workflow,
+          })
+          assert first["workflow"]["evidence"][0]["tool"] == "describe_workbook"
+          workflow["goal"] = "Create the corrected checked revenue input"
+          workflow["summary"] = "Revise the proposal while retaining evidence and exact operation groups."
+          revised = call(3, "revise_plan", {
+              "plan_id": first["plan_id"], "expected_revision": 1,
+              "operations": operations, "workflow": workflow,
+          })
+          assert revised["supersedes_plan_id"] == first["plan_id"]
+          handoff = call(4, "apply_plan", {"plan_id": revised["plan_id"], "expected_revision": 1})
+          assert handoff["status"] == "local_review_required"
+          process.stdin.close()
+          assert process.wait(timeout=10) == 0, process.stderr.read()
+          PY
+          test "$(sha256sum "$RUNNER_TEMP/lok-input/smoke.xlsx" | cut -d' ' -f1)" = "$original_sha"
       - name: Render the workbook through LibreOfficeKit
         run: |
           "$XDG_DATA_HOME/omasheets/app/bin/omasheets-lok-render" \

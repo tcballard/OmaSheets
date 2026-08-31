@@ -1,0 +1,44 @@
+[
+  {
+    "id": "explain",
+    "request": "Explain why the selected total differs from the source rows.",
+    "inspection": ["describe_workbook", "read_range", "trace_formula"],
+    "may_plan": false,
+    "required_operations": []
+  },
+  {
+    "id": "clean",
+    "request": "Clean this imported table and order it by date.",
+    "inspection": ["describe_workbook", "read_range"],
+    "may_plan": true,
+    "required_operations": ["set_range_values", "sort_range"]
+  },
+  {
+    "id": "variance",
+    "request": "Add budget variance values and highlight the result.",
+    "inspection": ["describe_workbook", "read_range"],
+    "may_plan": true,
+    "required_operations": ["set_formula", "fill_down", "format_cells"]
+  },
+  {
+    "id": "reconcile",
+    "request": "Reconcile the IDs and amounts on these two sheets.",
+    "inspection": ["describe_workbook", "read_range", "search_workbook"],
+    "may_plan": true,
+    "required_operations": ["add_sheet", "set_range_values", "set_range_formulas"]
+  },
+  {
+    "id": "summarise",
+    "request": "Create a checked summary sheet from the inspected source data.",
+    "inspection": ["describe_workbook", "read_range"],
+    "may_plan": true,
+    "required_operations": ["add_sheet", "set_range_values", "set_range_formulas", "format_cells"]
+  },
+  {
+    "id": "format",
+    "request": "Standardise this table without changing any values.",
+    "inspection": ["describe_workbook", "read_range"],
+    "may_plan": true,
+    "required_operations": ["format_cells"]
+  }
+]
