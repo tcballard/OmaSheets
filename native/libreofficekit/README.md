@@ -22,6 +22,12 @@ dirty-close handling, Save a Copy, the private live-document bridge and the
 human-controlled diff overlay. `.xlsx` and `.ods` are editable; `.xls` and
 `.xlsm` remain read-only.
 
+The review overlay is event-driven: the window monitors the overlay's parent
+directory so atomic create, rename, replacement and deletion are reflected
+without a permanent polling wakeup. A five-second fallback is used only when
+the platform cannot create the directory monitor. Repeated UI notifications
+with identical bounded context are also coalesced before touching disk.
+
 CI creates its workbook fixtures from the historical files under
 `spikes/libreofficekit/fixtures/`, but no production command runs a build-tree
 executable.
