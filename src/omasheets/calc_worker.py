@@ -270,13 +270,50 @@ def _object_inventory(document) -> dict[str, Any]:
 
 
 def _object_fingerprints(document, operations: list[dict[str, Any]]) -> dict[str, Any]:
-    inventory = _object_inventory(document)
-    chart_keys = {(operation["sheet"], operation["name"]) for operation in operations if operation["type"] == "upsert_chart"}
-    pivot_keys = {(operation["sheet"], operation["name"]) for operation in operations if operation["type"] in {"upsert_pivot", "refresh_pivot"}}
-    return {
-        "charts": [item for item in inventory["charts"] if (item["sheet"], item["name"]) in chart_keys],
-        "pivots": [item for item in inventory["pivots"] if (item["sheet"], item["name"]) in pivot_keys],
-    }
+    charts = []
+    pivots = []
+    sheets = document.getSheets()
+    for operation in operations:
+        sheet = sheets.getByName(operation["sheet"])
+        if operation["type"] == "upsert_chart":
+            title = None
+            table_charts = sheet.getCharts()
+            if table_charts.hasByName(operation["name"]):
+                try:
+                    embedded = table_charts.getByName(operation["name"]).getEmbeddedObject()
+                    title = str(embedded.Title.String) if embedded.HasMainTitle else ""
+                except Exception:
+                    title = ""
+            else:
+                # OOXML reload can expose a persisted chart as an OLE2 shape
+                # without reconstructing its XTableCharts name collection.
+                # Match the operation's visible title through the embedded
+                # chart model so verification still proves the chart survived.
+                draw_page = sheet.getDrawPage()
+                for index in range(draw_page.getCount()):
+                    shape = draw_page.getByIndex(index)
+                    try:
+                        model = shape.Model
+                        candidate = str(model.Title.String) if model.HasMainTitle else ""
+                    except Exception:
+                        continue
+                    if candidate == operation["title"]:
+                        title = candidate
+                        break
+            if title is not None:
+                charts.append({"sheet": operation["sheet"], "name": operation["name"], "title": title})
+        elif operation["type"] in {"upsert_pivot", "refresh_pivot"}:
+            tables = sheet.getDataPilotTables()
+            if tables.hasByName(operation["name"]):
+                table = tables.getByName(operation["name"])
+                source = table.getSourceRange()
+                output = table.getOutputRange()
+                pivots.append({
+                    "sheet": operation["sheet"], "name": operation["name"],
+                    "source": [source.Sheet, source.StartColumn, source.StartRow, source.EndColumn, source.EndRow],
+                    "output": [output.Sheet, output.StartColumn, output.StartRow, output.EndColumn, output.EndRow],
+                })
+    return {"charts": charts, "pivots": pivots}
 
 
 def _analyze(document, arguments: dict[str, Any], limits: dict[str, int]) -> dict[str, Any]:
