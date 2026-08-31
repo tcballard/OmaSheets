@@ -249,14 +249,17 @@ class CalcWorkerTests(unittest.TestCase):
 
     def test_bounded_sort_descriptor_uses_one_relative_key(self):
         document = FakeDocument()
-        _apply(document, [{
-            "type": "sort_range", "sheet": "Data", "range": "A1:C9",
-            "key_column": 2, "ascending": False, "has_header": True,
-        }])
+        fake_uno = SimpleNamespace(createUnoStruct=lambda name: SimpleNamespace(type_name=name))
+        with patch.dict("sys.modules", {"uno": fake_uno}):
+            _apply(document, [{
+                "type": "sort_range", "sheet": "Data", "range": "A1:C9",
+                "key_column": 2, "ascending": False, "has_header": True,
+            }])
         descriptor = document.area.sort_descriptor
         self.assertTrue(descriptor[0].Value)
         self.assertEqual(descriptor[1].Value[0].Field, 1)
-        self.assertFalse(descriptor[1].Value[0].IsAscending)
+        self.assertFalse(descriptor[1].Value[0].SortAscending)
+        self.assertEqual(descriptor[1].Value[0].type_name, "com.sun.star.util.SortField")
 
     def test_styles_are_deduplicated_and_automatic_colours_are_explicit(self):
         table = _style_table(FakeStyleDocument(), FakeStyleArea(), 2, 2)
