@@ -42,28 +42,28 @@ def diagnose() -> dict[str, Any]:
         "name": "desktop-integration",
         "ok": desktop_ok,
         "detail": DESKTOP_ID if desktop_ok else "run: omasheets integrate install",
-        "required": False,
+        "required": True,
     })
     plugin = Path.home() / ".config/omarchy/plugins/io.github.tcballard.omasheets/manifest.json"
     checks.append({
         "name": "omarchy-plugin",
         "ok": plugin.is_file(),
         "detail": str(plugin) if plugin.is_file() else "install with: omarchy plugin add <repository> --enable",
-        "required": False,
+        "required": True,
     })
     lok = lok_status()
     checks.append({
-        "name": "libreofficekit-spike",
+        "name": "libreofficekit-engine",
         "ok": lok["ready"],
-        "detail": "ready" if lok["ready"] else "optional: run omasheets lok status",
-        "required": False,
+        "detail": "ready" if lok["ready"] else "run: omasheets lok status",
+        "required": True,
     })
     native = window_status()
     checks.append({
         "name": "omasheets-window",
         "ok": native["ready"],
         "detail": native["detail"],
-        "required": False,
+        "required": True,
     })
     required = [check for check in checks if check.get("required", True)]
     return {"ready": all(check["ok"] for check in required), "checks": checks}

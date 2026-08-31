@@ -20,8 +20,15 @@ def main() -> int:
     versions = {project["version"], manifest["version"], matched.group(1)}
     assert len(versions) == 1, f"release versions disagree: {sorted(versions)}"
     assert manifest["id"] == "io.github.tcballard.omasheets"
-    for required in ("README.md", "INSTALL.md", "docs/ACCEPTANCE.md", "docs/SECURITY.md"):
+    for required in (
+        "README.md", "INSTALL.md", "docs/ACCEPTANCE.md", "docs/SECURITY.md",
+        "bin/omasheets-plugin", "scripts/install.py",
+        "native/libreofficekit/CMakeLists.txt", "plugins/omasheets/.codex-plugin/plugin.json",
+    ):
         assert (ROOT / required).is_file(), f"missing release document: {required}"
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "b686ed892d9c3020c3336203f6d34cc75b544e2b" in workflow, "Omarchy validator pin drifted"
+    assert "Arch production install and native acceptance" in workflow
     print(f"release contract ok: v{versions.pop()}")
     return 0
 

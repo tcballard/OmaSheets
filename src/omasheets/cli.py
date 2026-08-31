@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     open_command = commands.add_parser("open", help="Open workbooks in LibreOffice Calc")
     open_command.add_argument("paths", nargs="+", type=Path)
     commands.add_parser("open-current", help="Open the selected workbook in LibreOffice Calc")
-    window = commands.add_parser("window", help="Open a workbook in the experimental OmaSheets window")
+    window = commands.add_parser("window", help="Open a workbook in the native OmaSheets window")
     window.add_argument("path", type=Path)
     commands.add_parser("window-current", help="Open the selected workbook in the OmaSheets window")
     convert = commands.add_parser("convert", help="Convert .xls to a new adjacent .xlsx")
@@ -59,9 +59,9 @@ def build_parser() -> argparse.ArgumentParser:
     integrate_commands.add_parser("install", help="Install the desktop entry and MIME associations")
     integrate_commands.add_parser("uninstall", help="Restore or remove OmaSheets integration")
     commands.add_parser("uninstall", help="Remove the user-local OmaSheets product installation")
-    lok = commands.add_parser("lok", help="Run the experimental LibreOfficeKit spike")
+    lok = commands.add_parser("lok", help="Inspect the installed LibreOfficeKit engine")
     lok_commands = lok.add_subparsers(dest="lok_command", required=True)
-    lok_status = lok_commands.add_parser("status", help="Check LibreOfficeKit spike dependencies")
+    lok_status = lok_commands.add_parser("status", help="Check LibreOfficeKit engine dependencies")
     lok_status.add_argument("--json", action="store_true", help="Emit JSON")
     lok_render = lok_commands.add_parser("render", help="Render a workbook tile through LibreOfficeKit")
     lok_render.add_argument("path", type=Path)
@@ -194,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 for check in result["checks"]:
                     print(f"{'ok' if check['ok'] else 'missing':7} {check['name']}: {check['detail']}")
-                print("spike ready" if result["ready"] else "spike not ready")
+                print("native engine ready" if result["ready"] else "native engine not ready")
             return 0 if result["ready"] else 1
         result = render_workbook(
             arguments.path,

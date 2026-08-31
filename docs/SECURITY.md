@@ -16,6 +16,24 @@ is not cryptographically isolated from OmaSheets state.
 - Local CLI and panel review may approve, reject, commit, and undo.
 - `.xlsm` is read-only; `.xls` can only produce a separate `.xlsx`.
 
+## Installation and dependency authority
+
+The Omarchy plugin manager clones, validates and enables the repository but
+runs no OmaSheets hooks. The bar widget invokes only fixed argv rooted at the
+validated plugin source directory. Bootstrap never runs `sudo` or a package
+manager; missing LibreOfficeKit, GTK3, Python UNO, Bubblewrap and build tools are
+reported with an explicit `omarchy pkg add` command for the user to approve.
+
+Product files are user-local. The installer refuses pre-existing unowned target
+paths, rewrites the installed Codex MCP command to an absolute owned launcher,
+and records hashes for removal. Modified desktop/plugin/launcher files are
+preserved, and unrelated MIME or Codex marketplace entries are not rolled back.
+
+Native binaries embed the source commit and full tracked-source digest used by
+the compiler. CI verifies that embedded identity against the checkout and the
+installation provenance receipt; a detached checksum file is not treated as
+sufficient provenance.
+
 ## Calc isolation
 
 Production jobs require Bubblewrap and run with:

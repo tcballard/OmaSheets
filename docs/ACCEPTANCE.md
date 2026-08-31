@@ -1,58 +1,62 @@
 # v0.0.1 acceptance runbook
 
-Run this on an Omarchy `quattro` workstation. Automated CI covers policy,
-transaction, plugin-manifest, MIME rollback, protocol, and wheel contracts.
-This runbook covers the real Quickshell, Bubblewrap, LibreOffice UNO, desktop,
-and file-manager boundaries that a generic CI container cannot faithfully
-exercise.
+Run this on an Omarchy `quattro` workstation. Automated Arch CI covers policy,
+transactions, the pinned plugin validator, wheel packaging, user-local install,
+native launch under Xvfb, live bridge, diff overlay, provenance and uninstall.
+It does not prove a real Quickshell/Wayland session, physical input,
+accessibility, desktop portal behavior or file-manager integration.
 
 ## Preconditions
 
 ```bash
+omarchy plugin add https://github.com/tcballard/OmaSheets.git --enable
+~/.config/omarchy/plugins/io.github.tcballard.omasheets/bin/omasheets-plugin install
 omasheets --version
 omasheets doctor
 omarchy plugin validate ~/.config/omarchy/plugins/io.github.tcballard.omasheets
 ```
 
-`doctor` must report the Bubblewrap, LibreOffice, Python, and Python-UNO checks
-as ready. Desktop integration and the Omarchy plugin should also be present.
+`doctor` must report Bubblewrap, LibreOffice, Python UNO, the native engine,
+desktop integration and the Omarchy plugin as ready. Confirm Codex lists the
+OmaSheets personal plugin after a refresh/restart and can start its MCP server.
 
 Use disposable workbooks containing formulas, formatting, a chart, multiple
 sheets, and one filename with spaces and shell punctuation. Record SHA-256
 hashes before every mutation test.
 
-## Experimental LibreOfficeKit rendering
+## Native LibreOfficeKit window on Wayland
 
-1. Build and install the helper from [`../spikes/libreofficekit/`](../spikes/libreofficekit/README.md).
-2. Run `omasheets lok status` and confirm all three checks are ready.
-3. Run `omasheets lok render sample.xls --output /tmp/sample-tile.ppm`.
-4. Run `omasheets window sample.xlsx` and verify the title bar identifies
+1. Run `omasheets lok status` and confirm all three checks are ready.
+2. Run `omasheets lok render sample.xls --output /tmp/sample-tile.ppm`.
+3. Run `omasheets window sample.xlsx` and verify the title bar identifies
    OmaSheets rather than Calc.
-5. Select a cell and a dragged range; type a value and a formula; copy and
+4. Select a cell and a dragged range; type a value and a formula; copy and
    paste; undo and redo; toggle bold; and switch every sheet.
-6. Scroll horizontally and vertically with mouse, touchpad and keyboard. Check
+5. Scroll horizontally and vertically with mouse, touchpad and keyboard. Check
    that tiles repaint without stale seams and the address/formula surfaces track
    the selected cell.
-7. Save a copy, reopen it in both OmaSheets and Calc, and confirm values,
+6. Save a copy, reopen it in both OmaSheets and Calc, and confirm values,
    formulas, formats and sheet inventory survive. Confirm an existing output is
    never replaced without a separate explicit workflow.
-8. Open the PPM and compare the first visible region against Calc. Record load
+7. Open the PPM and compare the first visible region against Calc. Record load
    and render latency separately for cold and warm runs.
-9. Repeat with `.xlsx`, `.xlsm`, and `.ods`, a non-ASCII filename, and a broken
+8. Repeat with `.xlsx`, `.xlsm`, and `.ods`, a non-ASCII filename, and a broken
    workbook. Confirm failures never alter the source or an existing output.
-10. Open a workbook with at least 100,000 used rows and 50 used columns. Confirm
+9. Open a workbook with at least 100,000 used rows and 50 used columns. Confirm
     initial load stays below 15 seconds, first paint below 5 seconds, and RSS
     below 1 GiB; record the actual hardware and measured values.
-11. Drag both scrollbars continuously for 10 seconds. Confirm controls remain
+10. Drag both scrollbars continuously for 10 seconds. Confirm controls remain
     responsive and no stale tile seams remain after input stops.
 
-Passing this section proves only the rendering spike. It does not promote
-LibreOfficeKit to the default human editor.
+Passing this section supplies the hands-on Wayland evidence CI lacks. It does
+not prove Excel equivalence or close the remaining accessibility, dialog and
+crash-containment limitations.
 
 ## Native opening and selection
 
 1. Double-click `.xls`, `.xlsx`, `.xlsm`, and `.ods` files in the file manager.
-2. Confirm each opens in LibreOffice Calc through the OmaSheets desktop entry.
+2. Confirm `.xlsx` and `.ods` open editable in the OmaSheets window, while
+   `.xls` and `.xlsm` open read-only and preserve their source bytes.
 3. Run `omasheets select sample.xlsx` and open the bar panel.
 4. Confirm the panel shows only the basename and format, never a filesystem
    path, and that right-click opens the exact selected workbook.
@@ -105,8 +109,11 @@ ranges, and any warnings.
 
 ## Removal
 
-1. Add an unrelated MIME association after installation.
-2. Run `omasheets integrate uninstall`.
-3. Confirm OmaSheets associations are removed, the unrelated edit remains, and
-   an independently modified desktop entry is preserved with a conflict rather
-   than deleted.
+1. Add an unrelated MIME association and a separate personal Codex marketplace
+   entry after installation.
+2. Run `~/.local/bin/omasheets uninstall`.
+3. Confirm OmaSheets application bytes, launcher, Codex plugin and associations
+   are removed; the unrelated edits remain; and an independently modified
+   desktop entry is preserved and reported as a conflict rather than deleted.
+4. Resolve any reported conflict, repeat uninstall, then run
+   `omarchy plugin remove io.github.tcballard.omasheets`.
