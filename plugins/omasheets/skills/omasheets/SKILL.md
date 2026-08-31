@@ -23,6 +23,9 @@ surface as MCP. It does not expose workbook publication.
 2. Describe the workbook before assuming sheet names or ranges.
 3. Read only the bounded ranges needed for the request. Retain the
    `evidence_id` returned by each inspection you rely on.
+   When several independent describe, range, search, or formula-trace reads are
+   known up front, prefer `query_workbook` so they share one exact snapshot and
+   Calc load. Do not put `session_id` inside its subqueries.
    For workbook-wide audit or management-summary requests, run
    `analyze_workbook`; use its bounded table profiles, findings and summary
    opportunities as evidence before reading any supporting ranges.

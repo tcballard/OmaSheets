@@ -7,7 +7,10 @@ The person opens or selects a workbook, focuses a cell or range, and starts
 **Ask Agent**. Omarchy launches the user's configured default agent for an
 agent session. The agent reads `omasheets://session`, inspects only the workbook
 regions needed for the goal, and retains the sealed `evidence_id` from each
-read. A proposal must include:
+read. When two or more independent structure, range, search or formula-trace
+reads are known up front, `query_workbook` runs up to eight of them against one
+live snapshot and one Calc load, returning one ordered result and evidence
+record. A proposal must include:
 
 - the outcome the agent believes the person wants;
 - a concise explanation of the proposed result;

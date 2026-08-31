@@ -20,6 +20,7 @@ class AgentService(Protocol):
     def read_range(self, **arguments: Any) -> dict[str, Any]: ...
     def search_workbook(self, **arguments: Any) -> dict[str, Any]: ...
     def trace_formula(self, **arguments: Any) -> dict[str, Any]: ...
+    def query_workbook(self, **arguments: Any) -> dict[str, Any]: ...
     def analyze_workbook(self, **arguments: Any) -> dict[str, Any]: ...
     def render_workbook(self, **arguments: Any) -> dict[str, Any]: ...
     def change_history(self, **arguments: Any) -> dict[str, Any]: ...
@@ -171,6 +172,74 @@ WORKFLOW_SCHEMA = _object(
     ["goal", "summary", "evidence_ids", "groups"],
 )
 
+QUERY_ID = {
+    "type": "string",
+    "minLength": 1,
+    "maxLength": 64,
+    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+}
+QUERY_WORKBOOK_ITEM = {
+    "anyOf": [
+        _object(
+            {
+                "id": QUERY_ID,
+                "tool": {"type": "string", "enum": ["describe_workbook"]},
+                "arguments": _object(
+                    {"include_formulas": {"type": "boolean", "default": False}},
+                ),
+            },
+            ["id", "tool", "arguments"],
+        ),
+        _object(
+            {
+                "id": QUERY_ID,
+                "tool": {"type": "string", "enum": ["read_range"]},
+                "arguments": _object(
+                    {
+                        "sheet": SHEET,
+                        "range": RANGE,
+                        "include_formulas": {"type": "boolean", "default": True},
+                        "include_styles": {"type": "boolean", "default": False},
+                    },
+                    ["sheet", "range"],
+                ),
+            },
+            ["id", "tool", "arguments"],
+        ),
+        _object(
+            {
+                "id": QUERY_ID,
+                "tool": {"type": "string", "enum": ["search_workbook"]},
+                "arguments": _object(
+                    {
+                        "query": {"type": "string", "minLength": 1, "maxLength": 256},
+                        "scope": {"type": "string", "enum": ["values", "formulas", "both"], "default": "both"},
+                        "max_results": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+                    },
+                    ["query"],
+                ),
+            },
+            ["id", "tool", "arguments"],
+        ),
+        _object(
+            {
+                "id": QUERY_ID,
+                "tool": {"type": "string", "enum": ["trace_formula"]},
+                "arguments": _object(
+                    {
+                        "sheet": SHEET,
+                        "cell": RANGE,
+                        "direction": {"type": "string", "enum": ["precedents", "dependents", "both"], "default": "both"},
+                        "max_depth": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5},
+                    },
+                    ["sheet", "cell"],
+                ),
+            },
+            ["id", "tool", "arguments"],
+        ),
+    ],
+}
+
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -220,6 +289,22 @@ TOOLS: list[dict[str, Any]] = [
                 "max_depth": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5},
             },
             ["session_id", "sheet", "cell"],
+        ),
+    },
+    {
+        "name": "query_workbook",
+        "description": "Run 1-8 independent read queries against one workbook snapshot and return one sealed evidence record.",
+        "inputSchema": _object(
+            {
+                "session_id": SESSION,
+                "queries": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 8,
+                    "items": QUERY_WORKBOOK_ITEM,
+                },
+            },
+            ["session_id", "queries"],
         ),
     },
     {
@@ -379,7 +464,12 @@ def validate_tool_arguments(name: str, arguments: Any) -> dict[str, Any]:
         raise InvalidParams(f"unknown tool: {name}")
     if not isinstance(arguments, dict):
         raise InvalidParams("arguments must be an object")
-    return _validate(arguments, tool["inputSchema"])
+    result = _validate(arguments, tool["inputSchema"])
+    if name == "query_workbook":
+        identifiers = [query["id"] for query in result["queries"]]
+        if len(identifiers) != len(set(identifiers)):
+            raise InvalidParams("arguments.queries contains duplicate ids")
+    return result
 
 
 @dataclass(slots=True)

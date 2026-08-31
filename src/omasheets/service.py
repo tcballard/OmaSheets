@@ -33,6 +33,7 @@ class Engine(Protocol):
     def read_range(self, source: Path, **arguments: Any) -> dict[str, Any]: ...
     def search(self, source: Path, **arguments: Any) -> dict[str, Any]: ...
     def trace(self, source: Path, **arguments: Any) -> dict[str, Any]: ...
+    def query(self, source: Path, queries: list[dict[str, Any]]) -> dict[str, Any]: ...
     def analyze(self, source: Path, **arguments: Any) -> dict[str, Any]: ...
     def render(self, source: Path, *, output: Path) -> dict[str, Any]: ...
     def stage(self, source: Path, operations: list[dict[str, Any]], *, output: Path, preview: Path) -> dict[str, Any]: ...
@@ -435,6 +436,48 @@ class OmaSheetsService:
             result = self.engine.trace(source, **arguments)
         evidence_id = self._record_evidence(session, base, "trace_formula", arguments, result)
         return {**result, "document_source": base["kind"], "evidence_id": evidence_id}
+
+    def query_workbook(self, session_id: str, queries: list[dict[str, Any]]) -> dict[str, Any]:
+        """Execute a validated read batch against one exact workbook snapshot."""
+
+        session = self._session(session_id)
+        with self._agent_source(session) as (source, base):
+            worker_result = self.engine.query(source, queries)
+        result = self._validated_query_result(worker_result, queries)
+        evidence_id = self._record_evidence(
+            session, base, "query_workbook", {"queries": queries}, result,
+        )
+        return {**result, "document_source": base["kind"], "evidence_id": evidence_id}
+
+    @staticmethod
+    def _validated_query_result(
+        result: dict[str, Any], queries: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Reject malformed or reordered worker output before sealing evidence."""
+
+        if not isinstance(result, dict) or set(result) != {"items"}:
+            raise EngineError("Calc worker returned an invalid query batch")
+        items = result["items"]
+        if not isinstance(items, list) or len(items) != len(queries):
+            raise EngineError("Calc worker returned an incomplete query batch")
+        normalized = []
+        for query, item in zip(queries, items):
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"id", "tool", "result"}
+                or item.get("id") != query["id"]
+                or item.get("tool") != query["tool"]
+                or not isinstance(item.get("result"), dict)
+            ):
+                raise EngineError("Calc worker returned a mismatched query batch")
+            query_result = dict(item["result"])
+            if query["tool"] == "describe_workbook":
+                included = query["arguments"].get("include_formulas", False)
+                query_result["formula_records_included"] = included
+                if not included:
+                    query_result.pop("formulas", None)
+            normalized.append({"id": query["id"], "tool": query["tool"], "result": query_result})
+        return {"items": normalized}
 
     def analyze_workbook(self, session_id: str, **arguments: Any) -> dict[str, Any]:
         session = self._session(session_id)

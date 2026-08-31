@@ -10,14 +10,21 @@ Protocol. The server advertises a fixed protocol version and strict tool schemas
   table for ranges of up to 1,000 cells.
 - `search_workbook`: bounded literal search over displayed values or formulas.
 - `trace_formula`: bounded precedents, dependents, or both.
+- `query_workbook`: run one to eight independent `describe_workbook`,
+  `read_range`, `search_workbook`, or `trace_formula` queries, in order, against
+  one exact workbook snapshot and one Calc load. Each item has a caller-chosen
+  ID and its own strict arguments; nested session IDs, analysis, rendering and
+  mutation tools are rejected before the worker starts.
 - `analyze_workbook`: deterministic workbook-wide table profiles, data-quality
   and formula findings, workbook-object inventory, and management-summary
   opportunities, capped by the workbook and finding limits.
 - `render_workbook`: produce a verified PDF preview.
 - `change_history`: plans by default; receipts only for locally committed work.
 
-Each successful inspection returns a sealed `evidence_id`. Evidence is bound to
-the selected session, workbook revision and selected-file or live-window
+Each successful inspection returns a sealed `evidence_id`. A successful
+`query_workbook` batch returns one evidence ID sealing the ordered batch; a
+failed or invalid subquery returns no partial result or evidence. Evidence is
+bound to the selected session, workbook revision and selected-file or live-window
 semantic source. It records the tool, bounded arguments, bounded result and its digest; it
 does not contain a source path.
 

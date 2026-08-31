@@ -80,8 +80,12 @@ crash-containment limitations.
 5. Make an unsaved value and formula edit, then use `read_range`. Confirm the
    result reports `document_source: live_window` and contains both edits while
    the source file hash remains unchanged. Retain each returned `evidence_id`.
-6. Describe and audit the workbook, read a range, search, and trace one formula. Confirm
-   a plan cannot cite evidence from another session or semantic live snapshot.
+6. Use one `query_workbook` call to describe the workbook, read a range, search,
+   and trace one formula. Confirm the results retain input order, share one
+   evidence ID, and reflect the same unsaved snapshot. Repeat with an invalid
+   nested query and confirm that no partial result or evidence is created. Run
+   the separate audit tool, then confirm a plan cannot cite evidence from
+   another session or semantic live snapshot.
 7. Confirm the audit covers every used sheet, reports formula errors and data
    quality findings, inventories existing charts and pivots, and suggests only
    bounded management-summary candidates. Cite its `evidence_id` in a plan and

@@ -251,6 +251,9 @@ class CalcEngine:
     def trace(self, source: Path, **arguments: Any) -> dict[str, Any]:
         return self._execute("trace", source, arguments)
 
+    def query(self, source: Path, queries: list[dict[str, Any]]) -> dict[str, Any]:
+        return self._execute("query", source, {"queries": queries})
+
     def analyze(self, source: Path, **arguments: Any) -> dict[str, Any]:
         return self._execute("analyze", source, arguments)
 

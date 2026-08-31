@@ -101,6 +101,67 @@ class McpTests(unittest.TestCase):
         self.assertTrue(arguments["include_formulas"])
         self.assertFalse(arguments["include_styles"])
 
+    def test_read_query_batch_is_strict_ordered_and_applies_per_kind_defaults(self) -> None:
+        queries = [
+            {"id": "structure", "tool": "describe_workbook", "arguments": {}},
+            {"id": "cells", "tool": "read_range", "arguments": {"sheet": "Sheet1", "range": "A1:B2"}},
+            {"id": "needle", "tool": "search_workbook", "arguments": {"query": "revenue"}},
+            {"id": "formula", "tool": "trace_formula", "arguments": {"sheet": "Sheet1", "cell": "B2"}},
+        ]
+        response = self.server.handle(request("tools/call", {
+            "name": "query_workbook",
+            "arguments": {"session_id": "a" * 32, "queries": queries},
+        }))
+
+        self.assertNotIn("error", response)
+        name, arguments = self.service.calls[0]
+        self.assertEqual(name, "query_workbook")
+        self.assertEqual([item["id"] for item in arguments["queries"]], [item["id"] for item in queries])
+        self.assertFalse(arguments["queries"][0]["arguments"]["include_formulas"])
+        self.assertEqual(arguments["queries"][1]["arguments"], {
+            "sheet": "Sheet1", "range": "A1:B2",
+            "include_formulas": True, "include_styles": False,
+        })
+        self.assertEqual(arguments["queries"][2]["arguments"], {
+            "query": "revenue", "scope": "both", "max_results": 50,
+        })
+        self.assertEqual(arguments["queries"][3]["arguments"], {
+            "sheet": "Sheet1", "cell": "B2", "direction": "both", "max_depth": 5,
+        })
+
+    def test_read_query_batch_rejects_unsupported_or_ambiguous_subqueries(self) -> None:
+        valid = {"id": "ok", "tool": "describe_workbook", "arguments": {}}
+        invalid_items = [
+            {"id": "inner-session", "tool": "describe_workbook", "arguments": {"session_id": "a" * 32}},
+            {"id": "analysis", "tool": "analyze_workbook", "arguments": {}},
+            {"id": "render", "tool": "render_workbook", "arguments": {}},
+            {"id": "mutation", "tool": "plan_changes", "arguments": {}},
+            {"id": "unknown-item", "tool": "describe_workbook", "arguments": {}, "extra": True},
+            {"id": "missing-sheet", "tool": "read_range", "arguments": {"range": "A1"}},
+        ]
+        for item in invalid_items:
+            with self.subTest(item=item["id"]):
+                response = self.server.handle(request("tools/call", {
+                    "name": "query_workbook",
+                    "arguments": {"session_id": "a" * 32, "queries": [valid, item]},
+                }))
+                self.assertEqual(response["error"]["code"], -32602)
+        self.assertEqual(self.service.calls, [])
+
+    def test_read_query_batch_rejects_duplicate_ids_and_invalid_batch_sizes(self) -> None:
+        item = {"id": "same", "tool": "describe_workbook", "arguments": {}}
+        for queries in ([], [item, dict(item)], [
+            {"id": f"item-{index}", "tool": "describe_workbook", "arguments": {}}
+            for index in range(9)
+        ]):
+            with self.subTest(size=len(queries)):
+                response = self.server.handle(request("tools/call", {
+                    "name": "query_workbook",
+                    "arguments": {"session_id": "a" * 32, "queries": queries},
+                }))
+                self.assertEqual(response["error"]["code"], -32602)
+        self.assertEqual(self.service.calls, [])
+
     def test_unknown_operation_fields_are_rejected(self) -> None:
         response = self.server.handle(request("tools/call", {
             "name": "plan_changes",
