@@ -199,9 +199,14 @@ class CalcWorkerTests(unittest.TestCase):
                 return SimpleNamespace(Model=model)
 
         sheet = SimpleNamespace(getCharts=lambda: Charts(), getDrawPage=lambda: DrawPage())
-        sheets = SimpleNamespace(getByName=lambda name: sheet)
+        def get_sheet(name):
+            if name != "Summary":
+                raise AssertionError("non-object operations must not resolve target sheets")
+            return sheet
+
+        sheets = SimpleNamespace(getByName=get_sheet)
         document = SimpleNamespace(getSheets=lambda: sheets)
-        result = _object_fingerprints(document, [{
+        result = _object_fingerprints(document, [{"type": "add_sheet", "sheet": "New"}, {
             "type": "upsert_chart", "sheet": "Summary", "name": "RevenueChart",
             "title": "Revenue by region",
         }])
