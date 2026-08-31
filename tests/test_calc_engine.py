@@ -2,7 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from omasheets.calc_engine import CalcConfig, CalcEngine, _copy_no_clobber
+from omasheets.calc_engine import CalcConfig, CalcEngine, _copy_no_clobber, _runtime_path_arguments
 from omasheets.errors import ConflictError, EngineError
 from omasheets.paths import AppPaths
 
@@ -44,6 +44,16 @@ class CalcEngineTests(unittest.TestCase):
         )
         with self.assertRaises(EngineError):
             CalcEngine(self.paths, config=config)._sandbox_command(self.root)
+
+    def test_sandbox_recreates_loader_symlinks_and_binds_split_runtime_paths(self):
+        merged = self.root / "lib64"
+        merged.symlink_to("usr/lib")
+        split = self.root / "lib"
+        split.mkdir()
+        self.assertEqual(_runtime_path_arguments((merged, split)), [
+            "--symlink", "usr/lib", str(merged),
+            "--ro-bind", str(split), str(split),
+        ])
 
     def test_artifact_copy_never_clobbers(self):
         source = self.root / "source"

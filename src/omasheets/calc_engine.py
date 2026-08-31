@@ -55,6 +55,18 @@ def _copy_no_clobber(source: Path, destination: Path) -> None:
         os.close(descriptor)
 
 
+def _runtime_path_arguments(paths: tuple[Path, ...]) -> list[str]:
+    """Recreate merged-/usr links or bind separate loader directories read-only."""
+
+    arguments: list[str] = []
+    for path in paths:
+        if path.is_symlink():
+            arguments.extend(["--symlink", os.readlink(path), str(path)])
+        elif path.exists():
+            arguments.extend(["--ro-bind", str(path), str(path)])
+    return arguments
+
+
 class CalcEngine:
     """Run one Calc job per process inside a networkless Bubblewrap sandbox."""
 
@@ -105,6 +117,7 @@ class CalcEngine:
             "--tmpfs", "/tmp",
             "--dir", "/run",
         ]
+        command.extend(_runtime_path_arguments(tuple(Path(item) for item in ("/bin", "/sbin", "/lib", "/lib64"))))
         if Path("/etc/fonts").exists():
             command.extend(["--ro-bind", "/etc/fonts", "/etc/fonts"])
         if Path("/etc/machine-id").exists():
