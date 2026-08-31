@@ -28,7 +28,7 @@ PLUGIN_ENTRY = {
 }
 ARCH_PACKAGES = (
     "gcc", "make", "cmake", "pkgconf", "gtk3", "libreoffice-fresh",
-    "libreoffice-fresh-sdk", "python-uno", "bubblewrap",
+    "libreoffice-fresh-sdk", "bubblewrap",
 )
 
 
