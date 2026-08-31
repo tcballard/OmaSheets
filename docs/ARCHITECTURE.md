@@ -61,10 +61,16 @@ reject unknown arguments. Hidden implementation arguments cannot be smuggled in
 by a client. `apply_plan` is a read-only handoff that returns local review
 instructions; it does not commit.
 
-`omasheets://agent` is the path-free entry point for a new workbook task. The
-native window and Omarchy panel can start Codex with a fixed product prompt;
-the prompt contains no workbook path or content. Codex obtains the selected
-session and live focus through MCP, then uses ordinary bounded tools.
+`omasheets://session` is the path-free entry point for a new workbook task. The
+native window and Omarchy panel invoke the owned `agent-session` command with no
+agent name or user-controlled arguments. That command gives a fixed product
+prompt to `omarchy agent prompt`, which resolves the user's configured default
+agent. The prompt contains no workbook path or content. The selected agent
+obtains the session and live focus through MCP, then uses ordinary bounded tools.
+If that agent does not discover the installed MCP server, the fixed prompt
+directs it to the `omasheets agent-session` JSON command bridge. That bridge
+uses the same tool schemas and service methods and likewise exposes no commit or
+publication operation.
 
 Successful reads create sealed observation records below the private XDG state
 directory. Each record binds the session, revision, exact selected-file or

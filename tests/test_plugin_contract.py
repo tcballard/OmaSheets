@@ -28,6 +28,12 @@ class PluginContractTests(unittest.TestCase):
         self.assertIn("Open in OmaSheets", qml)
         self.assertIn("Text.PlainText", qml)
 
+    def test_widget_uses_provider_neutral_agent_session_entry(self):
+        qml = (ROOT / "Panel.qml").read_text()
+        self.assertIn('text: "Ask Agent"', qml)
+        self.assertIn('"agent-session"', qml)
+        self.assertNotIn("Ask Codex", qml)
+
 
 if __name__ == "__main__":
     unittest.main()

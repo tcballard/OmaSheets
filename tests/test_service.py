@@ -107,7 +107,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(context["address"], "C9")
         self.assertFalse(context["agent_control"])
 
-        agent = self.service.agent_context_resource()
+        agent = self.service.agent_session_resource()
         self.assertTrue(agent["ready"])
         self.assertEqual(agent["focus"]["address"], "C9")
         self.assertFalse(agent["workflow_contract"]["agent_publish_authority"])

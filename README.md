@@ -49,9 +49,13 @@ dependencies are reported with an explicit `omarchy pkg add` command for the
 user to approve. Full installation and reversible removal details are in
 [`INSTALL.md`](INSTALL.md).
 
-Open a workbook and choose **Ask Codex** from the OmaSheets window or Omarchy
-bar. Codex starts from the path-free `omasheets://agent` resource, which carries
-the live selection and the agent workflow contract. Flagship v0.0.1 workflows
+Open a workbook and choose **Ask Agent** from the OmaSheets window or Omarchy
+bar. OmaSheets asks `omarchy agent prompt` to start an agent session with the
+user's configured default agent. The agent starts from the path-free
+`omasheets://session` resource, which carries the live selection and workflow
+contract. Agents without OmaSheets MCP discovery can use the equivalent bounded
+`omasheets agent-session` JSON command bridge; neither surface exposes
+publication. Flagship v0.0.1 workflows
 are formula explanation, bounded data cleanup, variance analysis, cross-sheet
 reconciliation, checked summaries and formatting-only cleanup.
 
@@ -64,6 +68,9 @@ omasheets window workbook.xlsx
 omasheets select workbook.xlsx
 omasheets convert workbook.xls
 omasheets status --json
+omasheets agent-session
+omasheets agent-session resource
+omasheets agent-session tools
 omasheets mcp serve
 omasheets lok status
 omasheets lok render workbook.xls --output /tmp/workbook-tile.ppm
@@ -81,7 +88,7 @@ separate release gate.
 
 The native window and MCP server share one immutable workbook session. Agents
 can observe its bounded, path-free selection and viewport through
-`omasheets://agent`, inspect the relevant cells, and stage semantic changes;
+`omasheets://session`, inspect the relevant cells, and stage semantic changes;
 they cannot drive pointer/keyboard input or publish workbook bytes.
 
 While the window is open, those reads and plans are based on private

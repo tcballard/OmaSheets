@@ -32,7 +32,10 @@ def main() -> int:
     assert "b686ed892d9c3020c3336203f6d34cc75b544e2b" in workflow, "Omarchy validator pin drifted"
     assert "Arch production install and native acceptance" in workflow
     assert "Exercise the installed agentic workbook loop" in workflow
-    assert "omasheets://agent" in (ROOT / "README.md").read_text()
+    assert '"agent-session", "call", "describe_workbook"' in workflow
+    assert "omasheets://session" in (ROOT / "README.md").read_text()
+    assert "Ask Agent" in (ROOT / "README.md").read_text()
+    assert "omarchy agent prompt" in (ROOT / "README.md").read_text()
     print(f"release contract ok: v{versions.pop()}")
     return 0
 
