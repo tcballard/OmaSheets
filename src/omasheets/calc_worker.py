@@ -109,6 +109,20 @@ def _formula_errors(sheet_name: str, area, formulas, values, limit: int) -> list
     return errors
 
 
+def _named_ranges(document, limit: int) -> dict[str, Any]:
+    ranges = document.getNamedRanges()
+    names = sorted(ranges.getElementNames())
+    result = []
+    for name in names[:limit]:
+        item = ranges.getByName(name)
+        content = str(item.getContent())
+        if re.search(r"(?i)(?:file:|[a-z][a-z0-9+.-]*://)", content):
+            result.append({"name": name, "content_redacted": True})
+        else:
+            result.append({"name": name, "content": content, "content_redacted": False})
+    return {"items": result, "truncated": len(names) > limit, "total": len(names)}
+
+
 def _inspect(document, limits: dict[str, int], *, include_formulas: bool) -> dict[str, Any]:
     sheets = document.getSheets()
     names = list(sheets.getElementNames())
@@ -163,6 +177,7 @@ def _inspect(document, limits: dict[str, int], *, include_formulas: bool) -> dic
         "formula_count": formula_count,
         "formula_errors": errors,
         "formulas": formula_records if include_formulas else [],
+        "named_ranges": _named_ranges(document, limits["max_results"]),
     }
 
 
@@ -171,6 +186,40 @@ def _sheet(document, name: str):
     if not sheets.hasByName(name):
         raise RuntimeError("sheet not found")
     return sheets.getByName(name)
+
+
+def _style_color(value: int) -> str:
+    return "automatic" if int(value) < 0 else f"#{int(value) & 0xFFFFFF:06X}"
+
+
+def _cell_style(document, cell) -> dict[str, Any]:
+    formats = document.getNumberFormats()
+    properties = formats.getByKey(int(cell.NumberFormat))
+    return {
+        "style_name": str(cell.CellStyle),
+        "number_format": str(properties.getPropertyValue("FormatString")),
+        "bold": float(cell.CharWeight) >= 150.0,
+        "text_color": _style_color(cell.CharColor),
+        "background_color": _style_color(cell.CellBackColor),
+        "wrap_text": bool(cell.IsTextWrapped),
+    }
+
+
+def _style_table(document, area, rows: int, columns: int) -> dict[str, Any]:
+    styles: list[dict[str, Any]] = []
+    indexes: dict[str, int] = {}
+    style_ids = []
+    for row in range(rows):
+        output_row = []
+        for column in range(columns):
+            style = _cell_style(document, area.getCellByPosition(column, row))
+            key = json.dumps(style, sort_keys=True, separators=(",", ":"))
+            if key not in indexes:
+                indexes[key] = len(styles)
+                styles.append(style)
+            output_row.append(indexes[key])
+        style_ids.append(output_row)
+    return {"styles": styles, "style_ids": style_ids}
 
 
 def _read_range(document, arguments: dict[str, Any], limits: dict[str, int]) -> dict[str, Any]:
@@ -182,6 +231,15 @@ def _read_range(document, arguments: dict[str, Any], limits: dict[str, int]) -> 
     result = {"sheet": arguments["sheet"], "range": arguments["range"], "values": area.getDataArray()}
     if arguments.get("include_formulas", True):
         result["formulas"] = area.getFormulaArray()
+    if arguments.get("include_styles", False):
+        if cells > 1_000:
+            raise RuntimeError("styled range reads are limited to 1000 cells")
+        result["style_table"] = _style_table(
+            document,
+            area,
+            address.EndRow - address.StartRow + 1,
+            address.EndColumn - address.StartColumn + 1,
+        )
     return result
 
 
@@ -372,6 +430,7 @@ def _inventory(inspection: dict[str, Any]) -> dict[str, Any]:
         "sheets": [{"name": sheet["name"], "used_range": sheet["used_range"]} for sheet in inspection["sheets"]],
         "formula_count": inspection["formula_count"],
         "formula_errors": inspection["formula_errors"],
+        "named_ranges": inspection["named_ranges"],
     }
 
 
@@ -427,11 +486,17 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
         _render_pdf(reopened, preview)
         comparison = {
             "sheet_inventory_match": _inventory(expected)["sheets"] == _inventory(after)["sheets"],
+            "named_ranges_match": expected["named_ranges"] == after["named_ranges"],
             "formula_count_match": expected["formula_count"] == after["formula_count"],
             "target_ranges_match": expected_targets == reopened_targets,
             "new_formula_errors": [error for error in after["formula_errors"] if error not in before["formula_errors"]],
         }
-        if not comparison["sheet_inventory_match"] or not comparison["formula_count_match"] or not comparison["target_ranges_match"]:
+        if (
+            not comparison["sheet_inventory_match"]
+            or not comparison["named_ranges_match"]
+            or not comparison["formula_count_match"]
+            or not comparison["target_ranges_match"]
+        ):
             raise RuntimeError("staged workbook did not survive save and reopen verification")
         status = "manual_review_required" if action == "convert_xls" else "verified"
         result = {

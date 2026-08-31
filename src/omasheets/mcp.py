@@ -114,6 +114,7 @@ TOOLS: list[dict[str, Any]] = [
                 "sheet": SHEET,
                 "range": RANGE,
                 "include_formulas": {"type": "boolean", "default": True},
+                "include_styles": {"type": "boolean", "default": False},
             },
             ["session_id", "sheet", "range"],
         ),

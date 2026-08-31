@@ -76,6 +76,16 @@ class McpTests(unittest.TestCase):
         self.assertEqual(arguments["direction"], "both")
         self.assertEqual(arguments["max_depth"], 5)
 
+    def test_range_read_style_default_is_explicit(self) -> None:
+        response = self.server.handle(request("tools/call", {
+            "name": "read_range",
+            "arguments": {"session_id": "a" * 32, "sheet": "Sheet1", "range": "A1:B2"},
+        }))
+        self.assertNotIn("error", response)
+        _, arguments = self.service.calls[0]
+        self.assertTrue(arguments["include_formulas"])
+        self.assertFalse(arguments["include_styles"])
+
     def test_unknown_operation_fields_are_rejected(self) -> None:
         response = self.server.handle(request("tools/call", {
             "name": "plan_changes",
