@@ -1,11 +1,14 @@
 # OmaSheets
 
-Native spreadsheets for Omarchy, designed for people and agents.
+Native agentic spreadsheets for Omarchy.
 
 OmaSheets v0.0.1 combines LibreOffice Calc's native Linux spreadsheet engine
 with a constrained agent interface. People can open legacy `.xls` files in a
 desktop application; agents can inspect, explain, stage, verify, and propose
-workbook changes without receiving silent write authority.
+workbook changes without receiving silent write authority. The first release is
+built around a complete agent loop: start from the live selection, inspect the
+workbook, cite sealed observations, explain and group a verified proposal,
+revise it from human feedback, then hand it back for local approval.
 
 ## v0.0.1 scope
 
@@ -15,6 +18,12 @@ workbook changes without receiving silent write authority.
 - Trace formula precedents and dependents within a bounded request.
 - Stage cell-value and formula changes against an immutable source hash.
 - Stage bounded bulk values, bulk formulas, and typed cell formatting.
+- Insert and delete bounded rows or columns, fill formulas with Calc's
+  reference-aware engine, and sort bounded ranges.
+- Require every agent proposal to state its goal, summary, assumptions,
+  evidence and purpose-grouped operations.
+- Revise a verified proposal by superseding it; never silently mutate a plan
+  already presented for review.
 - Recalculate, reopen, render, and compare staged output before approval.
 - Require a local, explicit approval before publishing workbook bytes.
 - Preserve legacy `.xls` originals and convert only to a new `.xlsx` file.
@@ -39,6 +48,12 @@ associations. Omarchy intentionally runs no plugin install hooks; missing Arch
 dependencies are reported with an explicit `omarchy pkg add` command for the
 user to approve. Full installation and reversible removal details are in
 [`INSTALL.md`](INSTALL.md).
+
+Open a workbook and choose **Ask Codex** from the OmaSheets window or Omarchy
+bar. Codex starts from the path-free `omasheets://agent` resource, which carries
+the live selection and the agent workflow contract. Flagship v0.0.1 workflows
+are formula explanation, bounded data cleanup, variance analysis, cross-sheet
+reconciliation, checked summaries and formatting-only cleanup.
 
 ## Commands
 
@@ -66,7 +81,7 @@ separate release gate.
 
 The native window and MCP server share one immutable workbook session. Agents
 can observe its bounded, path-free selection and viewport through
-`omasheets://window`, inspect the relevant cells, and stage semantic changes;
+`omasheets://agent`, inspect the relevant cells, and stage semantic changes;
 they cannot drive pointer/keyboard input or publish workbook bytes.
 
 While the window is open, those reads and plans are based on private
@@ -75,13 +90,15 @@ work. Agents never mutate the visible document; verified output still goes
 through local review and live plans are copy-only.
 
 Verified proposals appear inside the native window as an OmaSheets-owned diff
-overlay. It shows bounded cell-level before/after values, formulas and
-formatting, flags destructive operations and truncation, and never paints
-changes into LibreOfficeKit. The user can hide it or explicitly approve a new,
-no-clobber workbook copy from the overlay.
+overlay. It shows the agent's goal, explanation, assumptions and purpose groups
+beside bounded cell-level before/after values, formulas and formatting. It
+flags destructive operations and truncation and never paints changes into
+LibreOfficeKit. The user can hide it or explicitly approve a new, no-clobber
+workbook copy from the overlay.
 
 ## Status
 
-Early development. v0.0.1 has an automated Arch install/native/uninstall gate,
-but no claim of hands-on Omarchy/Wayland release acceptance or perfect Excel
-compatibility.
+Early development. v0.0.1 has an automated Arch install/native/agent/uninstall
+gate and has received maintainer hands-on testing. The repository does not yet
+record evidence for every item in the complete Omarchy/Wayland release runbook,
+and no perfect Excel compatibility claim is made.

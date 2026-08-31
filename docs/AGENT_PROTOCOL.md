@@ -13,9 +13,17 @@ Protocol. The server advertises a fixed protocol version and strict tool schemas
 - `render_workbook`: produce a verified PDF preview.
 - `change_history`: plans by default; receipts only for locally committed work.
 
+Each successful inspection returns a sealed `evidence_id`. Evidence is bound to
+the selected session, workbook revision and selected-file or live-window
+semantic source. It records the tool, bounded arguments and result digest; it
+does not contain a source path.
+
 ## Planning tools
 
-- `plan_changes`: typed operations against the selected workbook revision.
+- `plan_changes`: evidence-cited, explained and purpose-grouped typed operations
+  against the selected workbook revision.
+- `revise_plan`: create a replacement verified plan from human feedback and
+  mark the previous plan as superseded.
 - `get_plan`: current sealed plan and verification evidence.
 - `apply_plan`: verify the expected revision and return local approval instructions.
 
@@ -33,12 +41,24 @@ approve, commit, reject, replace, or undo tool.
 - `set_range_values`: an exact-shape, typed two-dimensional scalar matrix.
 - `set_range_formulas`: an exact-shape two-dimensional formula matrix.
 - `format_cells`: number format, bold, text/background colour, and wrapping.
+- `insert_rows` and `delete_rows`: bounded, one-based structural row changes.
+- `insert_columns` and `delete_columns`: bounded A1-column structural changes.
+- `fill_down` and `fill_right`: reference-aware Calc autofill from an explicit
+  source row or column count within the target range.
+- `sort_range`: bounded one-key ascending or descending sort with explicit
+  header handling.
 
 Operations use A1 references, explicit sheet names, exact matrix dimensions, and
 a 10,000-cell per-operation ceiling. Unknown operation fields are rejected.
 Structural operations that could destroy data are prominently marked in the
 review evidence. Staging fingerprints targeted values, formulas, and requested
 format properties before save, then requires the same fingerprints after reopen.
+
+Every MCP-created plan requires a workflow object containing a goal, summary,
+optional assumptions, one or more evidence IDs, and purpose groups that cover
+each operation exactly once. These fields are bounded, sealed with the plan and
+shown in native review. They are agent explanations, not trusted verification;
+the semantic diff and reopened workbook evidence remain authoritative.
 
 ## Resources
 
@@ -49,6 +69,9 @@ format properties before save, then requires the same fingerprints after reopen.
 - `omasheets://window`: the active native window's bounded sheet, cell/formula,
   zoom, dirty state, and visible rectangle. It contains no source path and
   grants no pointer, keyboard, save, or publication authority.
+- `omasheets://agent`: the selection-aware entry resource used by **Ask Codex**.
+  It combines the public workbook session, live focus when available, suggested
+  workflows and the non-publication contract without exposing a source path.
 
 Resources are convenience pointers, not ambient authority. A client cannot
 change the selected workbook by constructing a URI or passing a path.

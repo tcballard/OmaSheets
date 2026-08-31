@@ -5,7 +5,7 @@
   "version": "0.0.1",
   "author": "Tom Ballard",
   "license": "MIT",
-  "description": "Selected workbook and agent-change review status for OmaSheets",
+  "description": "Native agentic spreadsheets with evidence-backed human review",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "OmaSheets",
-    "description": "Open the selected workbook and hand staged changes to a local review terminal",
+    "description": "Open a workbook, ask Codex, and review verified agent proposals locally",
     "category": "Office",
     "defaultSection": "right",
     "allowMultiple": false

@@ -10,7 +10,8 @@ is not cryptographically isolated from OmaSheets state.
 ## Authority rules
 
 - Agents may read a workbook selected by the local user.
-- Agents may submit typed, bounded operations for a selected workbook.
+- Agents may submit typed, bounded operations for a selected workbook only
+  with evidence from that exact session, revision and semantic source.
 - Agents may not supply raw paths, choose replacement mode, approve, commit,
   reject, or undo.
 - Local CLI and panel review may approve, reject, commit, and undo.
@@ -52,7 +53,13 @@ closed. A clearly labelled development override may exist for tests only.
 
 - Source identity includes a stable regular-file check and SHA-256 digest.
 - Plan seals bind the source, revision, normalized operations, staged artifact,
-  destination mode, destination path, preview, and verification record.
+  workflow explanation and cited observations, destination mode, destination
+  path, preview, and verification record.
+- Observation seals establish which bounded results a plan cited. They do not
+  establish that an agent interpreted those results correctly. Agent-authored
+  goals, summaries, assumptions and group purposes remain untrusted text.
+- Plan revision creates a sealed replacement and marks the previous plan
+  superseded under its plan lock; reviewed plan content is never edited in place.
 - Receipt records are hash chained and written under a chain lock.
 - Plan approval/rejection and publication are serialized by per-plan locks.
 - The native diff overlay is derived from sealed verification evidence, capped
@@ -70,3 +77,6 @@ closed. A clearly labelled development override may exist for tests only.
 - Literal search is case-insensitive in v0.0.1; it is not a query language.
 - Formula tracing is bounded and cannot resolve every dynamic reference.
 - No custom verification scripts run inside the sandbox in v0.0.1.
+- Starting Codex is an explicit local UI action. The fixed entry prompt contains
+  no workbook path or cell content; Codex still has the authority of the local
+  user account and is outside Calc's networkless worker sandbox.
