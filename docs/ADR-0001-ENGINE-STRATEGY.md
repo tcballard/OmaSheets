@@ -13,9 +13,9 @@ different projects:
 2. build an OmaSheets-native product and agent surface while using LibreOffice
    as a replaceable document engine.
 
-The v0.0.1 implementation is the second. It currently opens human work in the
-standard Calc desktop and runs separate headless Calc/UNO jobs for bounded agent
-inspection, recalculation, rendering, conversion, and staging.
+The v0.0.1 implementation is the second. It presents an OmaSheets-owned GTK
+window backed by LibreOfficeKit and runs separate headless Calc/UNO jobs for
+bounded agent inspection, recalculation, rendering, conversion, and staging.
 
 ## Decision
 
@@ -31,20 +31,16 @@ OmaSheets owns:
 LibreOffice Calc is a replaceable engine adapter. It is not the OmaSheets
 product identity and OmaSheets does not claim to be a LibreOffice fork.
 
-The next native-editor investigation should use LibreOfficeKit behind a narrow
-process boundary. LibreOfficeKit offers direct C/C++ access without UNO and an
-experimental tiled rendering/editing interface. Because the tiled API is
-explicitly unstable, v0.0.1 does not depend on it and a spike must prove
-packaging, crash containment, input handling, accessibility, rendering latency,
-and spreadsheet-specific editing before it becomes the main UI path.
+The native window uses LibreOfficeKit behind a narrow process boundary.
+LibreOfficeKit offers direct C/C++ access without UNO and an explicitly unstable
+tiled rendering/editing API. The production source lives in
+[`../native/libreofficekit/`](../native/libreofficekit/README.md); the installer
+builds it from the installed plugin checkout and CI exercises the resulting XDG
+binary rather than a build-tree executable.
 
-The first such spike lives in [`../spikes/libreofficekit/`](../spikes/libreofficekit/README.md).
-It proves package discovery, isolated initialization, Calc document loading,
-bounded tile rendering, and an OmaSheets-owned GTK workbook window against a
-real `.xls` in CI. The window includes scrolling, selection, keyboard editing,
-sheet switching and save-copy controls. It remains an explicit experimental
-path until Wayland, accessibility, complex-dialog, performance and crash
-containment gates pass.
+This promotes the window to the installed product path, not to proven release
+acceptance. Hands-on Wayland input, accessibility, complex dialogs and crash
+containment remain gates in `docs/ACCEPTANCE.md`.
 
 ## Why not fork now
 
@@ -56,10 +52,11 @@ merge burden without yet improving workbook semantics.
 
 ## Evolution path
 
-1. **v0.0.1 — integrated engine:** Calc desktop for people; isolated UNO jobs
-   for agents; OmaSheets owns selection, planning, verification, and publication.
-2. **v0.1 investigation — native shell:** prototype a Quickshell/GTK or Qt
-   workbook window backed by an isolated LibreOfficeKit renderer/editor.
+1. **v0.0.1 — native shell:** an OmaSheets GTK window uses LibreOfficeKit while
+   isolated UNO jobs serve semantic agent work; OmaSheets owns selection,
+   planning, verification and publication.
+2. **v0.1 hardening:** complete Wayland, accessibility, dialog and crash
+   containment evidence without widening agent authority.
 3. **Later — engine competition:** keep the adapter contract narrow enough to
    compare LibreOffice, a purpose-built grid/model, or another engine using the
    same compatibility corpus and receipts.
@@ -69,7 +66,7 @@ merge burden without yet improving workbook semantics.
 
 ## Consequences
 
-- The current PR is honestly described as an OmaSheets layer, not a LibreOffice
+- OmaSheets is honestly described as a product layer, not a LibreOffice
   fork or a complete native spreadsheet editor.
 - Native product differentiation can advance without changing calculation and
   file-format authority at the same time.

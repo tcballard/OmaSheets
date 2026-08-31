@@ -22,7 +22,7 @@ PLUGIN_NAME = "omasheets"
 PLUGIN_ENTRY = {
     "name": PLUGIN_NAME,
     "source": {"source": "local", "path": "./.codex/plugins/omasheets"},
-    "policy": {"installation": "INSTALLED_BY_DEFAULT", "authentication": "ON_FIRST_USE"},
+    "policy": {"installation": "INSTALLED_BY_DEFAULT", "authentication": "ON_USE"},
     "category": "Productivity",
 }
 ARCH_PACKAGES = (
@@ -111,12 +111,14 @@ def dependency_report() -> dict[str, Any]:
     checks = [
         ("cmake", shutil.which("cmake")),
         ("C++ compiler", shutil.which("c++")),
+        ("make", shutil.which("make")),
         ("pkg-config", shutil.which("pkg-config")),
         ("GTK3", _pkg_config("gtk+-3.0")),
         ("LibreOffice", _first_existing("/usr/bin/soffice", "/usr/bin/libreoffice")),
         ("LibreOfficeKit headers", _first_existing("/usr/include/libreoffice/LibreOfficeKit/LibreOfficeKit.hxx")),
         ("LibreOfficeKitGTK", _first_existing(
             "/usr/lib/libreofficekitgtk.so",
+            "/usr/lib/liblibreofficekitgtk.so",
             "/usr/lib/libreoffice/program/liblibreofficekitgtk.so",
         )),
         ("Bubblewrap", _first_existing("/usr/bin/bwrap")),
@@ -208,6 +210,13 @@ def install(
         journal = read_json(paths.journal)
         intact = paths.launcher.is_file() and _sha_file(paths.launcher) == journal["launcher_sha256"]
         intact = intact and paths.app.is_dir() and _tree_sha(paths.app) == journal["app_sha256"]
+        intact = intact and paths.codex_plugin.is_dir()
+        intact = intact and _tree_sha(paths.codex_plugin) == journal["codex_plugin_sha256"]
+        intact = intact and paths.codex_marketplace.is_file()
+        if intact:
+            marketplace = json.loads(paths.codex_marketplace.read_text())
+            intact = PLUGIN_ENTRY in marketplace.get("plugins", [])
+        intact = intact and paths.integration.desktop.is_file() and paths.integration.journal.is_file()
         if intact:
             return {"installed": True, "changed": False, "source": journal["source"]}
         raise ConflictError("installed OmaSheets files changed; uninstall or resolve them before reinstalling")

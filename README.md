@@ -26,7 +26,21 @@ always requires manual review.
 
 The product and safety contracts are in [`docs/`](docs/).
 
-## Current developer commands
+## Install on Omarchy
+
+```bash
+omarchy plugin add https://github.com/tcballard/OmaSheets.git --enable
+```
+
+The command installs and enables the Omarchy bar surface. Choose **Install
+OmaSheets** there to run the privilege-free, user-local bootstrap for the native
+window, Python service, Codex plugin, MCP server, desktop entry and MIME
+associations. Omarchy intentionally runs no plugin install hooks; missing Arch
+dependencies are reported with an explicit `omarchy pkg add` command for the
+user to approve. Full installation and reversible removal details are in
+[`INSTALL.md`](INSTALL.md).
+
+## Commands
 
 ```bash
 omasheets doctor
@@ -40,14 +54,15 @@ omasheets lok status
 omasheets lok render workbook.xls --output /tmp/workbook-tile.ppm
 ```
 
-Installation is documented in [`INSTALL.md`](INSTALL.md); the real Omarchy and
-LibreOffice release pass is in [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).
+The real Omarchy, Wayland and LibreOffice release pass remains in
+[`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).
 
-An experimental native workbook window is in
-[`spikes/libreofficekit/`](spikes/libreofficekit/). It embeds LibreOfficeKit's
+The native workbook window source is in
+[`native/libreofficekit/`](native/libreofficekit/). It embeds LibreOfficeKit's
 interactive tile engine in OmaSheets-owned GTK chrome with scrolling,
-selection, keyboard editing, sheets, zoom and save-copy controls. Calc remains
-the file-association fallback until real Omarchy/Wayland acceptance passes.
+selection, keyboard editing, sheets, zoom and save-copy controls. CI exercises
+the installed XDG binary under Xvfb; real Omarchy/Wayland acceptance is still a
+separate release gate.
 
 The native window and MCP server share one immutable workbook session. Agents
 can observe its bounded, path-free selection and viewport through
@@ -67,5 +82,6 @@ no-clobber workbook copy from the overlay.
 
 ## Status
 
-Early development. The `main` branch remains the minimal bootstrap; v0.0.1 is
-being built as a reviewable commit stack on `feat/v0.0.1`.
+Early development. v0.0.1 has an automated Arch install/native/uninstall gate,
+but no claim of hands-on Omarchy/Wayland release acceptance or perfect Excel
+compatibility.

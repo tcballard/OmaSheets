@@ -1,44 +1,77 @@
-# Install OmaSheets v0.0.1 (development preview)
+# Install OmaSheets v0.0.1 on Omarchy
 
-OmaSheets currently targets Omarchy `quattro`. It needs LibreOffice Calc,
-LibreOffice's SDK, GTK3, Bubblewrap, a system Python with LibreOffice's UNO
-module, CMake, and `pipx`.
+OmaSheets targets Omarchy `quattro`. Install and enable its Omarchy surface
+from the repository with:
 
 ```bash
-sudo pacman -S --needed cmake gtk3 libreoffice-fresh libreoffice-fresh-sdk python-uno bubblewrap python-pipx
-git clone --branch feat/v0.0.1 https://github.com/tcballard/OmaSheets.git
-cd OmaSheets
-pipx install .
-cmake -S spikes/libreofficekit -B build/lok-spike -DCMAKE_BUILD_TYPE=Release
-cmake --build build/lok-spike
-sudo cmake --install build/lok-spike
-omasheets integrate install
 omarchy plugin add https://github.com/tcballard/OmaSheets.git --enable
 ```
 
-`omasheets integrate install` operates only on the current user's desktop
-entry and `mimeapps.list`. It records the exact files it created or changed.
-The corresponding removal command restores untouched files and preserves a
-desktop entry that another process edited:
+That command is the complete Omarchy plugin installation. Omarchy clones and
+validates the repository, adds the bar widget, and deliberately does not run
+plugin install hooks or `sudo`.
+
+Open the OmaSheets bar widget and choose **Install OmaSheets** to finish the
+user-local product bootstrap. The same action can be run in a terminal:
 
 ```bash
-omasheets integrate uninstall
-omarchy plugin remove io.github.tcballard.omasheets
-pipx uninstall omasheets
+~/.config/omarchy/plugins/io.github.tcballard.omasheets/bin/omasheets-plugin install
 ```
 
-Open a workbook normally from the file manager, or select one for constrained
-agent access:
+The bootstrap checks dependencies, compiles the native window from the installed
+checkout, and installs only OmaSheets-owned files. It never invokes a package
+manager or requests privilege. If dependencies are missing, it stops and prints
+this explicit Omarchy command for the user to approve and run:
 
 ```bash
-omasheets open ./book.xls
-omasheets window ./book.xlsx
-omasheets select ./book.xlsx
-omasheets convert ./legacy-book.xls
+omarchy pkg add gcc make cmake pkgconf gtk3 libreoffice-fresh libreoffice-fresh-sdk python-uno bubblewrap
+```
+
+Then run the **Install OmaSheets** action again.
+
+## Installed surfaces
+
+The bootstrap installs these surfaces together:
+
+- Python package and native binaries under
+  `$XDG_DATA_HOME/omasheets/app/` (normally `~/.local/share/omasheets/app/`);
+- the stable `~/.local/bin/omasheets` launcher;
+- the Codex plugin under `~/.codex/plugins/omasheets/`, with an absolute MCP
+  command and a personal marketplace entry in
+  `~/.agents/plugins/marketplace.json`;
+- the desktop entry under `$XDG_DATA_HOME/applications/`; and
+- OmaSheets MIME associations in `$XDG_CONFIG_HOME/mimeapps.list`.
+
+Private workbook state, receipts and installation journals live under
+`$XDG_STATE_HOME/omasheets/`; build artifacts live under
+`$XDG_CACHE_HOME/omasheets/`; sockets and live snapshots live under
+`$XDG_RUNTIME_DIR/omasheets/`. Runtime and state directories are mode `0700`.
+
+Verify the result:
+
+```bash
 omasheets doctor
+omasheets --version
 ```
 
-The bar widget can open the selected workbook and display staged-plan status.
-Its review button opens `omasheets review-current` in a terminal. Publication
-still requires the exact local approval token; the widget and MCP server do not
-possess commit authority.
+`doctor` must report Bubblewrap, LibreOffice, Python UNO, the native window,
+desktop integration and the Omarchy plugin. Restart or refresh Codex after the
+first installation so it discovers the new personal plugin and MCP server.
+
+## Removal
+
+Remove the product-owned files before removing the Omarchy checkout:
+
+```bash
+~/.local/bin/omasheets uninstall
+omarchy plugin remove io.github.tcballard.omasheets
+```
+
+The uninstall journal removes only files whose content still matches what
+OmaSheets installed. Modified launchers, desktop entries, Codex plugin files and
+associations are preserved and reported as conflicts. Unrelated MIME entries,
+personal marketplace plugins and Codex plugin directories are retained.
+
+Omarchy itself has no uninstall hook, so `omarchy plugin remove` alone removes
+only the bar-plugin checkout. If that happened first, the installed
+`~/.local/bin/omasheets uninstall` command remains available for cleanup.
