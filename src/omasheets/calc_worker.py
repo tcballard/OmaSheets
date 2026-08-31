@@ -359,6 +359,12 @@ def _column_index(name: str) -> int:
     return value - 1
 
 
+def _fill_direction(name: str):
+    import uno
+
+    return uno.Enum("com.sun.star.sheet.FillDirection", name)
+
+
 def _sort(area, operation: dict[str, Any]) -> None:
     descriptor = area.createSortDescriptor()
     for item in descriptor:
@@ -430,13 +436,9 @@ def _apply(document, operations: list[dict[str, Any]]) -> None:
                 if "wrap_text" in operation:
                     area.IsTextWrapped = operation["wrap_text"]
             elif kind == "fill_down":
-                import uno
-
-                area.fillAuto(uno.getConstantByName("com.sun.star.sheet.FillDirection.TO_BOTTOM"), operation["source_rows"])
+                area.fillAuto(_fill_direction("TO_BOTTOM"), operation["source_rows"])
             elif kind == "fill_right":
-                import uno
-
-                area.fillAuto(uno.getConstantByName("com.sun.star.sheet.FillDirection.TO_RIGHT"), operation["source_columns"])
+                area.fillAuto(_fill_direction("TO_RIGHT"), operation["source_columns"])
             elif kind == "sort_range":
                 _sort(area, operation)
 
