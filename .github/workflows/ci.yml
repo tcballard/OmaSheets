@@ -120,29 +120,28 @@ jobs:
           done
           test -S "$RUNNER_TEMP/window-runtime/bridge.sock"
           python - <<'PY'
-          import json
           import os
           from pathlib import Path
-          import socket
           import stat
+          import sys
           import zipfile
+
+          sys.path.insert(0, "src")
+          from omasheets.live_bridge import request_live_snapshot
+          from omasheets.paths import AppPaths
 
           runtime = Path(os.environ["RUNNER_TEMP"], "window-runtime")
           session = "a" * 32
-          nonce = "b" * 32
           bridge = runtime / "bridge.sock"
           assert stat.S_IMODE(bridge.stat().st_mode) == 0o600
-          with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-              connection.settimeout(10)
-              connection.connect(str(bridge))
-              connection.sendall(f"SNAPSHOT {session} {nonce}\n".encode())
-              response = json.loads(connection.recv(4096))
-          assert response == {"format": "xlsx", "ok": True}
-          snapshot = runtime / f"snapshot-{session}-{nonce}.xlsx"
-          assert stat.S_IMODE(snapshot.stat().st_mode) == 0o600
-          with zipfile.ZipFile(snapshot) as archive:
+          paths = AppPaths(runtime / "state", runtime / "cache", runtime)
+          snapshot = request_live_snapshot(paths, session, ".xlsx")
+          assert snapshot.format == "xlsx" and len(snapshot.semantic_sha256) == 64
+          assert stat.S_IMODE(snapshot.path.stat().st_mode) == 0o600
+          with zipfile.ZipFile(snapshot.path) as archive:
               content = b"".join(archive.read(name) for name in archive.namelist() if name.endswith(".xml"))
           assert b"OmaSheets unsaved live bridge" in content
+          snapshot.path.unlink()
           PY
           wait "$window_pid"
           cat "$RUNNER_TEMP/window-report.json"
