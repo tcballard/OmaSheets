@@ -384,6 +384,7 @@ jobs:
             .ci-performance/agent-analyze-*-ci.json
             .ci-performance/fixture-manifest.json
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 14
       - name: Render the workbook through LibreOfficeKit
         run: |
