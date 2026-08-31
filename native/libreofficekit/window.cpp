@@ -171,6 +171,14 @@ struct DiffGroup {
     std::string purpose;
 };
 
+struct DiffFinding {
+    std::string severity;
+    std::string category;
+    std::string sheet;
+    std::string range;
+    std::string message;
+};
+
 struct DiffOverlay {
     std::string plan_id;
     std::string status;
@@ -183,6 +191,7 @@ struct DiffOverlay {
     std::string summary;
     std::vector<std::string> assumptions;
     std::vector<DiffGroup> groups;
+    std::vector<DiffFinding> findings;
     std::vector<DiffItem> items;
 };
 
@@ -232,7 +241,7 @@ DiffOverlay read_diff_overlay(WindowState* state)
     std::string payload((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     std::istringstream stream(payload);
     std::string line;
-    if (!std::getline(stream, line) || line != "OMASHEETS_DIFF_V2")
+    if (!std::getline(stream, line) || line != "OMASHEETS_DIFF_V3")
         throw std::runtime_error("unsupported diff overlay");
     std::map<std::string, std::string> metadata;
     DiffOverlay overlay;
@@ -247,6 +256,11 @@ DiffOverlay read_diff_overlay(WindowState* state)
             overlay.assumptions.push_back(percent_decode(fields[1]));
         } else if (fields.size() == 3 && fields[0] == "group" && overlay.groups.size() < 20) {
             overlay.groups.push_back({percent_decode(fields[1]), percent_decode(fields[2])});
+        } else if (fields.size() == 6 && fields[0] == "finding" && overlay.findings.size() < 100) {
+            overlay.findings.push_back({
+                percent_decode(fields[1]), percent_decode(fields[2]), percent_decode(fields[3]),
+                percent_decode(fields[4]), percent_decode(fields[5]),
+            });
         } else if (fields.size() == 7 && fields[0] == "item" && overlay.items.size() < 200) {
             overlay.items.push_back({
                 percent_decode(fields[1]), percent_decode(fields[2]), percent_decode(fields[3]),
@@ -261,7 +275,7 @@ DiffOverlay read_diff_overlay(WindowState* state)
     const auto plan = metadata.find("plan_id");
     const auto status = metadata.find("status");
     const auto truncated = metadata.find("truncated");
-    if (metadata.size() != 13 || session == metadata.end() || session->second != state->session_id
+    if (metadata.size() != 14 || session == metadata.end() || session->second != state->session_id
         || revision == metadata.end() || revision->second != std::to_string(state->revision)
         || plan == metadata.end() || !lowercase_hex(plan->second)
         || status == metadata.end() || status->second.size() > 32
@@ -275,6 +289,7 @@ DiffOverlay read_diff_overlay(WindowState* state)
     overlay.total_changes = bounded_unsigned(metadata, "total_changes", 1'000'000);
     if (bounded_unsigned(metadata, "assumption_count", 20) != overlay.assumptions.size()
         || bounded_unsigned(metadata, "group_count", 20) != overlay.groups.size()
+        || bounded_unsigned(metadata, "finding_count", 100) != overlay.findings.size()
         || metadata.at("goal").size() > 512 || metadata.at("summary").size() > 512)
         throw std::runtime_error("invalid workflow explanation");
     overlay.goal = metadata.at("goal");
@@ -891,6 +906,17 @@ GtkWidget* diff_text(const std::string& text, const char* style)
 void show_diff_overlay(WindowState* state, const DiffOverlay& overlay)
 {
     gtk_container_foreach(GTK_CONTAINER(state->diff_list), destroy_child, nullptr);
+    for (const DiffFinding& finding : overlay.findings) {
+        GtkWidget* card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+        gtk_style_context_add_class(gtk_widget_get_style_context(card), "omasheets-diff-card");
+        const std::string location = "Audit · " + finding.severity + " · " + finding.sheet + " · " + finding.range;
+        GtkWidget* title = diff_text(location, "omasheets-diff-location");
+        GtkWidget* message = diff_text(finding.message, "omasheets-diff-after");
+        gtk_widget_set_tooltip_text(title, finding.category.c_str());
+        gtk_box_pack_start(GTK_BOX(card), title, FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(card), message, FALSE, FALSE, 0);
+        gtk_box_pack_start(GTK_BOX(state->diff_list), card, FALSE, FALSE, 0);
+    }
     for (const DiffItem& item : overlay.items) {
         GtkWidget* card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
         gtk_style_context_add_class(gtk_widget_get_style_context(card), "omasheets-diff-card");
@@ -911,6 +937,8 @@ void show_diff_overlay(WindowState* state, const DiffOverlay& overlay)
         summary << " · " << overlay.destructive_count << " destructive";
     if (overlay.warning_count != 0)
         summary << " · " << overlay.warning_count << " warnings";
+    if (!overlay.findings.empty())
+        summary << " · " << overlay.findings.size() << (overlay.findings.size() == 1 ? " audit finding" : " audit findings");
     if (overlay.truncated)
         summary << " · showing first 200";
     gtk_label_set_text(GTK_LABEL(state->diff_summary), summary.str().c_str());

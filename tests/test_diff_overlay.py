@@ -26,6 +26,10 @@ class DiffOverlayTests(unittest.TestCase):
                     {"title": "Correct values", "purpose": "Use the inspected source figures.", "operation_indexes": [0]},
                     {"title": "Emphasise review", "purpose": "Make the checked cells visible.", "operation_indexes": [1]},
                 ],
+                "evidence": [{
+                    "tool": "analyze_workbook",
+                    "result": {"findings": [{"severity": "warning", "category": "duplicate_rows", "sheet": "Sheet1", "range": "A2:C4", "message": "Duplicate rows may distort totals."}]},
+                }],
             },
             "semantic_diff": {
                 "target_changes": [{
@@ -52,6 +56,7 @@ class DiffOverlayTests(unittest.TestCase):
         self.assertIn("bold", overlay["items"][2]["after"])
         self.assertEqual(overlay["goal"], "Prepare the monthly variance view")
         self.assertEqual(overlay["groups"][0]["title"], "Correct values")
+        self.assertEqual(overlay["findings"][0]["category"], "duplicate_rows")
 
     def test_round_trip_is_path_free_and_percent_encoded(self):
         overlay = build_overlay(self._plan())

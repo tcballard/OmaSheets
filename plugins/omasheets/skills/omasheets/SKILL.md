@@ -23,6 +23,9 @@ surface as MCP. It does not expose workbook publication.
 2. Describe the workbook before assuming sheet names or ranges.
 3. Read only the bounded ranges needed for the request. Retain the
    `evidence_id` returned by each inspection you rely on.
+   For workbook-wide audit or management-summary requests, run
+   `analyze_workbook`; use its bounded table profiles, findings and summary
+   opportunities as evidence before reading any supporting ranges.
 4. Trace formulas when explaining calculated results.
 5. Before planning, state the goal, important assumptions, and any ambiguity
    that could materially change the result. Ask the user when necessary.
@@ -41,6 +44,10 @@ Good first workflows are:
 - `reconcile`: reconcile values across two sheets.
 - `summarise`: create a checked summary.
 - `format`: standardise presentation without changing values.
+- `analyse`: audit the whole workbook for structure, quality, formula errors,
+  anomalies, charts, pivots and summary opportunities.
+- `management`: create a reviewable summary sheet using typed pivot, chart,
+  value and formatting operations based on cited audit evidence.
 
 Never ask for or pass an arbitrary local path. Never claim a plan has been
 applied until a local commit receipt is present. `.xlsm` is read-only and `.xls`

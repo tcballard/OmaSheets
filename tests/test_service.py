@@ -26,6 +26,13 @@ class FakeEngine:
     def trace(self, source, **arguments):
         return {"nodes": [], **arguments}
 
+    def analyze(self, source, **arguments):
+        return {
+            "summary": {"sheet_count": 1, "finding_count": 1},
+            "findings": [{"id": "F001", "severity": "warning", "category": "duplicate_rows", "sheet": "Sheet1", "range": "A1:B3", "message": "Duplicate rows found."}],
+            **arguments,
+        }
+
     def render(self, source, *, output):
         output.write_bytes(b"%PDF-preview")
         return {"format": "pdf"}
@@ -91,6 +98,21 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(capabilities["live_document_bridge"]["agent_mutates_open_document"])
         self.assertTrue(capabilities["agent_diff_overlay"]["native"])
         self.assertFalse(capabilities["agent_diff_overlay"]["mutates_open_document"])
+        self.assertIn("upsert_chart", capabilities["agent_operations"])
+        self.assertIn("upsert_pivot", capabilities["agent_operations"])
+
+    def test_workbook_audit_is_sealed_as_reviewable_evidence(self):
+        session = self.service.select_workbook(self.source)
+        audit = self.service.analyze_workbook(session["session_id"], focus="all", max_findings=10)
+        self.assertEqual(audit["summary"]["finding_count"], 1)
+        plan = self.service.plan_changes(
+            session["session_id"], 1,
+            [{"type": "set_value", "sheet": "Sheet1", "range": "C1", "value": "Reviewed"}],
+            {"goal": "Resolve the audit", "summary": "Mark the reviewed result.", "assumptions": [],
+             "evidence_ids": [audit["evidence_id"]],
+             "groups": [{"title": "Record review", "purpose": "Make the audit follow-up visible.", "operation_indexes": [0]}]},
+        )
+        self.assertEqual(plan["workflow"]["evidence"][0]["result"]["findings"][0]["id"], "F001")
 
     def test_live_window_context_is_path_free_and_session_bound(self):
         session = self.service.select_workbook(self.source)

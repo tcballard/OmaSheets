@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import subprocess
 import sys
@@ -207,6 +208,184 @@ def _inspect(document, limits: dict[str, int], *, include_formulas: bool) -> dic
     }
 
 
+def _column_name(index: int) -> str:
+    result = ""
+    number = index + 1
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+
+def _object_inventory(document) -> dict[str, Any]:
+    charts = []
+    pivots = []
+    truncated = False
+    for sheet_name in document.getSheets().getElementNames():
+        sheet = document.getSheets().getByName(sheet_name)
+        table_charts = sheet.getCharts()
+        for name in sorted(table_charts.getElementNames()):
+            if len(charts) >= 500:
+                truncated = True
+                break
+            chart = table_charts.getByName(name)
+            title = ""
+            ranges = []
+            column_headers = False
+            row_headers = False
+            try:
+                embedded = chart.getEmbeddedObject()
+                title = str(embedded.Title.String) if embedded.HasMainTitle else ""
+                ranges = [[address.Sheet, address.StartColumn, address.StartRow, address.EndColumn, address.EndRow] for address in chart.getRanges()]
+                column_headers = bool(chart.getHasColumnHeaders())
+                row_headers = bool(chart.getHasRowHeaders())
+            except Exception:
+                pass
+            charts.append({
+                "sheet": sheet_name,
+                "name": name,
+                "title": title,
+                "column_headers": column_headers,
+                "row_headers": row_headers,
+                "source_ranges": ranges,
+            })
+        tables = sheet.getDataPilotTables()
+        for name in sorted(tables.getElementNames()):
+            if len(pivots) >= 500:
+                truncated = True
+                break
+            table = tables.getByName(name)
+            try:
+                source = table.getSourceRange()
+                output = table.getOutputRange()
+                pivots.append({
+                    "sheet": sheet_name,
+                    "name": name,
+                    "source": [source.Sheet, source.StartColumn, source.StartRow, source.EndColumn, source.EndRow],
+                    "output": [output.Sheet, output.StartColumn, output.StartRow, output.EndColumn, output.EndRow],
+                })
+            except Exception:
+                pivots.append({"sheet": sheet_name, "name": name, "details_unavailable": True})
+    return {"charts": charts, "pivots": pivots, "truncated": truncated}
+
+
+def _object_fingerprints(document, operations: list[dict[str, Any]]) -> dict[str, Any]:
+    inventory = _object_inventory(document)
+    chart_keys = {(operation["sheet"], operation["name"]) for operation in operations if operation["type"] == "upsert_chart"}
+    pivot_keys = {(operation["sheet"], operation["name"]) for operation in operations if operation["type"] in {"upsert_pivot", "refresh_pivot"}}
+    return {
+        "charts": [item for item in inventory["charts"] if (item["sheet"], item["name"]) in chart_keys],
+        "pivots": [item for item in inventory["pivots"] if (item["sheet"], item["name"]) in pivot_keys],
+    }
+
+
+def _analyze(document, arguments: dict[str, Any], limits: dict[str, int]) -> dict[str, Any]:
+    """Return a deterministic, bounded workbook-wide audit for any MCP agent."""
+
+    maximum = min(int(arguments.get("max_findings", 50)), 100)
+    focus = arguments.get("focus", "all")
+    inspection = _inspect(document, limits, include_formulas=False)
+    findings: list[dict[str, Any]] = []
+    finding_total = 0
+    profiles = []
+
+    def add(severity: str, category: str, sheet: str, address: str, message: str, metrics: dict[str, Any]) -> None:
+        nonlocal finding_total
+        finding_total += 1
+        if len(findings) < maximum:
+            findings.append({
+                "id": f"F{len(findings) + 1:03d}", "severity": severity, "category": category,
+                "sheet": sheet, "range": address, "message": message, "metrics": metrics,
+            })
+
+    total_rows = 0
+    for sheet_info in inspection["sheets"]:
+        name = sheet_info["name"]
+        sheet = document.getSheets().getByName(name)
+        address, area = _used_range(sheet)
+        values = [list(row) for row in area.getDataArray()]
+        formulas = [list(row) for row in area.getFormulaArray()]
+        rows = len(values)
+        columns = len(values[0]) if values else 0
+        total_rows += max(rows - 1, 0)
+        headers = [str(value).strip() for value in (values[0] if values else [])]
+        if rows > 1 and any(not header for header in headers):
+            blanks = [_column_name(index) for index, header in enumerate(headers) if not header]
+            add("warning", "missing_header", name, f"A1:{_column_name(columns - 1)}1", "The table has blank header cells.", {"blank_columns": blanks[:20]})
+        normalized_headers = [header.casefold() for header in headers if header]
+        duplicates = sorted({header for header in normalized_headers if normalized_headers.count(header) > 1})
+        if duplicates:
+            add("warning", "duplicate_header", name, f"A1:{_column_name(columns - 1)}1", "The table has duplicate column names.", {"headers": duplicates[:20]})
+
+        seen_rows: dict[str, int] = {}
+        duplicate_examples = []
+        duplicate_count = 0
+        for row_index, row in enumerate(values[1:], start=2):
+            key = json.dumps(row, sort_keys=True, default=str)
+            if any(value not in ("", None) for value in row):
+                if key in seen_rows:
+                    duplicate_count += 1
+                    if len(duplicate_examples) < 10:
+                        duplicate_examples.append({"row": row_index, "matches_row": seen_rows[key]})
+                else:
+                    seen_rows[key] = row_index
+        if duplicate_examples and focus in ("all", "quality"):
+            add("warning", "duplicate_rows", name, f"A1:{_column_name(columns - 1)}{rows}", "Duplicate data rows may distort totals.", {"duplicate_count": duplicate_count, "examples": duplicate_examples})
+
+        column_profiles = []
+        for column in range(columns):
+            data = [row[column] for row in values[1:]]
+            populated = [value for value in data if value not in ("", None)]
+            numeric = [float(value) for value in populated if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))]
+            blank_count = len(data) - len(populated)
+            header = headers[column] or f"Column {_column_name(column)}"
+            profile: dict[str, Any] = {
+                "column": _column_name(column), "header": header, "populated": len(populated),
+                "blanks": blank_count, "distinct": len({str(value) for value in populated[:10_000]}),
+                "numeric": len(numeric), "formula_cells": sum(1 for row in formulas[1:] if str(row[column]).startswith("=")),
+            }
+            if numeric:
+                ordered = sorted(numeric)
+                profile.update({"min": ordered[0], "max": ordered[-1], "sum": sum(numeric), "mean": sum(numeric) / len(numeric)})
+                if len(ordered) >= 8:
+                    q1 = ordered[len(ordered) // 4]
+                    q3 = ordered[(len(ordered) * 3) // 4]
+                    low, high = q1 - 1.5 * (q3 - q1), q3 + 1.5 * (q3 - q1)
+                    outliers = [value for value in numeric if value < low or value > high]
+                    if outliers and focus in ("all", "quality", "management"):
+                        add("notice", "numeric_outliers", name, f"{_column_name(column)}2:{_column_name(column)}{rows}", f"{header} contains values outside the IQR range.", {"count": len(outliers), "low": low, "high": high, "examples": outliers[:5]})
+            if data and blank_count / len(data) >= 0.25 and focus in ("all", "quality"):
+                add("notice", "sparse_column", name, f"{_column_name(column)}2:{_column_name(column)}{rows}", f"{header} is at least 25% blank.", {"blank_count": blank_count, "row_count": len(data)})
+            column_profiles.append(profile)
+        profiles.append({"sheet": name, "table_range": f"A1:{_column_name(max(columns - 1, 0))}{max(rows, 1)}", "headers": headers, "columns": column_profiles})
+
+    for error in inspection["formula_errors"]:
+        add("error", "formula_error", error["sheet"], f"{_column_name(error['column'] - 1)}{error['row']}", "A formula currently evaluates to an error.", {"displayed": error["displayed"], "error_code": error["error_code"]})
+    objects = _object_inventory(document)
+    opportunities = []
+    for profile in profiles:
+        numeric_headers = [column["header"] for column in profile["columns"] if column["numeric"] > 0]
+        dimension_headers = [column["header"] for column in profile["columns"] if column["populated"] > 0 and column["numeric"] == 0]
+        if numeric_headers:
+            opportunities.append({
+                "sheet": profile["sheet"], "source_range": profile["table_range"],
+                "dimensions": dimension_headers[:4], "measures": numeric_headers[:8],
+                "recommended_chart": "column" if dimension_headers else "line",
+            })
+    return {
+        "focus": focus,
+        "summary": {
+            "sheet_count": inspection["sheet_count"], "inspected_cells": inspection["inspected_cells"],
+            "data_rows": total_rows, "formula_count": inspection["formula_count"],
+            "formula_error_count": len(inspection["formula_errors"]), "finding_count": len(findings),
+            "finding_total": finding_total, "truncated": finding_total > len(findings),
+        },
+        "sheets": profiles, "findings": findings, "objects": objects,
+        "management_summary_opportunities": opportunities[:20],
+        "method": "deterministic_bounded_profile_v1",
+    }
+
+
 def _sheet(document, name: str):
     sheets = document.getSheets()
     if not sheets.hasByName(name):
@@ -384,11 +563,113 @@ def _sort(area, operation: dict[str, Any]) -> None:
     area.sort(descriptor)
 
 
+def _upsert_chart(document, operation: dict[str, Any]) -> None:
+    import uno
+
+    sheets = document.getSheets()
+    target = sheets.getByName(operation["sheet"])
+    source = sheets.getByName(operation["source_sheet"]).getCellRangeByName(operation["source_range"])
+    anchor = target.getCellRangeByName(operation["anchor_range"])
+    address = anchor.getRangeAddress()
+    start = target.getCellByPosition(address.StartColumn, address.StartRow)
+    end = target.getCellByPosition(address.EndColumn, address.EndRow)
+    rectangle = uno.createUnoStruct("com.sun.star.awt.Rectangle")
+    rectangle.X = int(start.Position.X)
+    rectangle.Y = int(start.Position.Y)
+    rectangle.Width = max(1000, int(end.Position.X + end.Size.Width - rectangle.X))
+    rectangle.Height = max(1000, int(end.Position.Y + end.Size.Height - rectangle.Y))
+    charts = target.getCharts()
+    if charts.hasByName(operation["name"]):
+        charts.removeByName(operation["name"])
+    charts.addNewByName(
+        operation["name"], rectangle, (source.getRangeAddress(),),
+        operation["has_column_headers"], operation["has_row_headers"],
+    )
+    embedded = charts.getByName(operation["name"]).getEmbeddedObject()
+    services = {
+        "column": "com.sun.star.chart.BarDiagram", "bar": "com.sun.star.chart.BarDiagram",
+        "line": "com.sun.star.chart.LineDiagram", "pie": "com.sun.star.chart.PieDiagram",
+        "scatter": "com.sun.star.chart.XYDiagram",
+    }
+    diagram = embedded.createInstance(services[operation["chart_type"]])
+    if operation["chart_type"] in {"column", "bar"}:
+        diagram.Vertical = operation["chart_type"] == "column"
+    embedded.setDiagram(diagram)
+    embedded.HasMainTitle = bool(operation["title"])
+    if operation["title"]:
+        embedded.Title.String = operation["title"]
+    embedded.HasLegend = operation["legend"]
+
+
+def _pivot_field_map(descriptor) -> dict[str, Any]:
+    fields = descriptor.getDataPilotFields()
+    result = {}
+    for index in range(fields.getCount()):
+        field = fields.getByIndex(index)
+        name = str(field.Name)
+        result[name] = field
+        result.setdefault(name.casefold(), field)
+    return result
+
+
+def _pivot_orientation(name: str):
+    import uno
+
+    return uno.Enum("com.sun.star.sheet.DataPilotFieldOrientation", name)
+
+
+def _general_function(name: str):
+    import uno
+
+    return uno.Enum("com.sun.star.sheet.GeneralFunction", name)
+
+
+def _upsert_pivot(document, operation: dict[str, Any]) -> None:
+    sheets = document.getSheets()
+    target = sheets.getByName(operation["sheet"])
+    tables = target.getDataPilotTables()
+    if tables.hasByName(operation["name"]):
+        tables.removeByName(operation["name"])
+    descriptor = tables.createDataPilotDescriptor()
+    source = sheets.getByName(operation["source_sheet"]).getCellRangeByName(operation["source_range"])
+    descriptor.setSourceRange(source.getRangeAddress())
+    fields = _pivot_field_map(descriptor)
+
+    def field(name: str):
+        found = fields.get(name) or fields.get(name.casefold())
+        if found is None:
+            raise RuntimeError(f"pivot field not found: {name}")
+        return found
+
+    for name in operation["rows"]:
+        field(name).Orientation = _pivot_orientation("ROW")
+    for name in operation["columns"]:
+        field(name).Orientation = _pivot_orientation("COLUMN")
+    for name in operation["filters"]:
+        field(name).Orientation = _pivot_orientation("PAGE")
+    functions = {"sum": "SUM", "count": "COUNT", "average": "AVERAGE", "min": "MIN", "max": "MAX"}
+    for value in operation["values"]:
+        item = field(value["field"])
+        item.Orientation = _pivot_orientation("DATA")
+        item.Function = _general_function(functions[value["function"]])
+        if value.get("label"):
+            item.Name = value["label"]
+    destination = target.getCellRangeByName(operation["output_cell"]).getCellAddress()
+    tables.insertNewByName(operation["name"], destination, descriptor)
+
+
 def _apply(document, operations: list[dict[str, Any]]) -> None:
     sheets = document.getSheets()
     for operation in operations:
         kind = operation["type"]
-        if kind == "add_sheet":
+        if kind == "upsert_chart":
+            _upsert_chart(document, operation)
+        elif kind == "upsert_pivot":
+            _upsert_pivot(document, operation)
+        elif kind == "refresh_pivot":
+            table = sheets.getByName(operation["sheet"]).getDataPilotTables().getByName(operation["name"])
+            table.refresh()
+        elif kind == "add_sheet":
             sheets.insertNewByName(operation["sheet"], sheets.getCount())
         elif kind == "delete_sheet":
             sheets.removeByName(operation["sheet"])
@@ -544,6 +825,8 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
             return {"result": _search(document, request["arguments"], limits), "artifacts": {}}
         if action == "trace":
             return {"result": _trace(document, request["arguments"], limits), "artifacts": {}}
+        if action == "analyze":
+            return {"result": _analyze(document, request["arguments"], limits), "artifacts": {}}
         if action == "render":
             preview = out / "preview.pdf"
             _render_pdf(document, preview)
@@ -551,6 +834,7 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
 
         before = _inspect(document, limits, include_formulas=True)
         before_targets = _target_fingerprints(document, request["arguments"].get("operations", []))
+        before_objects = _object_fingerprints(document, request["arguments"].get("operations", []))
         if action == "stage":
             _apply(document, request["arguments"]["operations"])
             extension = source.suffix.lower()
@@ -564,6 +848,7 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
         document.calculateAll()
         expected = _inspect(document, limits, include_formulas=True)
         expected_targets = _target_fingerprints(document, request["arguments"].get("operations", []))
+        expected_objects = _object_fingerprints(document, request["arguments"].get("operations", []))
         workbook = out / f"workbook{extension}"
         _store(document, workbook, filter_name)
         document.close(True)
@@ -572,6 +857,7 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
         reopened.calculateAll()
         after = _inspect(reopened, limits, include_formulas=True)
         reopened_targets = _target_fingerprints(reopened, request["arguments"].get("operations", []))
+        reopened_objects = _object_fingerprints(reopened, request["arguments"].get("operations", []))
         preview = out / "preview.pdf"
         _render_pdf(reopened, preview)
         comparison = {
@@ -579,6 +865,7 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
             "named_ranges_match": expected["named_ranges"] == after["named_ranges"],
             "formula_count_match": expected["formula_count"] == after["formula_count"],
             "target_ranges_match": expected_targets == reopened_targets,
+            "workbook_objects_match": expected_objects == reopened_objects,
             "new_formula_errors": [error for error in after["formula_errors"] if error not in before["formula_errors"]],
         }
         if (
@@ -586,6 +873,7 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
             or not comparison["named_ranges_match"]
             or not comparison["formula_count_match"]
             or not comparison["target_ranges_match"]
+            or not comparison["workbook_objects_match"]
         ):
             raise RuntimeError("staged workbook did not survive save and reopen verification")
         status = "manual_review_required" if action == "convert_xls" else "verified"
@@ -595,6 +883,7 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
                 "before": _inventory(before),
                 "after": _inventory(after),
                 "target_changes": _target_changes(before_targets, expected_targets),
+                "object_changes": {"before": before_objects, "after": expected_objects},
             },
             "verification": {
                 "status": status,
@@ -604,7 +893,12 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
                 "comparison": comparison,
                 "excel_equivalence": "not_claimed",
             },
-            "warnings": (["Legacy conversion requires manual review in both Calc and the rendered PDF"] if action == "convert_xls" else []),
+            "warnings": (
+                ["Legacy conversion requires manual review in both Calc and the rendered PDF"]
+                if action == "convert_xls" else
+                (["Pivot tables in .xlsx may render differently in Microsoft Excel; review the staged workbook and PDF"]
+                 if source.suffix.lower() == ".xlsx" and any(operation["type"] in {"upsert_pivot", "refresh_pivot"} for operation in request["arguments"].get("operations", [])) else [])
+            ),
             "engine": {"name": "LibreOffice Calc", "filter_name": filter_name},
         }
         return {"result": result, "artifacts": {"workbook": f"out/{workbook.name}", "preview": "out/preview.pdf"}}

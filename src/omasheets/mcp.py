@@ -20,6 +20,7 @@ class AgentService(Protocol):
     def read_range(self, **arguments: Any) -> dict[str, Any]: ...
     def search_workbook(self, **arguments: Any) -> dict[str, Any]: ...
     def trace_formula(self, **arguments: Any) -> dict[str, Any]: ...
+    def analyze_workbook(self, **arguments: Any) -> dict[str, Any]: ...
     def render_workbook(self, **arguments: Any) -> dict[str, Any]: ...
     def change_history(self, **arguments: Any) -> dict[str, Any]: ...
     def plan_changes(self, **arguments: Any) -> dict[str, Any]: ...
@@ -65,6 +66,14 @@ FORMULA_MATRIX = {
         "items": {"type": "string", "minLength": 1, "maxLength": 8192},
     },
 }
+PIVOT_VALUES = {
+    "type": "array", "minItems": 1, "maxItems": 8,
+    "items": _object({
+        "field": SHEET,
+        "function": {"type": "string", "enum": ["sum", "count", "average", "min", "max"]},
+        "label": SHEET,
+    }, ["field", "function"]),
+}
 
 OPERATION_SCHEMA = _object(
     {
@@ -87,13 +96,15 @@ OPERATION_SCHEMA = _object(
                 "fill_down",
                 "fill_right",
                 "sort_range",
+                "upsert_chart",
+                "upsert_pivot",
+                "refresh_pivot",
             ],
         },
         "sheet": SHEET,
         "range": RANGE,
         "value": SCALAR,
         "formula": {"type": "string", "minLength": 1, "maxLength": 8192},
-        "values": VALUE_MATRIX,
         "formulas": FORMULA_MATRIX,
         "number_format": {"type": "string", "minLength": 1, "maxLength": 128},
         "bold": {"type": "boolean"},
@@ -109,6 +120,20 @@ OPERATION_SCHEMA = _object(
         "key_column": {"type": "integer", "minimum": 1, "maximum": 16384},
         "ascending": {"type": "boolean"},
         "has_header": {"type": "boolean"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "source_sheet": SHEET,
+        "source_range": RANGE,
+        "anchor_range": RANGE,
+        "chart_type": {"type": "string", "enum": ["column", "bar", "line", "pie", "scatter"]},
+        "title": {"type": "string", "maxLength": 256},
+        "has_column_headers": {"type": "boolean"},
+        "has_row_headers": {"type": "boolean"},
+        "legend": {"type": "boolean"},
+        "output_cell": RANGE,
+        "rows": {"type": "array", "maxItems": 8, "items": SHEET},
+        "columns": {"type": "array", "maxItems": 4, "items": SHEET},
+        "filters": {"type": "array", "maxItems": 4, "items": SHEET},
+        "values": {"anyOf": [VALUE_MATRIX, PIVOT_VALUES]},
     },
     ["type"],
 )
@@ -198,6 +223,18 @@ TOOLS: list[dict[str, Any]] = [
         ),
     },
     {
+        "name": "analyze_workbook",
+        "description": "Audit the whole bounded workbook for structure, quality issues, anomalies, formulas, charts, pivots, and management-summary opportunities without modifying it.",
+        "inputSchema": _object(
+            {
+                "session_id": SESSION,
+                "focus": {"type": "string", "enum": ["all", "quality", "management"], "default": "all"},
+                "max_findings": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+            },
+            ["session_id"],
+        ),
+    },
+    {
         "name": "render_workbook",
         "description": "Render the selected workbook to a verified PDF preview.",
         "inputSchema": _object(
@@ -281,6 +318,13 @@ def _matches_type(value: Any, expected: str) -> bool:
 
 
 def _validate(value: Any, schema: dict[str, Any], path: str = "arguments") -> Any:
+    if "anyOf" in schema:
+        for option in schema["anyOf"]:
+            try:
+                return _validate(value, option, path)
+            except InvalidParams:
+                pass
+        raise InvalidParams(f"{path} does not match an allowed shape")
     expected = schema.get("type")
     expected_types = expected if isinstance(expected, list) else [expected]
     if expected and not any(_matches_type(value, item) for item in expected_types):

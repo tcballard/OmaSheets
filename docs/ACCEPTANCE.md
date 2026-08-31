@@ -80,22 +80,33 @@ crash-containment limitations.
 5. Make an unsaved value and formula edit, then use `read_range`. Confirm the
    result reports `document_source: live_window` and contains both edits while
    the source file hash remains unchanged. Retain each returned `evidence_id`.
-6. Describe the workbook, read a range, search, and trace one formula. Confirm
+6. Describe and audit the workbook, read a range, search, and trace one formula. Confirm
    a plan cannot cite evidence from another session or semantic live snapshot.
-7. Stage scalar value, formula, formatting, bounded range, inserted row,
+7. Confirm the audit covers every used sheet, reports formula errors and data
+   quality findings, inventories existing charts and pivots, and suggests only
+   bounded management-summary candidates. Cite its `evidence_id` in a plan and
+   confirm the native overlay shows the findings as read-only audit cards.
+8. Stage scalar value, formula, formatting, bounded range, inserted row,
    reference-aware fill and bounded sort changes. Confirm the native diff
    overlay opens and shows the goal, explanation, assumptions, purpose groups,
    red/green before-and-after records, and destructive flags. Confirm hiding it
    does not change the workbook and that a proposal over 200 visible changes
    states it is truncated.
-8. Give a correction such as “exclude Forecast” and confirm `revise_plan`
+9. Ask for a management summary. Confirm the plan creates a separate sheet,
+   adds or updates a named pivot and chart, and groups them by purpose. Reopen
+   the staged `.ods` in Calc and confirm both objects survive. Repeat with
+   `.xlsx`, confirm the pivot compatibility warning appears, and manually open
+   the result in Microsoft Excel before release sign-off.
+10. Refresh the named pivot after changing its staged source data and confirm
+    save/reopen object fingerprints and the rendered preview both pass.
+11. Give a correction such as “exclude Forecast” and confirm `revise_plan`
    creates a new plan, the prior plan becomes `superseded`, and only the new
    plan is actionable.
-9. Change a different live cell after staging and invoke the MCP apply handoff;
+12. Change a different live cell after staging and invoke the MCP apply handoff;
    confirm semantic fingerprint drift rejects the plan. Restage without further
    edits and confirm the handoff returns local review instructions
    and still does not write a workbook.
-10. From the overlay choose **Approve & Save a Copy**. Cancel the confirmation
+13. From the overlay choose **Approve & Save a Copy**. Cancel the confirmation
    first and confirm no output appears. Repeat, approve a new destination, and
    confirm the verified copy appears, the overlay closes and the original and
    open in-memory workbook remain unchanged. Also repeat the terminal review,

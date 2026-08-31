@@ -33,6 +33,7 @@ class Engine(Protocol):
     def read_range(self, source: Path, **arguments: Any) -> dict[str, Any]: ...
     def search(self, source: Path, **arguments: Any) -> dict[str, Any]: ...
     def trace(self, source: Path, **arguments: Any) -> dict[str, Any]: ...
+    def analyze(self, source: Path, **arguments: Any) -> dict[str, Any]: ...
     def render(self, source: Path, *, output: Path) -> dict[str, Any]: ...
     def stage(self, source: Path, operations: list[dict[str, Any]], *, output: Path, preview: Path) -> dict[str, Any]: ...
     def convert_legacy(self, source: Path, *, destination: Path | None = None, preview: Path) -> dict[str, Any]: ...
@@ -148,6 +149,7 @@ class OmaSheetsService:
             "agent_diff_overlay": {
                 "native": True,
                 "verified_before_after_values": True,
+                "cited_audit_findings": True,
                 "maximum_visible_changes": 200,
                 "mutates_open_document": False,
             },
@@ -182,6 +184,8 @@ class OmaSheetsService:
             "workbook": current,
             "focus": focus,
             "suggested_workflows": [
+                {"id": "analyse", "label": "Audit the whole workbook"},
+                {"id": "management", "label": "Build a management summary with pivots and charts"},
                 {"id": "explain", "label": "Explain this selection or formula"},
                 {"id": "clean", "label": "Clean and standardise a data range"},
                 {"id": "variance", "label": "Build or explain a variance analysis"},
@@ -427,6 +431,13 @@ class OmaSheetsService:
         evidence_id = self._record_evidence(session, base, "trace_formula", arguments, result)
         return {**result, "document_source": base["kind"], "evidence_id": evidence_id}
 
+    def analyze_workbook(self, session_id: str, **arguments: Any) -> dict[str, Any]:
+        session = self._session(session_id)
+        with self._agent_source(session) as (source, base):
+            result = self.engine.analyze(source, **arguments)
+        evidence_id = self._record_evidence(session, base, "analyze_workbook", arguments, result)
+        return {**result, "document_source": base["kind"], "evidence_id": evidence_id}
+
     def render_workbook(self, session_id: str, format: str = "pdf") -> dict[str, Any]:
         del format
         session = self._session(session_id)
@@ -461,6 +472,15 @@ class OmaSheetsService:
             "result_sha256": _canonical_hash(result),
             "observed_at": _now(),
         }
+        if tool == "analyze_workbook":
+            # Native review needs cited findings, not a second persisted copy
+            # of every profiled cell/column. Keep the evidence projection
+            # deliberately small while the digest still seals the full result.
+            record["result"] = {
+                "summary": result.get("summary", {}),
+                "findings": result.get("findings", [])[:100],
+                "method": result.get("method"),
+            }
         record["seal"] = _canonical_hash(record)
         write_json_atomic(self.evidence / f"{evidence_id}.json", record)
         return evidence_id

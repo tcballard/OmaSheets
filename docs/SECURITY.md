@@ -52,6 +52,8 @@ Production jobs require Bubblewrap and run with:
 - a private writable job directory and fresh Calc profile;
 - no inherited home, SSH agent, cloud credentials, or arbitrary environment;
 - macro execution and automatic link/update behavior disabled;
+- formula writes that request network-capable functions, URLs or external
+  workbook references rejected before staging;
 - bounded time, output size, sheet count, cell count, and formula count.
 
 If the required isolation cannot be established, the production worker fails
@@ -66,6 +68,8 @@ closed. A clearly labelled development override may exist for tests only.
 - Observation seals establish which bounded results a plan cited. They do not
   establish that an agent interpreted those results correctly. Agent-authored
   goals, summaries, assumptions and group purposes remain untrusted text.
+- Audit findings are deterministic heuristics, not proof of a business error;
+  their bounded results are shown separately from verified workbook changes.
 - Plan revision creates a sealed replacement and marks the previous plan
   superseded under its plan lock; reviewed plan content is never edited in place.
 - Receipt records are hash chained and written under a chain lock.

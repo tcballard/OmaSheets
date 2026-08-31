@@ -35,12 +35,32 @@ history. Only the local person can approve publication.
   formulas and presentation formatting.
 - **Format:** standardise number formats, emphasis, colours and wrapping without
   changing cell values.
+- **Analyse:** run a deterministic bounded audit across every used sheet and
+  return reviewable findings, column profiles, existing workbook objects and
+  management-summary opportunities as sealed evidence.
+- **Management:** cite the workbook audit, inspect only the supporting ranges,
+  then propose a purpose-labelled summary sheet with typed pivot tables and
+  charts. The agent chooses the useful presentation; OmaSheets constrains and
+  verifies the workbook mutations.
+
+Charts are upserts: a named chart is created or replaced from an explicit
+source and anchor range. Pivots can likewise be upserted from named row,
+column, filter and aggregate fields, or refreshed by name. These operations
+remain staged proposals. In `.xlsx`, pivot compatibility carries an explicit
+manual-review warning because Calc and Excel may render pivot details
+differently.
 
 The deterministic workflow catalog in `tests/fixtures/agent_workflows.json`
 proves that each flagship job is expressible through the public v0.0.1 tools.
 The Arch acceptance job additionally drives the installed MCP server through
 inspection, an evidence-cited structural/formula/sort proposal, revision and
 the non-publishing local-review handoff.
+
+The same tool schemas are exposed through MCP and the provider-neutral command
+bridge used by Omarchy's configured default agent. Contract tests cover both
+surfaces; release acceptance still repeats the workflows with Codex and a
+non-Codex agent because deterministic protocol compatibility is not the same as
+model-behaviour proof.
 
 This does not claim that every model run will choose the right interpretation.
 Evidence seals prove which observations a proposal cites; they do not prove the

@@ -28,7 +28,8 @@ does not establish Excel equivalence and always returns a manual-review result.
 ## Human workflow
 
 1. Open a supported workbook from the desktop or file manager.
-2. Ask an agent to describe, trace, search, render, or propose changes.
+2. Ask an agent to describe, audit, trace, search, render, or propose changes,
+   including charts, pivots and a management-summary sheet.
 3. Review the sealed plan, source and staged hashes, semantic diff, warnings,
    verification evidence, and rendered preview.
 4. Type an exact approval token in the local review surface.
@@ -52,6 +53,8 @@ does not establish Excel equivalence and always returns a manual-review result.
 - A staged plan is invalidated if its source, destination, revision, or seal changes.
 - Recalculation, reopen, formula-error inspection, and preview rendering run before
   a plan becomes eligible for local approval.
+- Whole-workbook findings are bounded, evidence sealed and visible in native
+  review; staged chart and pivot objects survive save/reopen verification.
 - Copy publication cannot overwrite an existing path.
 - Replace publication creates a verified backup and a bounded undo receipt.
 - Every publish and undo has a durable, hash-chained receipt.

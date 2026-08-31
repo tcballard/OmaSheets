@@ -15,11 +15,16 @@ revise it from human feedback, then hand it back for local approval.
 - Open `.xls`, `.xlsx`, `.xlsm`, and `.ods` in LibreOffice Calc.
 - Inspect workbook structure, values, formulas, named ranges, deduplicated cell
   styles, and formula errors.
+- Audit every bounded used range for table structure, missing or duplicate
+  headers, duplicate rows, sparse columns, numeric outliers, formula errors,
+  existing charts and pivots, and management-summary opportunities.
 - Trace formula precedents and dependents within a bounded request.
 - Stage cell-value and formula changes against an immutable source hash.
 - Stage bounded bulk values, bulk formulas, and typed cell formatting.
 - Insert and delete bounded rows or columns, fill formulas with Calc's
   reference-aware engine, and sort bounded ranges.
+- Create or update typed column, bar, line, pie and scatter charts; create,
+  update and refresh typed pivot tables with bounded sources.
 - Require every agent proposal to state its goal, summary, assumptions,
   evidence and purpose-grouped operations.
 - Revise a verified proposal by superseding it; never silently mutate a plan
@@ -61,7 +66,8 @@ contract. Agents without OmaSheets MCP discovery can use the equivalent bounded
 `omasheets agent-session` JSON command bridge; neither surface exposes
 publication. Flagship v0.0.1 workflows
 are formula explanation, bounded data cleanup, variance analysis, cross-sheet
-reconciliation, checked summaries and formatting-only cleanup.
+reconciliation, checked summaries, formatting-only cleanup, workbook-wide
+audit, and audit-backed management summaries with pivots and charts.
 
 ## Commands
 
@@ -102,7 +108,8 @@ through local review and live plans are copy-only.
 
 Verified proposals appear inside the native window as an OmaSheets-owned diff
 overlay. It shows the agent's goal, explanation, assumptions and purpose groups
-beside bounded cell-level before/after values, formulas and formatting. It
+beside cited audit findings and bounded cell-level before/after values,
+formulas, formatting, charts and pivots. It
 flags destructive operations and truncation and never paints changes into
 LibreOfficeKit. The user can hide it or explicitly approve a new, no-clobber
 workbook copy from the overlay.

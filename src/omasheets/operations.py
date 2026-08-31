@@ -11,6 +11,11 @@ _A1 = re.compile(r"^\$?([A-Z]{1,3})\$?([1-9][0-9]{0,6})(?::\$?([A-Z]{1,3})\$?([1
 _SHEET = re.compile(r"^[^\x00-\x1f\\/?*\[\]:]{1,128}$")
 _COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _COLUMN = re.compile(r"^[A-Z]{1,3}$")
+_OBJECT_NAME = re.compile(r"^[^\x00-\x1f]{1,128}$")
+_UNSAFE_FORMULA = re.compile(
+    r"(?:\b(?:WEBSERVICE|DDE)\s*\(|(?:https?|ftp|file)://|(?:^|[;(])\s*['\"]?[^'\"]+\.(?:ods|xlsx?|xlsm)['\"]?[#.])",
+    re.IGNORECASE,
+)
 _MAX_RANGE_CELLS = 10_000
 
 _FIELDS: dict[str, tuple[set[str], set[str]]] = {
@@ -42,6 +47,15 @@ _FIELDS: dict[str, tuple[set[str], set[str]]] = {
         {"type", "sheet", "range", "key_column", "ascending", "has_header"},
         {"type", "sheet", "range", "key_column", "ascending", "has_header"},
     ),
+    "upsert_chart": (
+        {"type", "sheet", "name", "source_sheet", "source_range", "anchor_range", "chart_type", "title", "has_column_headers", "has_row_headers", "legend"},
+        {"type", "sheet", "name", "source_sheet", "source_range", "anchor_range", "chart_type", "title", "has_column_headers", "has_row_headers", "legend"},
+    ),
+    "upsert_pivot": (
+        {"type", "sheet", "name", "source_sheet", "source_range", "output_cell", "rows", "columns", "filters", "values"},
+        {"type", "sheet", "name", "source_sheet", "source_range", "output_cell", "rows", "columns", "filters", "values"},
+    ),
+    "refresh_pivot": ({"type", "sheet", "name"}, {"type", "sheet", "name"}),
 }
 SUPPORTED_OPERATIONS = tuple(_FIELDS)
 
@@ -87,6 +101,8 @@ def _validate_matrix(value: Any, *, rows: int, columns: int, formulas: bool, ind
             if formulas:
                 if not isinstance(item, str) or not item.startswith("=") or len(item) > 8192:
                     raise PolicyError(f"operation {index} contains an invalid formula")
+                if _UNSAFE_FORMULA.search(item):
+                    raise PolicyError(f"operation {index} contains an external or network-capable formula")
             else:
                 if not (item is None or isinstance(item, (str, int, float, bool))):
                     raise PolicyError(f"operation {index} contains an invalid scalar value")
@@ -119,6 +135,15 @@ def validate_operations(operations: list[dict[str, Any]]) -> list[dict[str, Any]
                 not isinstance(operation[key], str) or _SHEET.fullmatch(operation[key]) is None
             ):
                 raise PolicyError(f"operation {index} has an invalid {key}")
+        for key in ("name",):
+            if key in operation and (
+                not isinstance(operation[key], str) or _OBJECT_NAME.fullmatch(operation[key]) is None
+            ):
+                raise PolicyError(f"operation {index} has an invalid {key}")
+        if "source_sheet" in operation and (
+            not isinstance(operation["source_sheet"], str) or _SHEET.fullmatch(operation["source_sheet"]) is None
+        ):
+            raise PolicyError(f"operation {index} has an invalid source_sheet")
         shape = None
         if "range" in operation:
             if not isinstance(operation["range"], str):
@@ -137,6 +162,8 @@ def validate_operations(operations: list[dict[str, Any]]) -> list[dict[str, Any]
             or len(operation["formula"]) > 8192
         ):
             raise PolicyError(f"operation {index} has an invalid formula")
+        if "formula" in operation and _UNSAFE_FORMULA.search(operation["formula"]):
+            raise PolicyError(f"operation {index} contains an external or network-capable formula")
         if "value" in operation:
             value = operation["value"]
             if not (value is None or isinstance(value, (str, int, float, bool))):
@@ -212,9 +239,62 @@ def validate_operations(operations: list[dict[str, Any]]) -> list[dict[str, Any]
             for key in ("ascending", "has_header"):
                 if not isinstance(operation[key], bool):
                     raise PolicyError(f"operation {index} has an invalid {key}")
+        if kind == "upsert_chart":
+            for key in ("source_range", "anchor_range"):
+                if not isinstance(operation[key], str):
+                    raise PolicyError(f"operation {index} has an invalid {key}")
+                rows, columns = range_shape(operation[key])
+                if key == "source_range" and rows * columns > _MAX_RANGE_CELLS:
+                    raise PolicyError(f"operation {index} exceeds the {_MAX_RANGE_CELLS}-cell chart source limit")
+                if key == "anchor_range" and (rows < 2 or columns < 2):
+                    raise PolicyError(f"operation {index} chart anchor must span at least two rows and columns")
+            if operation["chart_type"] not in {"column", "bar", "line", "pie", "scatter"}:
+                raise PolicyError(f"operation {index} has an invalid chart type")
+            if not isinstance(operation["title"], str) or len(operation["title"]) > 256:
+                raise PolicyError(f"operation {index} has an invalid chart title")
+            for key in ("has_column_headers", "has_row_headers", "legend"):
+                if not isinstance(operation[key], bool):
+                    raise PolicyError(f"operation {index} has an invalid {key}")
+        if kind == "upsert_pivot":
+            if not isinstance(operation["source_range"], str):
+                raise PolicyError(f"operation {index} has an invalid source_range")
+            rows_count, columns_count = range_shape(operation["source_range"])
+            if rows_count * columns_count > _MAX_RANGE_CELLS:
+                raise PolicyError(f"operation {index} exceeds the {_MAX_RANGE_CELLS}-cell pivot source limit")
+            if not isinstance(operation["output_cell"], str) or ":" in operation["output_cell"]:
+                raise PolicyError(f"operation {index} has an invalid output_cell")
+            range_shape(operation["output_cell"])
+            for key, maximum in (("rows", 8), ("columns", 4), ("filters", 4)):
+                fields = operation[key]
+                if not isinstance(fields, list) or len(fields) > maximum or any(
+                    not isinstance(field, str) or _OBJECT_NAME.fullmatch(field) is None for field in fields
+                ):
+                    raise PolicyError(f"operation {index} has invalid pivot {key}")
+            layout_fields = operation["rows"] + operation["columns"] + operation["filters"]
+            if len({field.casefold() for field in layout_fields}) != len(layout_fields):
+                raise PolicyError(f"operation {index} reuses a pivot layout field")
+            values = operation["values"]
+            if not isinstance(values, list) or not 1 <= len(values) <= 8:
+                raise PolicyError(f"operation {index} has invalid pivot values")
+            for value in values:
+                if not isinstance(value, dict) or set(value) - {"field", "function", "label"} or not {"field", "function"} <= set(value):
+                    raise PolicyError(f"operation {index} has an invalid pivot value")
+                if not isinstance(value["field"], str) or _OBJECT_NAME.fullmatch(value["field"]) is None:
+                    raise PolicyError(f"operation {index} has an invalid pivot value field")
+                if value["function"] not in {"sum", "count", "average", "min", "max"}:
+                    raise PolicyError(f"operation {index} has an invalid pivot function")
+                if "label" in value and (not isinstance(value["label"], str) or _OBJECT_NAME.fullmatch(value["label"]) is None):
+                    raise PolicyError(f"operation {index} has an invalid pivot label")
+            value_fields = [value["field"] for value in values]
+            if (len({field.casefold() for field in value_fields}) != len(value_fields)
+                    or {field.casefold() for field in value_fields} & {field.casefold() for field in layout_fields}):
+                raise PolicyError(f"operation {index} reuses a pivot value field")
         item = dict(operation)
         if "range" in item:
             item["range"] = item["range"].upper()
+        for key in ("source_range", "anchor_range", "output_cell"):
+            if key in item:
+                item[key] = item[key].upper()
         if "column" in item:
             item["column"] = item["column"].upper()
         for key in ("text_color", "background_color"):

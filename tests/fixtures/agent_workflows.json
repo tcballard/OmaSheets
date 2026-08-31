@@ -40,5 +40,19 @@
     "inspection": ["describe_workbook", "read_range"],
     "may_plan": true,
     "required_operations": ["format_cells"]
+  },
+  {
+    "id": "analyse",
+    "request": "Audit the whole workbook and show me the important findings.",
+    "inspection": ["describe_workbook", "analyze_workbook"],
+    "may_plan": false,
+    "required_operations": []
+  },
+  {
+    "id": "management",
+    "request": "Build a checked management summary with a pivot and chart from the workbook audit.",
+    "inspection": ["describe_workbook", "analyze_workbook", "read_range"],
+    "may_plan": true,
+    "required_operations": ["add_sheet", "set_range_values", "format_cells", "upsert_pivot", "upsert_chart"]
   }
 ]

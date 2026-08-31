@@ -82,6 +82,15 @@ class McpTests(unittest.TestCase):
         self.assertEqual(arguments["direction"], "both")
         self.assertEqual(arguments["max_depth"], 5)
 
+    def test_workbook_analysis_is_provider_neutral_and_bounded(self) -> None:
+        response = self.server.handle(request("tools/call", {
+            "name": "analyze_workbook", "arguments": {"session_id": "a" * 32},
+        }))
+        self.assertNotIn("error", response)
+        name, arguments = self.service.calls[0]
+        self.assertEqual(name, "analyze_workbook")
+        self.assertEqual(arguments, {"session_id": "a" * 32, "focus": "all", "max_findings": 50})
+
     def test_range_read_style_default_is_explicit(self) -> None:
         response = self.server.handle(request("tools/call", {
             "name": "read_range",

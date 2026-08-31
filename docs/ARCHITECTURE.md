@@ -76,9 +76,9 @@ directs it to the `omasheets agent-session` JSON command bridge. That bridge
 uses the same tool schemas and service methods and likewise exposes no commit or
 publication operation.
 
-Successful reads create sealed observation records below the private XDG state
+Successful reads and deterministic audits create sealed observation records below the private XDG state
 directory. Each record binds the session, revision, exact selected-file or
-live-window semantic source, tool arguments and result digest. Agent plans cite
+live-window semantic source, tool arguments, bounded result and result digest. Agent plans cite
 those record IDs and carry bounded goal, summary, assumptions and purpose
 groups. These explanations are sealed and presented, but are not calculation
 evidence. `revise_plan` stages a complete replacement from the same immutable
@@ -101,7 +101,8 @@ are removed after each operation.
 After staging, the service derives a mode-`0600`, session-bound review payload
 from the sealed plan and its verified target fingerprints. The native window
 renders at most 200 exact cell/range changes in a GTK overlay above the
-LibreOfficeKit view. The overlay also presents the sealed goal, summary,
+LibreOfficeKit view. Cited workbook-audit findings appear as separate read-only
+cards. The overlay also presents the sealed goal, summary,
 assumptions and operation-group purposes. Larger proposals retain their total count and visibly say
 that the list is truncated. The overlay never sends edit commands to the
 document engine.
