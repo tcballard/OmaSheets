@@ -1,0 +1,391 @@
+"""Single-job LibreOffice UNO worker. Runs only inside the Calc sandbox."""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+import time
+import uuid
+from pathlib import Path
+from typing import Any
+
+FORMULA_ERRORS = {501, 502, 503, 504, 509, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 523, 524, 525, 526, 527, 532}
+REFERENCE = re.compile(r"(?:'([^']+)'|([A-Za-z_][^.!]*))?[.!]?(\$?[A-Z]{1,3}\$?[1-9][0-9]{0,6}(?::\$?[A-Z]{1,3}\$?[1-9][0-9]{0,6})?)")
+
+
+def _property(name: str, value: Any):
+    from com.sun.star.beans import PropertyValue
+
+    item = PropertyValue()
+    item.Name = name
+    item.Value = value
+    return item
+
+
+def _url(path: Path) -> str:
+    import uno
+
+    return uno.systemPathToFileUrl(str(path.resolve()))
+
+
+def _connect(soffice: str, profile: Path):
+    import uno
+
+    pipe = f"omasheets-{uuid.uuid4().hex}"
+    process = subprocess.Popen(
+        [
+            soffice,
+            "--headless",
+            "--nologo",
+            "--nodefault",
+            "--norestore",
+            "--nofirststartwizard",
+            "--nolockcheck",
+            f"-env:UserInstallation={_url(profile)}",
+            f"--accept=pipe,name={pipe};urp;StarOffice.ComponentContext",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    local = uno.getComponentContext()
+    resolver = local.ServiceManager.createInstanceWithContext("com.sun.star.bridge.UnoUrlResolver", local)
+    for _ in range(100):
+        if process.poll() is not None:
+            raise RuntimeError("LibreOffice exited before opening its private pipe")
+        try:
+            context = resolver.resolve(f"uno:pipe,name={pipe};urp;StarOffice.ComponentContext")
+            return process, context
+        except Exception:
+            time.sleep(0.05)
+    process.terminate()
+    raise RuntimeError("timed out connecting to LibreOffice")
+
+
+def _load(context, path: Path, *, read_only: bool):
+    desktop = context.ServiceManager.createInstanceWithContext("com.sun.star.frame.Desktop", context)
+    properties = (
+        _property("Hidden", True),
+        _property("ReadOnly", read_only),
+        _property("MacroExecutionMode", 0),
+        _property("UpdateDocMode", 0),
+        _property("Silent", True),
+    )
+    document = desktop.loadComponentFromURL(_url(path), "_blank", 0, properties)
+    if document is None or not document.supportsService("com.sun.star.sheet.SpreadsheetDocument"):
+        raise RuntimeError("input is not a Calc spreadsheet")
+    return document
+
+
+def _used_range(sheet):
+    cursor = sheet.createCursor()
+    cursor.gotoEndOfUsedArea(True)
+    address = cursor.getRangeAddress()
+    return address, sheet.getCellRangeByPosition(0, 0, address.EndColumn, address.EndRow)
+
+
+def _formula_errors(sheet_name: str, area, formulas, values, limit: int) -> list[dict[str, Any]]:
+    errors = []
+    for row_index, row in enumerate(formulas):
+        for column_index, formula in enumerate(row):
+            if not formula.startswith("="):
+                continue
+            cell = area.getCellByPosition(column_index, row_index)
+            code = int(cell.getError())
+            displayed = str(cell.getString())
+            if code or displayed.startswith("#"):
+                errors.append({
+                    "sheet": sheet_name,
+                    "row": row_index + 1,
+                    "column": column_index + 1,
+                    "formula": formula,
+                    "error_code": code,
+                    "displayed": displayed,
+                })
+                if len(errors) >= limit:
+                    return errors
+    return errors
+
+
+def _inspect(document, limits: dict[str, int], *, include_formulas: bool) -> dict[str, Any]:
+    sheets = document.getSheets()
+    names = list(sheets.getElementNames())
+    if len(names) > limits["max_sheets"]:
+        raise RuntimeError("workbook exceeds the sheet limit")
+    result_sheets = []
+    formula_records = []
+    errors = []
+    total_cells = 0
+    formula_count = 0
+    for name in names:
+        sheet = sheets.getByName(name)
+        address, area = _used_range(sheet)
+        rows = address.EndRow + 1
+        columns = address.EndColumn + 1
+        total_cells += rows * columns
+        if total_cells > limits["max_cells"]:
+            raise RuntimeError("workbook exceeds the inspected-cell limit")
+        formulas = area.getFormulaArray()
+        values = area.getDataArray()
+        sheet_formula_count = sum(1 for row in formulas for formula in row if str(formula).startswith("="))
+        formula_count += sheet_formula_count
+        if formula_count > limits["max_formulas"]:
+            raise RuntimeError("workbook exceeds the formula limit")
+        errors.extend(_formula_errors(name, area, formulas, values, limits["max_results"] - len(errors)))
+        if include_formulas:
+            for row_index, row in enumerate(formulas):
+                for column_index, formula in enumerate(row):
+                    if str(formula).startswith("="):
+                        formula_records.append({
+                            "sheet": name,
+                            "row": row_index + 1,
+                            "column": column_index + 1,
+                            "formula": str(formula),
+                        })
+        result_sheets.append({
+            "name": name,
+            "used_range": {
+                "start_column": 1,
+                "start_row": 1,
+                "end_column": columns,
+                "end_row": rows,
+            },
+            "rows": rows,
+            "columns": columns,
+            "formula_count": sheet_formula_count,
+        })
+    return {
+        "sheets": result_sheets,
+        "sheet_count": len(result_sheets),
+        "inspected_cells": total_cells,
+        "formula_count": formula_count,
+        "formula_errors": errors,
+        "formulas": formula_records if include_formulas else [],
+    }
+
+
+def _sheet(document, name: str):
+    sheets = document.getSheets()
+    if not sheets.hasByName(name):
+        raise RuntimeError("sheet not found")
+    return sheets.getByName(name)
+
+
+def _read_range(document, arguments: dict[str, Any], limits: dict[str, int]) -> dict[str, Any]:
+    area = _sheet(document, arguments["sheet"]).getCellRangeByName(arguments["range"])
+    address = area.getRangeAddress()
+    cells = (address.EndColumn - address.StartColumn + 1) * (address.EndRow - address.StartRow + 1)
+    if cells > min(limits["max_cells"], 10_000):
+        raise RuntimeError("requested range exceeds the read limit")
+    result = {"sheet": arguments["sheet"], "range": arguments["range"], "values": area.getDataArray()}
+    if arguments.get("include_formulas", True):
+        result["formulas"] = area.getFormulaArray()
+    return result
+
+
+def _search(document, arguments: dict[str, Any], limits: dict[str, int]) -> dict[str, Any]:
+    query = arguments["query"].casefold()
+    scope = arguments.get("scope", "both")
+    maximum = min(arguments.get("max_results", 50), limits["max_results"])
+    matches = []
+    for sheet_name in document.getSheets().getElementNames():
+        sheet = document.getSheets().getByName(sheet_name)
+        address, area = _used_range(sheet)
+        values = area.getDataArray()
+        formulas = area.getFormulaArray()
+        for row in range(address.EndRow + 1):
+            for column in range(address.EndColumn + 1):
+                value = str(values[row][column])
+                formula = str(formulas[row][column])
+                matched = (scope in ("values", "both") and query in value.casefold()) or (
+                    scope in ("formulas", "both") and query in formula.casefold()
+                )
+                if matched:
+                    matches.append({
+                        "sheet": sheet_name,
+                        "row": row + 1,
+                        "column": column + 1,
+                        "value": value,
+                        "formula": formula if formula.startswith("=") else None,
+                    })
+                    if len(matches) >= maximum:
+                        return {"matches": matches, "truncated": True}
+    return {"matches": matches, "truncated": False}
+
+
+def _trace(document, arguments: dict[str, Any], limits: dict[str, int]) -> dict[str, Any]:
+    sheet_name = arguments["sheet"]
+    cell_name = arguments["cell"]
+    cell = _sheet(document, sheet_name).getCellRangeByName(cell_name)
+    formula = str(cell.getFormula())
+    precedents = []
+    if formula.startswith("="):
+        for match in REFERENCE.finditer(formula):
+            precedents.append({
+                "sheet": match.group(1) or match.group(2) or sheet_name,
+                "range": match.group(3).replace("$", ""),
+            })
+            if len(precedents) >= limits["max_results"]:
+                break
+    return {
+        "root": {"sheet": sheet_name, "cell": cell_name, "formula": formula},
+        "precedents": precedents if arguments.get("direction", "both") in ("precedents", "both") else [],
+        "dependents": [],
+        "max_depth": arguments.get("max_depth", 5),
+        "warnings": ["v0.0.1 tracing resolves literal A1 precedents only; dynamic references and dependents may be incomplete"],
+    }
+
+
+def _apply(document, operations: list[dict[str, Any]]) -> None:
+    sheets = document.getSheets()
+    for operation in operations:
+        kind = operation["type"]
+        if kind == "add_sheet":
+            sheets.insertNewByName(operation["sheet"], sheets.getCount())
+        elif kind == "delete_sheet":
+            sheets.removeByName(operation["sheet"])
+        elif kind == "rename_sheet":
+            sheets.getByName(operation["sheet"]).setName(operation["new_name"])
+        else:
+            area = sheets.getByName(operation["sheet"]).getCellRangeByName(operation["range"])
+            if kind == "clear_range":
+                area.clearContents(1023)
+            elif kind == "set_formula":
+                area.setFormula(operation["formula"])
+            elif kind == "set_value":
+                value = operation["value"]
+                if value is None:
+                    area.clearContents(1023)
+                elif isinstance(value, bool):
+                    area.setValue(1 if value else 0)
+                elif isinstance(value, (int, float)):
+                    area.setValue(float(value))
+                else:
+                    area.setString(value)
+
+
+def _store(document, path: Path, filter_name: str) -> None:
+    document.storeAsURL(_url(path), (_property("FilterName", filter_name), _property("Overwrite", False)))
+
+
+def _render_pdf(document, path: Path) -> None:
+    document.storeToURL(_url(path), (_property("FilterName", "calc_pdf_Export"), _property("Overwrite", False)))
+
+
+def _filter_for(path: Path) -> str:
+    if path.suffix.lower() == ".xlsx":
+        return "Calc MS Excel 2007 XML"
+    if path.suffix.lower() == ".ods":
+        return "calc8"
+    raise RuntimeError("unsupported writable workbook format")
+
+
+def _inventory(inspection: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "sheets": [{"name": sheet["name"], "used_range": sheet["used_range"]} for sheet in inspection["sheets"]],
+        "formula_count": inspection["formula_count"],
+        "formula_errors": inspection["formula_errors"],
+    }
+
+
+def run(request: dict[str, Any]) -> dict[str, Any]:
+    import uno  # noqa: F401 - verifies the system UNO bridge before Calc launch
+
+    action = request["action"]
+    source = Path("/job" if Path("/job").exists() else Path.cwd()) / request["source"]
+    out = source.parent.parent / "out"
+    limits = request["limits"]
+    process, context = _connect(request["soffice"], source.parent.parent / "profile")
+    document = None
+    reopened = None
+    try:
+        document = _load(context, source, read_only=action not in ("stage", "convert_xls"))
+        if action == "describe":
+            result = _inspect(document, limits, include_formulas=request["arguments"].get("include_formulas", False))
+            return {"result": result, "artifacts": {}}
+        if action == "read_range":
+            return {"result": _read_range(document, request["arguments"], limits), "artifacts": {}}
+        if action == "search":
+            return {"result": _search(document, request["arguments"], limits), "artifacts": {}}
+        if action == "trace":
+            return {"result": _trace(document, request["arguments"], limits), "artifacts": {}}
+        if action == "render":
+            preview = out / "preview.pdf"
+            _render_pdf(document, preview)
+            return {"result": {"format": "pdf", "engine": {"name": "LibreOffice Calc"}}, "artifacts": {"preview": "out/preview.pdf"}}
+
+        before = _inspect(document, limits, include_formulas=True)
+        if action == "stage":
+            _apply(document, request["arguments"]["operations"])
+            extension = source.suffix.lower()
+            filter_name = _filter_for(Path(f"x{extension}"))
+        elif action == "convert_xls":
+            filter_name = "Calc MS Excel 2007 XML"
+            extension = ".xlsx"
+        else:
+            raise RuntimeError("unsupported Calc action")
+
+        document.calculateAll()
+        workbook = out / f"workbook{extension}"
+        _store(document, workbook, filter_name)
+        document.close(True)
+        document = None
+        reopened = _load(context, workbook, read_only=True)
+        reopened.calculateAll()
+        after = _inspect(reopened, limits, include_formulas=True)
+        preview = out / "preview.pdf"
+        _render_pdf(reopened, preview)
+        comparison = {
+            "sheet_inventory_match": _inventory(before)["sheets"] == _inventory(after)["sheets"],
+            "formula_count_match": before["formula_count"] == after["formula_count"] if action == "convert_xls" else None,
+            "new_formula_errors": [error for error in after["formula_errors"] if error not in before["formula_errors"]],
+        }
+        status = "manual_review_required" if action == "convert_xls" else "verified"
+        result = {
+            "semantic_diff": {
+                "operation_count": len(request["arguments"].get("operations", [])),
+                "before": _inventory(before),
+                "after": _inventory(after),
+            },
+            "verification": {
+                "status": status,
+                "recalculated": True,
+                "reopened": True,
+                "filter_name": filter_name,
+                "comparison": comparison,
+                "excel_equivalence": "not_claimed",
+            },
+            "warnings": (["Legacy conversion requires manual review in both Calc and the rendered PDF"] if action == "convert_xls" else []),
+            "engine": {"name": "LibreOffice Calc", "filter_name": filter_name},
+        }
+        return {"result": result, "artifacts": {"workbook": f"out/{workbook.name}", "preview": "out/preview.pdf"}}
+    finally:
+        for item in (reopened, document):
+            if item is not None:
+                try:
+                    item.close(True)
+                except Exception:
+                    pass
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+
+def main(argv: list[str]) -> int:
+    request_path = Path(argv[1])
+    result_path = Path(argv[2])
+    try:
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        payload = {"ok": True, **run(request)}
+    except Exception as exc:
+        payload = {"ok": False, "error": f"{type(exc).__name__}: {exc}"[:512]}
+    result_path.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+    return 0 if payload["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
