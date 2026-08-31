@@ -1,6 +1,7 @@
 import io
 import json
 import unittest
+from unittest.mock import patch
 
 from omasheets.mcp import McpServer, PROTOCOL_VERSION, serve_stdio
 
@@ -26,6 +27,9 @@ class FakeService:
 
     def pending_resource(self):
         return {"pending": False}
+
+    def capabilities_resource(self):
+        return {"libreoffice_fork": False, "agent_publish_authority": False}
 
 
 def request(method, params=None, request_id=1):
@@ -93,6 +97,21 @@ class McpTests(unittest.TestCase):
         serve_stdio(self.service, source, destination)
         response = json.loads(destination.getvalue())
         self.assertEqual(response["error"]["code"], -32700)
+
+    def test_capabilities_make_the_engine_boundary_explicit(self) -> None:
+        response = self.server.handle(request("resources/read", {"uri": "omasheets://capabilities"}))
+        payload = json.loads(response["result"]["contents"][0]["text"])
+        self.assertFalse(payload["libreoffice_fork"])
+        self.assertFalse(payload["agent_publish_authority"])
+
+    def test_stdio_rejects_and_drains_oversized_messages(self) -> None:
+        source = io.StringIO("x" * 40 + "\nnot json\n")
+        destination = io.StringIO()
+        with patch("omasheets.mcp.MAX_MESSAGE_CHARACTERS", 32):
+            serve_stdio(self.service, source, destination)
+        responses = [json.loads(line) for line in destination.getvalue().splitlines()]
+        self.assertEqual(responses[0]["error"]["message"], "Message too large")
+        self.assertEqual(responses[1]["error"]["code"], -32700)
 
 
 if __name__ == "__main__":

@@ -73,6 +73,13 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(status["agent_commit_authority"])
         self.assertNotIn(str(self.source.parent), str(status))
 
+    def test_capabilities_do_not_misrepresent_libreoffice_as_a_fork(self):
+        capabilities = self.service.capabilities_resource()
+        self.assertFalse(capabilities["libreoffice_fork"])
+        self.assertEqual(capabilities["document_engine"]["adapter"], "isolated_uno_worker")
+        self.assertIn("set_range_values", capabilities["agent_operations"])
+        self.assertIn("format_cells", capabilities["agent_operations"])
+
     def test_legacy_conversion_creates_a_receipt_and_preserves_source(self):
         legacy = self.source.with_name("legacy.xls")
         legacy.write_bytes(b"legacy-source")

@@ -14,7 +14,7 @@ from typing import Any, Protocol
 from . import __version__
 from .errors import ConflictError, EngineError
 from .identity import FileIdentity, identify_regular_file
-from .operations import destructive_operations, validate_operations
+from .operations import SUPPORTED_OPERATIONS, destructive_operations, validate_operations
 from .paths import AppPaths
 from .policy import Actor, require_agent_readable, require_stageable, workbook_format
 from .store import read_json, write_json_atomic
@@ -112,6 +112,25 @@ class OmaSheetsService:
             return {"selected": False}
         session = read_json(self.current_path)
         return {"selected": True, **self._public_session(session)}
+
+    def capabilities_resource(self) -> dict[str, Any]:
+        """Describe the stable product/engine boundary without probing a workbook."""
+
+        return {
+            "product": "OmaSheets",
+            "version": __version__,
+            "product_model": "native_omarchy_shell_with_replaceable_document_engine",
+            "libreoffice_fork": False,
+            "document_engine": {
+                "name": "LibreOffice Calc",
+                "adapter": "isolated_uno_worker",
+                "network_access": False,
+                "macro_execution": False,
+            },
+            "agent_operations": list(SUPPORTED_OPERATIONS),
+            "agent_publish_authority": False,
+            "local_review_required": True,
+        }
 
     def pending_resource(self) -> dict[str, Any]:
         if not self.current_path.exists():

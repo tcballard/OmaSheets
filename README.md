@@ -13,6 +13,7 @@ workbook changes without receiving silent write authority.
 - Inspect workbook structure, values, formulas, names, and formula errors.
 - Trace formula precedents and dependents within a bounded request.
 - Stage cell-value and formula changes against an immutable source hash.
+- Stage bounded bulk values, bulk formulas, and typed cell formatting.
 - Recalculate, reopen, render, and compare staged output before approval.
 - Require a local, explicit approval before publishing workbook bytes.
 - Preserve legacy `.xls` originals and convert only to a new `.xlsx` file.

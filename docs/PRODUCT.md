@@ -36,7 +36,9 @@ does not establish Excel equivalence and always returns a manual-review result.
 
 ## Non-goals
 
-- Reimplementing a spreadsheet calculation engine.
+- Forking or rebranding the complete LibreOffice desktop in v0.0.1.
+- Reimplementing a spreadsheet calculation engine before the native product
+  shell and engine-adapter boundary have been proven.
 - Claiming pixel-perfect or formula-perfect Microsoft Excel compatibility.
 - Running workbook macros, external-data refreshes, or arbitrary extensions.
 - Giving remote MCP clients direct commit or undo authority.

@@ -29,15 +29,22 @@ approve, commit, reject, replace, or undo tool.
 - `rename_sheet`
 - `add_sheet`
 - `delete_sheet`
+- `set_range_values`: an exact-shape, typed two-dimensional scalar matrix.
+- `set_range_formulas`: an exact-shape two-dimensional formula matrix.
+- `format_cells`: number format, bold, text/background colour, and wrapping.
 
-Operations use A1 references, explicit sheet names, and bounded scalar payloads.
-Unknown operation fields are rejected. Structural operations that could destroy
-data are prominently marked in the review evidence.
+Operations use A1 references, explicit sheet names, exact matrix dimensions, and
+a 10,000-cell per-operation ceiling. Unknown operation fields are rejected.
+Structural operations that could destroy data are prominently marked in the
+review evidence. Staging fingerprints targeted values, formulas, and requested
+format properties before save, then requires the same fingerprints after reopen.
 
 ## Resources
 
 - `omasheets://current`: the last workbook explicitly selected locally.
 - `omasheets://pending`: the current pending plan, if one exists.
+- `omasheets://capabilities`: engine identity, fork status, supported operations,
+  and the local-only publication boundary.
 
 Resources are convenience pointers, not ambient authority. A client cannot
 change the selected workbook by constructing a URI or passing a path.
