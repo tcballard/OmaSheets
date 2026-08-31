@@ -67,15 +67,19 @@ LibreOfficeKit to the default human editor.
    result reports `document_source: live_window` and contains both edits while
    the source file hash remains unchanged.
 4. Describe the workbook, read a range, search, and trace one formula.
-5. Stage a scalar value or formula change. Confirm the original hash is
-   unchanged and the panel reports the operation count.
+5. Stage scalar value, formula, formatting and bounded range changes. Confirm
+   the native diff overlay opens, shows red/green before-and-after records and
+   flags any destructive operation. Confirm hiding it does not change the
+   workbook and that a proposal over 200 visible changes states it is truncated.
 6. Change a different live cell after staging and invoke the MCP apply handoff;
    confirm semantic fingerprint drift rejects the plan. Restage without further
    edits and confirm the handoff returns local review instructions
    and still does not write a workbook.
-7. Click **Review in terminal**. Type a wrong token first and confirm no output
-   file appears. Repeat and type the exact token; confirm a new `-omasheets`
-   copy appears and the original remains unchanged.
+7. From the overlay choose **Approve & Save a Copy**. Cancel the confirmation
+   first and confirm no output appears. Repeat, approve a new destination, and
+   confirm the verified copy appears, the overlay closes and the original and
+   open in-memory workbook remain unchanged. Also repeat the terminal review,
+   enter a wrong token and confirm that path still writes nothing.
 
 ## Replacement and undo
 

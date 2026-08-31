@@ -107,10 +107,33 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/window-runtime"
           session=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          PYTHONPATH=src python - <<'PY'
+          import os
+          from pathlib import Path
+          from omasheets.diff_overlay import publish_overlay
+
+          runtime = Path(os.environ["RUNNER_TEMP"], "window-runtime")
+          publish_overlay(runtime / "window-diff.overlay", {
+              "plan_id": "b" * 32,
+              "session_id": "a" * 32,
+              "revision": 1,
+              "status": "verified",
+              "operations": [{"type": "set_value", "sheet": "Sheet1", "range": "B2", "value": 42}],
+              "destructive_operations": [],
+              "warnings": [],
+              "semantic_diff": {"target_changes": [{
+                  "sheet": "Sheet1", "range": "B2",
+                  "before": {"values": [[41]], "formulas": [[""]]},
+                  "after": {"values": [[42]], "formulas": [[""]]},
+              }]},
+          })
+          PY
           xvfb-run -a build/lok-spike/omasheets-window \
             --smoke-test "$RUNNER_TEMP/omasheets-window.png" \
             --context "$RUNNER_TEMP/window-runtime/context.json" \
             --bridge "$RUNNER_TEMP/window-runtime/window-bridge.sock" \
+            --diff "$RUNNER_TEMP/window-runtime/window-diff.overlay" \
+            --cli /usr/bin/true \
             --session "$session" --revision 1 \
             "$RUNNER_TEMP/lok-input/large.xlsx" > "$RUNNER_TEMP/window-report.json" &
           window_pid=$!
@@ -157,6 +180,7 @@ jobs:
           assert report["loaded"] is True and report["parts"] == 1
           assert report["scrolling"] is True and report["selection"] is True
           assert report["window_owned_by"] == "omasheets"
+          assert report["diff_overlay"] is True and report["diff_change_count"] == 1
           performance = report["performance"]
           assert performance["load_ms"] <= 15_000
           assert performance["first_paint_observed"] is True

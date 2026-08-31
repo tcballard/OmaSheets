@@ -59,6 +59,12 @@ LibreOfficeKit save-copies of the exact in-memory document, including unsaved
 work. Agents never mutate the visible document; verified output still goes
 through local review and live plans are copy-only.
 
+Verified proposals appear inside the native window as an OmaSheets-owned diff
+overlay. It shows bounded cell-level before/after values, formulas and
+formatting, flags destructive operations and truncation, and never paints
+changes into LibreOfficeKit. The user can hide it or explicitly approve a new,
+no-clobber workbook copy from the overlay.
+
 ## Status
 
 Early development. The `main` branch remains the minimal bootstrap; v0.0.1 is

@@ -43,11 +43,20 @@ unsaved in-memory content without running agent commands in the GTK process or
 changing the human view. Snapshot paths remain internal, are mode `0600`, and
 are removed after each operation.
 
+After staging, the service derives a mode-`0600`, session-bound review payload
+from the sealed plan and its verified target fingerprints. The native window
+renders at most 200 exact cell/range changes in a GTK overlay above the
+LibreOfficeKit view. Larger proposals retain their total count and visibly say
+that the list is truncated. The overlay never sends edit commands to the
+document engine.
+
 ### Local approval surface
 
-The Omarchy panel launches a local terminal review. Approval requires an exact
-token containing the plan identifier. The review surface rechecks the plan seal,
-revision, hashes, and preview immediately before publication.
+The Omarchy panel can launch a local terminal review, while the native window
+offers an explicit **Approve & Save a Copy** confirmation from the diff overlay.
+Both paths recheck the plan seal, live semantic fingerprint, revision, staged
+hash and destination immediately before publication. Native live-window review
+is always copy-only and refuses an existing destination.
 
 ## State model
 

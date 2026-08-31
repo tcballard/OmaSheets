@@ -37,6 +37,10 @@ closed. A clearly labelled development override may exist for tests only.
   destination mode, destination path, preview, and verification record.
 - Receipt records are hash chained and written under a chain lock.
 - Plan approval/rejection and publication are serialized by per-plan locks.
+- The native diff overlay is derived from sealed verification evidence, capped
+  at 200 visible changes, mode `0600`, session/revision bound and presentation
+  only. Its approval action uses fixed argv, revalidates live state and can
+  publish only to a new, unused same-format destination.
 - Copy uses no-clobber publication; replace revalidates while holding a source
   advisory lock and never overwrites unexpected concurrent bytes.
 
