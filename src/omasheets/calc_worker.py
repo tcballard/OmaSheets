@@ -13,6 +13,8 @@ from typing import Any
 
 FORMULA_ERRORS = {501, 502, 503, 504, 509, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 523, 524, 525, 526, 527, 532}
 REFERENCE = re.compile(r"(?:'([^']+)'|([A-Za-z_][^.!]*))?[.!]?(\$?[A-Z]{1,3}\$?[1-9][0-9]{0,6}(?::\$?[A-Z]{1,3}\$?[1-9][0-9]{0,6})?)")
+STARTUP_PATH = re.compile(r"(?<![A-Za-z0-9._-])/(?:[^\s:]+/)*[^\s:]*")
+STARTUP_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S+")
 
 
 def _property(name: str, value: Any):
@@ -30,31 +32,53 @@ def _url(path: Path) -> str:
     return uno.systemPathToFileUrl(str(path.resolve()))
 
 
+def _startup_diagnostic(path: Path) -> str:
+    """Return one bounded, path-free LibreOffice startup diagnostic."""
+
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")[-4096:]
+    except OSError:
+        return ""
+    lines = []
+    for raw_line in text.splitlines():
+        line = "".join(character if character.isprintable() else " " for character in raw_line).strip()
+        if line:
+            lines.append(line)
+    if not lines:
+        return ""
+    detail = STARTUP_PATH.sub("<path>", STARTUP_URL.sub("<url>", lines[-1]))
+    return detail[:256]
+
+
 def _connect(soffice: str, profile: Path):
     import uno
 
     pipe = f"omasheets-{uuid.uuid4().hex}"
-    process = subprocess.Popen(
-        [
-            soffice,
-            "--headless",
-            "--nologo",
-            "--nodefault",
-            "--norestore",
-            "--nofirststartwizard",
-            "--nolockcheck",
-            f"-env:UserInstallation={_url(profile)}",
-            f"--accept=pipe,name={pipe};urp;StarOffice.ComponentContext",
-        ],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    diagnostic_path = profile.parent / "soffice-startup.log"
+    with diagnostic_path.open("wb") as diagnostic:
+        process = subprocess.Popen(
+            [
+                soffice,
+                "--headless",
+                "--nologo",
+                "--nodefault",
+                "--norestore",
+                "--nofirststartwizard",
+                "--nolockcheck",
+                f"-env:UserInstallation={_url(profile)}",
+                f"--accept=pipe,name={pipe};urp;StarOffice.ComponentContext",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=diagnostic,
+        )
     local = uno.getComponentContext()
     resolver = local.ServiceManager.createInstanceWithContext("com.sun.star.bridge.UnoUrlResolver", local)
     for _ in range(100):
         if process.poll() is not None:
-            raise RuntimeError("LibreOffice exited before opening its private pipe")
+            detail = _startup_diagnostic(diagnostic_path)
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(f"LibreOffice exited before opening its private pipe{suffix}")
         try:
             context = resolver.resolve(f"uno:pipe,name={pipe};urp;StarOffice.ComponentContext")
             return process, context
