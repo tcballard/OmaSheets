@@ -63,3 +63,37 @@ jobs:
           cp .omarchy-contract/bin/omarchy-plugin-validate "$RUNNER_TEMP/omarchy-plugin-validate"
           rm -rf .omarchy-contract
           bash "$RUNNER_TEMP/omarchy-plugin-validate" .
+
+  libreofficekit-spike:
+    name: LibreOfficeKit .xls rendering spike
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - run: pacman -Syu --noconfirm --needed git cmake libreoffice-fresh ttf-dejavu
+      - uses: actions/checkout@v7
+      - run: cmake -S spikes/libreofficekit -B build/lok-spike -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build/lok-spike --parallel 2
+      - name: Create an Excel 97 fixture
+        run: |
+          mkdir -p "$RUNNER_TEMP/lok-input"
+          libreoffice --headless --convert-to 'xls:MS Excel 97' \
+            --outdir "$RUNNER_TEMP/lok-input" spikes/libreofficekit/fixtures/smoke.fods
+          test -s "$RUNNER_TEMP/lok-input/smoke.xls"
+      - name: Render the workbook through LibreOfficeKit
+        run: |
+          build/lok-spike/omasheets-lok-render \
+            "$RUNNER_TEMP/lok-input/smoke.xls" "$RUNNER_TEMP/lok-tile.ppm" 320 200 \
+            | tee "$RUNNER_TEMP/lok-report.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path(os.environ["RUNNER_TEMP"], "lok-report.json").read_text())
+          tile = Path(os.environ["RUNNER_TEMP"], "lok-tile.ppm").read_bytes()
+          assert report["engine"] == "libreofficekit"
+          assert report["width"] == 320 and report["height"] == 200
+          assert report["parts"] == 1
+          assert tile.startswith(b"P6\n320 200\n255\n")
+          assert len(tile) == len(b"P6\n320 200\n255\n") + 320 * 200 * 3
+          PY

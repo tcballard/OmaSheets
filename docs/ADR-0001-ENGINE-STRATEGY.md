@@ -38,6 +38,11 @@ explicitly unstable, v0.0.1 does not depend on it and a spike must prove
 packaging, crash containment, input handling, accessibility, rendering latency,
 and spreadsheet-specific editing before it becomes the main UI path.
 
+The first such spike lives in [`../spikes/libreofficekit/`](../spikes/libreofficekit/README.md).
+It proves package discovery, isolated initialization, Calc document loading, and
+bounded tile rendering against a real `.xls` in CI. It does not change the
+accepted v0.0.1 engine path or resolve the remaining promotion gates.
+
 ## Why not fork now
 
 A full fork would make OmaSheets responsible for a very large upstream desktop,
