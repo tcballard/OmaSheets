@@ -1,10 +1,12 @@
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from omasheets import __version__
 from omasheets.installation import ARCH_PACKAGES, InstallPaths, PLUGIN_ENTRY, install, source_identity, uninstall
@@ -85,6 +87,14 @@ class InstallationTests(unittest.TestCase):
         self.assertFalse(self.paths.launcher.exists())
         self.assertFalse(self.paths.codex_plugin.exists())
         self.assertFalse(self.paths.app.exists())
+
+    def test_explicit_environment_bundle_bypasses_automatic_release_download(self):
+        with patch.dict(
+            os.environ, {"OMASHEETS_NATIVE_BUNDLE_PATH": str(self.bundle)}, clear=False,
+        ), patch("omasheets.installation.download_native_bundle") as download:
+            result = install(ROOT, self.paths, check_dependencies=False)
+        self.assertTrue(result["changed"])
+        download.assert_not_called()
 
     def test_user_dependencies_are_runtime_only(self):
         self.assertEqual(ARCH_PACKAGES, ("gtk3", "libreoffice-fresh", "bubblewrap"))

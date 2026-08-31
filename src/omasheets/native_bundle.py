@@ -21,6 +21,44 @@ NATIVE_EXECUTABLES = ("omasheets-window", "omasheets-lok-render")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
+def require_exact_version_tag(source_root: Path, version: str) -> str:
+    """Require checkout HEAD to be the commit named by ``v<version>``.
+
+    Automatic downloads are safe only at a published release boundary. An
+    explicit bundle remains available to CI and developers because its source
+    identity is verified independently by :func:`install_native_bundle`.
+    """
+
+    expected_tag = f"v{version}"
+
+    def resolve(revision: str) -> str | None:
+        try:
+            completed = subprocess.run(
+                [
+                    "git", "-C", str(source_root), "rev-parse", "--verify", "--quiet",
+                    f"{revision}^{{commit}}",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        value = completed.stdout.strip()
+        return value if completed.returncode == 0 and value else None
+
+    head = resolve("HEAD")
+    tagged = resolve(f"refs/tags/{expected_tag}")
+    if head is None or tagged != head:
+        raise RuntimeError(
+            "automatic native bundle download requires checkout HEAD to be exactly "
+            f"tagged {expected_tag}; check out that published release tag or provide "
+            "a matching explicit bundle with OMASHEETS_NATIVE_BUNDLE_PATH"
+        )
+    return head
+
+
 def normalized_architecture(machine: str | None = None) -> str:
     value = (machine or platform.machine()).lower()
     aliases = {"amd64": "x86_64", "x64": "x86_64", "arm64": "aarch64"}
@@ -61,7 +99,8 @@ def _download(url: str, destination: Path) -> None:
         Path(temporary_name).unlink(missing_ok=True)
 
 
-def download_native_bundle(version: str, destination: Path) -> Path:
+def download_native_bundle(version: str, destination: Path, *, source_root: Path) -> Path:
+    require_exact_version_tag(source_root, version)
     system = platform_id()
     architecture = normalized_architecture()
     if (system, architecture) != ("linux", "x86_64"):

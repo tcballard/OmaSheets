@@ -236,7 +236,9 @@ def install(
             Path(value) if (value := os.environ.get("OMASHEETS_NATIVE_BUNDLE_PATH")) else None
         )
         if configured_bundle is None:
-            configured_bundle = download_native_bundle(__version__, paths.build)
+            configured_bundle = download_native_bundle(
+                __version__, paths.build, source_root=source_root,
+            )
         configured_bundle = configured_bundle.expanduser().resolve(strict=True)
         native_manifest = install_native_bundle(
             configured_bundle, stage, version=__version__, source=identity,
