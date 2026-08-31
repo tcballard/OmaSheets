@@ -18,6 +18,15 @@ class DiffOverlayTests(unittest.TestCase):
             ],
             "destructive_operations": [],
             "warnings": [],
+            "workflow": {
+                "goal": "Prepare the monthly variance view",
+                "summary": "Correct two values and emphasise the reviewed range.",
+                "assumptions": ["The source amounts use the same currency."],
+                "groups": [
+                    {"title": "Correct values", "purpose": "Use the inspected source figures.", "operation_indexes": [0]},
+                    {"title": "Emphasise review", "purpose": "Make the checked cells visible.", "operation_indexes": [1]},
+                ],
+            },
             "semantic_diff": {
                 "target_changes": [{
                     "sheet": "Sheet1", "range": "B2:C3",
@@ -37,10 +46,12 @@ class DiffOverlayTests(unittest.TestCase):
         overlay = build_overlay(self._plan())
         self.assertEqual(overlay["total_changes"], 3)
         self.assertEqual(overlay["items"][0], {
-            "kind": "set_range_values", "sheet": "Sheet1", "range": "B2", "before": "1", "after": "2",
+            "kind": "set_range_values", "group": "Correct values", "sheet": "Sheet1", "range": "B2", "before": "1", "after": "2",
         })
         self.assertEqual(overlay["items"][1]["range"], "C3")
         self.assertIn("bold", overlay["items"][2]["after"])
+        self.assertEqual(overlay["goal"], "Prepare the monthly variance view")
+        self.assertEqual(overlay["groups"][0]["title"], "Correct values")
 
     def test_round_trip_is_path_free_and_percent_encoded(self):
         overlay = build_overlay(self._plan())

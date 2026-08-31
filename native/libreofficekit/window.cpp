@@ -46,6 +46,8 @@ struct WindowState {
     GtkWidget* diff_button = nullptr;
     GtkWidget* diff_revealer = nullptr;
     GtkWidget* diff_summary = nullptr;
+    GtkWidget* diff_goal = nullptr;
+    GtkWidget* diff_explanation = nullptr;
     GtkWidget* diff_list = nullptr;
     GtkWidget* diff_approve = nullptr;
     fs::path source;
@@ -157,10 +159,16 @@ bool lowercase_hex(std::string_view value)
 
 struct DiffItem {
     std::string kind;
+    std::string group;
     std::string sheet;
     std::string range;
     std::string before;
     std::string after;
+};
+
+struct DiffGroup {
+    std::string title;
+    std::string purpose;
 };
 
 struct DiffOverlay {
@@ -171,6 +179,10 @@ struct DiffOverlay {
     unsigned warning_count = 0;
     unsigned total_changes = 0;
     bool truncated = false;
+    std::string goal;
+    std::string summary;
+    std::vector<std::string> assumptions;
+    std::vector<DiffGroup> groups;
     std::vector<DiffItem> items;
 };
 
@@ -220,7 +232,7 @@ DiffOverlay read_diff_overlay(WindowState* state)
     std::string payload((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     std::istringstream stream(payload);
     std::string line;
-    if (!std::getline(stream, line) || line != "OMASHEETS_DIFF_V1")
+    if (!std::getline(stream, line) || line != "OMASHEETS_DIFF_V2")
         throw std::runtime_error("unsupported diff overlay");
     std::map<std::string, std::string> metadata;
     DiffOverlay overlay;
@@ -231,10 +243,14 @@ DiffOverlay read_diff_overlay(WindowState* state)
         if (fields.size() == 3 && fields[0] == "meta") {
             if (!metadata.emplace(fields[1], percent_decode(fields[2])).second)
                 throw std::runtime_error("duplicate diff metadata");
-        } else if (fields.size() == 6 && fields[0] == "item" && overlay.items.size() < 200) {
+        } else if (fields.size() == 2 && fields[0] == "assumption" && overlay.assumptions.size() < 20) {
+            overlay.assumptions.push_back(percent_decode(fields[1]));
+        } else if (fields.size() == 3 && fields[0] == "group" && overlay.groups.size() < 20) {
+            overlay.groups.push_back({percent_decode(fields[1]), percent_decode(fields[2])});
+        } else if (fields.size() == 7 && fields[0] == "item" && overlay.items.size() < 200) {
             overlay.items.push_back({
                 percent_decode(fields[1]), percent_decode(fields[2]), percent_decode(fields[3]),
-                percent_decode(fields[4]), percent_decode(fields[5]),
+                percent_decode(fields[4]), percent_decode(fields[5]), percent_decode(fields[6]),
             });
         } else {
             throw std::runtime_error("malformed diff overlay");
@@ -245,7 +261,7 @@ DiffOverlay read_diff_overlay(WindowState* state)
     const auto plan = metadata.find("plan_id");
     const auto status = metadata.find("status");
     const auto truncated = metadata.find("truncated");
-    if (metadata.size() != 9 || session == metadata.end() || session->second != state->session_id
+    if (metadata.size() != 13 || session == metadata.end() || session->second != state->session_id
         || revision == metadata.end() || revision->second != std::to_string(state->revision)
         || plan == metadata.end() || !lowercase_hex(plan->second)
         || status == metadata.end() || status->second.size() > 32
@@ -257,6 +273,12 @@ DiffOverlay read_diff_overlay(WindowState* state)
     overlay.destructive_count = bounded_unsigned(metadata, "destructive_count", 100);
     overlay.warning_count = bounded_unsigned(metadata, "warning_count", 1000);
     overlay.total_changes = bounded_unsigned(metadata, "total_changes", 1'000'000);
+    if (bounded_unsigned(metadata, "assumption_count", 20) != overlay.assumptions.size()
+        || bounded_unsigned(metadata, "group_count", 20) != overlay.groups.size()
+        || metadata.at("goal").size() > 512 || metadata.at("summary").size() > 512)
+        throw std::runtime_error("invalid workflow explanation");
+    overlay.goal = metadata.at("goal");
+    overlay.summary = metadata.at("summary");
     overlay.truncated = truncated->second == "true";
     return overlay;
 }
@@ -695,6 +717,39 @@ void on_save_copy(GtkButton*, gpointer data)
     gtk_widget_destroy(chooser);
 }
 
+void on_ask_agent(GtkButton*, gpointer data)
+{
+    auto* state = static_cast<WindowState*>(data);
+    gchar* terminal = g_find_program_in_path("omarchy-launch-tui");
+    gchar* codex = g_find_program_in_path("codex");
+    if (terminal == nullptr || codex == nullptr) {
+        set_status(state, "Codex or the Omarchy terminal launcher is unavailable");
+        g_free(terminal);
+        g_free(codex);
+        return;
+    }
+    const char* prompt =
+        "Use the OmaSheets plugin to help with my locally selected workbook. "
+        "Start from omasheets://agent, inspect the bounded evidence you need, "
+        "clarify material ambiguity, and propose a verified plan. Never publish workbook bytes.";
+    gchar* arguments[] = {
+        terminal,
+        const_cast<gchar*>("--app-id=org.omarchy.omasheets-agent"),
+        codex,
+        const_cast<gchar*>(prompt),
+        nullptr,
+    };
+    GError* error = nullptr;
+    if (!g_spawn_async(nullptr, arguments, nullptr, G_SPAWN_DEFAULT, nullptr, nullptr, nullptr, &error)) {
+        set_status(state, "Could not open the Codex agent entry point");
+        g_clear_error(&error);
+    } else {
+        set_status(state, "Codex opened with this workbook's live selection context");
+    }
+    g_free(terminal);
+    g_free(codex);
+}
+
 gboolean on_delete(GtkWidget*, GdkEvent*, gpointer data)
 {
     auto* state = static_cast<WindowState*>(data);
@@ -851,7 +906,7 @@ void show_diff_overlay(WindowState* state, const DiffOverlay& overlay)
     for (const DiffItem& item : overlay.items) {
         GtkWidget* card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
         gtk_style_context_add_class(gtk_widget_get_style_context(card), "omasheets-diff-card");
-        const std::string location = item.sheet + " · " + item.range;
+        const std::string location = item.group + " · " + item.sheet + " · " + item.range;
         GtkWidget* title = diff_text(location, "omasheets-diff-location");
         GtkWidget* before = diff_text("− " + item.before, "omasheets-diff-before");
         GtkWidget* after = diff_text("+ " + item.after, "omasheets-diff-after");
@@ -871,6 +926,20 @@ void show_diff_overlay(WindowState* state, const DiffOverlay& overlay)
     if (overlay.truncated)
         summary << " · showing first 200";
     gtk_label_set_text(GTK_LABEL(state->diff_summary), summary.str().c_str());
+    gtk_label_set_text(GTK_LABEL(state->diff_goal), overlay.goal.c_str());
+    std::ostringstream explanation;
+    explanation << overlay.summary;
+    if (!overlay.assumptions.empty()) {
+        explanation << "\n\nAssumptions";
+        for (const std::string& assumption : overlay.assumptions)
+            explanation << "\n• " << assumption;
+    }
+    if (!overlay.groups.empty()) {
+        explanation << "\n\nPlan";
+        for (const DiffGroup& group : overlay.groups)
+            explanation << "\n• " << group.title << " — " << group.purpose;
+    }
+    gtk_label_set_text(GTK_LABEL(state->diff_explanation), explanation.str().c_str());
     const std::string button = "Review " + std::to_string(overlay.total_changes) + " agent changes";
     gtk_button_set_label(GTK_BUTTON(state->diff_button), button.c_str());
     gtk_widget_show(state->diff_button);
@@ -1047,6 +1116,10 @@ GtkWidget* build_window(WindowState* state)
     gtk_widget_set_sensitive(state->save, FALSE);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(header), state->save);
     g_signal_connect(state->save, "clicked", G_CALLBACK(on_save_copy), state);
+    GtkWidget* ask_agent = gtk_button_new_with_label("Ask Codex");
+    gtk_widget_set_tooltip_text(ask_agent, "Start a selection-aware OmaSheets workflow in Codex");
+    gtk_header_bar_pack_start(GTK_HEADER_BAR(header), ask_agent);
+    g_signal_connect(ask_agent, "clicked", G_CALLBACK(on_ask_agent), state);
     state->diff_button = gtk_button_new_with_label("Review agent changes");
     gtk_style_context_add_class(gtk_widget_get_style_context(state->diff_button), "omasheets-review-button");
     gtk_widget_set_tooltip_text(state->diff_button, "Show the verified agent proposal without changing the workbook");
@@ -1130,11 +1203,24 @@ GtkWidget* build_window(WindowState* state)
     gtk_label_set_xalign(GTK_LABEL(state->diff_summary), 0.0F);
     gtk_label_set_line_wrap(GTK_LABEL(state->diff_summary), TRUE);
     gtk_style_context_add_class(gtk_widget_get_style_context(state->diff_summary), "omasheets-diff-summary");
+    state->diff_goal = gtk_label_new("Proposed workbook changes");
+    gtk_label_set_xalign(GTK_LABEL(state->diff_goal), 0.0F);
+    gtk_label_set_line_wrap(GTK_LABEL(state->diff_goal), TRUE);
+    gtk_label_set_selectable(GTK_LABEL(state->diff_goal), TRUE);
+    gtk_style_context_add_class(gtk_widget_get_style_context(state->diff_goal), "omasheets-diff-title");
+    state->diff_explanation = gtk_label_new("Review the verified explanation and changes.");
+    gtk_label_set_xalign(GTK_LABEL(state->diff_explanation), 0.0F);
+    gtk_label_set_line_wrap(GTK_LABEL(state->diff_explanation), TRUE);
+    gtk_label_set_selectable(GTK_LABEL(state->diff_explanation), TRUE);
+    gtk_label_set_max_width_chars(GTK_LABEL(state->diff_explanation), 46);
+    gtk_style_context_add_class(gtk_widget_get_style_context(state->diff_explanation), "omasheets-diff-summary");
     GtkWidget* diff_scroll = gtk_scrolled_window_new(nullptr, nullptr);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(diff_scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     state->diff_list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_container_add(GTK_CONTAINER(diff_scroll), state->diff_list);
     gtk_box_pack_start(GTK_BOX(diff_panel), diff_header, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(diff_panel), state->diff_goal, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(diff_panel), state->diff_explanation, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(diff_panel), state->diff_summary, FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(diff_panel), diff_scroll, TRUE, TRUE, 0);
     GtkWidget* boundary = gtk_label_new("Review only · the open workbook is unchanged");

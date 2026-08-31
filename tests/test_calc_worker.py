@@ -2,6 +2,7 @@ import unittest
 
 from omasheets.calc_worker import (
     _apply,
+    _column_index,
     _color,
     _matrix_values,
     _named_ranges,
@@ -19,6 +20,8 @@ class FakeArea:
         self.CharColor = 0
         self.CellBackColor = 0
         self.IsTextWrapped = False
+        self.fills = []
+        self.sort_descriptor = None
 
     def clearContents(self, flags):
         del flags
@@ -39,14 +42,51 @@ class FakeArea:
     def getFormulaArray(self):
         return self.formulas
 
+    def fillAuto(self, direction, count):
+        self.fills.append((direction, count))
+
+    def createSortDescriptor(self):
+        class Field:
+            Field = 0
+            IsAscending = True
+
+        class Item:
+            def __init__(self, name, value):
+                self.Name = name
+                self.Value = value
+
+        return [Item("ContainsHeader", False), Item("SortFields", [Field()])]
+
+    def sort(self, descriptor):
+        self.sort_descriptor = descriptor
+
+
+class FakeCollection:
+    def __init__(self):
+        self.calls = []
+
+    def insertByIndex(self, index, count):
+        self.calls.append(("insert", index, count))
+
+    def removeByIndex(self, index, count):
+        self.calls.append(("remove", index, count))
+
 
 class FakeSheet:
     def __init__(self, area):
         self.area = area
+        self.rows = FakeCollection()
+        self.columns = FakeCollection()
 
     def getCellRangeByName(self, name):
         del name
         return self.area
+
+    def getRows(self):
+        return self.rows
+
+    def getColumns(self):
+        return self.columns
 
 
 class FakeSheets:
@@ -177,6 +217,28 @@ class CalcWorkerTests(unittest.TestCase):
         }]
         _apply(document, operations)
         self.assertEqual(document.area.formulas[1][1], "=4+4")
+
+    def test_structural_operations_use_zero_based_uno_indexes(self):
+        document = FakeDocument()
+        _apply(document, [
+            {"type": "insert_rows", "sheet": "Data", "row": 2, "count": 3},
+            {"type": "delete_columns", "sheet": "Data", "column": "B", "count": 2},
+        ])
+        sheet = document.sheets.sheet
+        self.assertEqual(sheet.rows.calls, [("insert", 1, 3)])
+        self.assertEqual(sheet.columns.calls, [("remove", 1, 2)])
+        self.assertEqual(_column_index("XFD"), 16383)
+
+    def test_bounded_sort_descriptor_uses_one_relative_key(self):
+        document = FakeDocument()
+        _apply(document, [{
+            "type": "sort_range", "sheet": "Data", "range": "A1:C9",
+            "key_column": 2, "ascending": False, "has_header": True,
+        }])
+        descriptor = document.area.sort_descriptor
+        self.assertTrue(descriptor[0].Value)
+        self.assertEqual(descriptor[1].Value[0].Field, 1)
+        self.assertFalse(descriptor[1].Value[0].IsAscending)
 
     def test_styles_are_deduplicated_and_automatic_colours_are_explicit(self):
         table = _style_table(FakeStyleDocument(), FakeStyleArea(), 2, 2)

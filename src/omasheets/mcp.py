@@ -23,12 +23,14 @@ class AgentService(Protocol):
     def render_workbook(self, **arguments: Any) -> dict[str, Any]: ...
     def change_history(self, **arguments: Any) -> dict[str, Any]: ...
     def plan_changes(self, **arguments: Any) -> dict[str, Any]: ...
+    def revise_plan(self, **arguments: Any) -> dict[str, Any]: ...
     def get_plan(self, **arguments: Any) -> dict[str, Any]: ...
     def apply_plan_handoff(self, **arguments: Any) -> dict[str, Any]: ...
     def current_resource(self) -> dict[str, Any]: ...
     def pending_resource(self) -> dict[str, Any]: ...
     def capabilities_resource(self) -> dict[str, Any]: ...
     def window_context_resource(self) -> dict[str, Any]: ...
+    def agent_context_resource(self) -> dict[str, Any]: ...
 
 
 def _object(properties: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
@@ -78,6 +80,13 @@ OPERATION_SCHEMA = _object(
                 "set_range_values",
                 "set_range_formulas",
                 "format_cells",
+                "insert_rows",
+                "delete_rows",
+                "insert_columns",
+                "delete_columns",
+                "fill_down",
+                "fill_right",
+                "sort_range",
             ],
         },
         "sheet": SHEET,
@@ -92,8 +101,49 @@ OPERATION_SCHEMA = _object(
         "background_color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
         "wrap_text": {"type": "boolean"},
         "new_name": SHEET,
+        "row": {"type": "integer", "minimum": 1, "maximum": 1048576},
+        "column": {"type": "string", "pattern": "^[A-Za-z]{1,3}$"},
+        "count": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "source_rows": {"type": "integer", "minimum": 1, "maximum": 9999},
+        "source_columns": {"type": "integer", "minimum": 1, "maximum": 9999},
+        "key_column": {"type": "integer", "minimum": 1, "maximum": 16384},
+        "ascending": {"type": "boolean"},
+        "has_header": {"type": "boolean"},
     },
     ["type"],
+)
+
+EVIDENCE_IDS = {
+    "type": "array",
+    "minItems": 1,
+    "maxItems": 50,
+    "items": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+}
+WORKFLOW_SCHEMA = _object(
+    {
+        "goal": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "assumptions": {
+            "type": "array", "maxItems": 20,
+            "items": {"type": "string", "minLength": 1, "maxLength": 500},
+        },
+        "evidence_ids": EVIDENCE_IDS,
+        "groups": {
+            "type": "array", "minItems": 1, "maxItems": 20,
+            "items": _object(
+                {
+                    "title": {"type": "string", "minLength": 1, "maxLength": 120},
+                    "purpose": {"type": "string", "minLength": 1, "maxLength": 500},
+                    "operation_indexes": {
+                        "type": "array", "minItems": 1, "maxItems": 100,
+                        "items": {"type": "integer", "minimum": 0, "maximum": 99},
+                    },
+                },
+                ["title", "purpose", "operation_indexes"],
+            ),
+        },
+    },
+    ["goal", "summary", "evidence_ids", "groups"],
 )
 
 
@@ -169,14 +219,28 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "plan_changes",
-        "description": "Stage and verify typed changes; this does not publish workbook bytes.",
+        "description": "Stage an evidence-cited, purpose-grouped proposal; this does not publish workbook bytes.",
         "inputSchema": _object(
             {
                 "session_id": SESSION,
                 "expected_revision": REVISION,
                 "operations": {"type": "array", "minItems": 1, "maxItems": 100, "items": OPERATION_SCHEMA},
+                "workflow": WORKFLOW_SCHEMA,
             },
-            ["session_id", "expected_revision", "operations"],
+            ["session_id", "expected_revision", "operations", "workflow"],
+        ),
+    },
+    {
+        "name": "revise_plan",
+        "description": "Replace a verified proposal after human feedback; the prior plan becomes superseded.",
+        "inputSchema": _object(
+            {
+                "plan_id": PLAN,
+                "expected_revision": REVISION,
+                "operations": {"type": "array", "minItems": 1, "maxItems": 100, "items": OPERATION_SCHEMA},
+                "workflow": WORKFLOW_SCHEMA,
+            },
+            ["plan_id", "expected_revision", "operations", "workflow"],
         ),
     },
     {
@@ -316,6 +380,7 @@ class McpServer:
                     {"uri": "omasheets://pending", "name": "Pending plan", "mimeType": "application/json"},
                     {"uri": "omasheets://capabilities", "name": "OmaSheets capabilities", "mimeType": "application/json"},
                     {"uri": "omasheets://window", "name": "Live OmaSheets window context", "mimeType": "application/json"},
+                    {"uri": "omasheets://agent", "name": "Start an OmaSheets agent workflow", "mimeType": "application/json"},
                 ]})
             if method == "resources/read":
                 params = request.get("params", {})
@@ -331,6 +396,8 @@ class McpServer:
                     payload = self.service.capabilities_resource()
                 elif uri == "omasheets://window":
                     payload = self.service.window_context_resource()
+                elif uri == "omasheets://agent":
+                    payload = self.service.agent_context_resource()
                 else:
                     raise InvalidParams("unknown resource URI")
                 return self._result(request_id, {"contents": [{

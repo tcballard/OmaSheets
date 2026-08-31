@@ -67,6 +67,10 @@ class OperationTests(unittest.TestCase):
         self.assertEqual(result[0]["background_color"], "#AABBCC")
         with self.assertRaises(PolicyError):
             validate_operations([{"type": "format_cells", "sheet": "Data", "range": "A1"}])
+        with self.assertRaises(PolicyError):
+            validate_operations([{
+                "type": "format_cells", "sheet": "Data", "range": "A1", "text_color": "red",
+            }])
 
     def test_ranges_are_bounded_by_sheet_and_operation_limits(self) -> None:
         self.assertEqual(range_shape("A1:XFD1"), (1, 16384))
@@ -75,6 +79,35 @@ class OperationTests(unittest.TestCase):
                 range_shape(invalid)
         with self.assertRaises(PolicyError):
             validate_operations([{"type": "clear_range", "sheet": "Data", "range": "A1:A10001"}])
+
+    def test_structural_operations_are_bounded_and_normalized(self) -> None:
+        operations = validate_operations([
+            {"type": "insert_rows", "sheet": "Data", "row": 2, "count": 3},
+            {"type": "delete_columns", "sheet": "Data", "column": "b", "count": 2},
+        ])
+        self.assertEqual(operations[1]["column"], "B")
+        self.assertEqual(destructive_operations(operations), [1])
+        with self.assertRaises(PolicyError):
+            validate_operations([{"type": "delete_rows", "sheet": "Data", "row": 1048576, "count": 2}])
+
+    def test_formula_fill_requires_a_source_smaller_than_the_target(self) -> None:
+        self.assertEqual(validate_operations([{
+            "type": "fill_down", "sheet": "Data", "range": "D2:D20", "source_rows": 1,
+        }])[0]["source_rows"], 1)
+        with self.assertRaises(PolicyError):
+            validate_operations([{
+                "type": "fill_right", "sheet": "Data", "range": "A1:B1", "source_columns": 2,
+            }])
+
+    def test_sort_is_bounded_to_a_relative_key_column(self) -> None:
+        operation = {
+            "type": "sort_range", "sheet": "Data", "range": "A1:C20",
+            "key_column": 2, "ascending": False, "has_header": True,
+        }
+        self.assertEqual(validate_operations([operation])[0], operation)
+        operation["key_column"] = 4
+        with self.assertRaises(PolicyError):
+            validate_operations([operation])
 
 
 if __name__ == "__main__":
