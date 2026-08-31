@@ -1,11 +1,17 @@
 # Install OmaSheets v0.0.1 (development preview)
 
 OmaSheets currently targets Omarchy `quattro`. It needs LibreOffice Calc,
-Bubblewrap, a system Python with LibreOffice's UNO module, and `pipx`.
+LibreOffice's SDK, GTK3, Bubblewrap, a system Python with LibreOffice's UNO
+module, CMake, and `pipx`.
 
 ```bash
-sudo pacman -S --needed libreoffice-fresh python-uno bubblewrap python-pipx
-pipx install 'git+https://github.com/tcballard/OmaSheets.git@feat/v0.0.1'
+sudo pacman -S --needed cmake gtk3 libreoffice-fresh libreoffice-fresh-sdk python-uno bubblewrap python-pipx
+git clone --branch feat/v0.0.1 https://github.com/tcballard/OmaSheets.git
+cd OmaSheets
+pipx install .
+cmake -S spikes/libreofficekit -B build/lok-spike -DCMAKE_BUILD_TYPE=Release
+cmake --build build/lok-spike
+sudo cmake --install build/lok-spike
 omasheets integrate install
 omarchy plugin add https://github.com/tcballard/OmaSheets.git --enable
 ```
@@ -26,6 +32,7 @@ agent access:
 
 ```bash
 omasheets open ./book.xls
+omasheets window ./book.xlsx
 omasheets select ./book.xlsx
 omasheets convert ./legacy-book.xls
 omasheets doctor

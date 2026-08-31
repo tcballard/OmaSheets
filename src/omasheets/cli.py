@@ -32,6 +32,9 @@ def build_parser() -> argparse.ArgumentParser:
     open_command = commands.add_parser("open", help="Open workbooks in LibreOffice Calc")
     open_command.add_argument("paths", nargs="+", type=Path)
     commands.add_parser("open-current", help="Open the selected workbook in LibreOffice Calc")
+    window = commands.add_parser("window", help="Open a workbook in the experimental OmaSheets window")
+    window.add_argument("path", type=Path)
+    commands.add_parser("window-current", help="Open the selected workbook in the OmaSheets window")
     convert = commands.add_parser("convert", help="Convert .xls to a new adjacent .xlsx")
     convert.add_argument("path", type=Path)
     doctor = commands.add_parser("doctor", help="Check the local OmaSheets runtime")
@@ -80,6 +83,13 @@ def main(argv: list[str] | None = None) -> int:
         service = _service()
         paths = arguments.paths if arguments.command == "open" else [service.current_local_path()]
         print(json.dumps({"pid": open_workbooks(paths), "opened": len(paths)}, sort_keys=True))
+        return 0
+    if arguments.command in {"window", "window-current"}:
+        from .native_window import open_window
+
+        service = _service()
+        path = arguments.path if arguments.command == "window" else service.current_local_path()
+        print(json.dumps({"pid": open_window(path), "window": "omasheets"}, sort_keys=True))
         return 0
     if arguments.command == "convert":
         print(json.dumps(_service().convert_legacy_local(arguments.path), indent=2, sort_keys=True))
