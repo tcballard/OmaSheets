@@ -16,6 +16,9 @@ different projects:
 The v0.0.1 implementation is the second. It presents an OmaSheets-owned GTK
 window backed by LibreOfficeKit and runs separate headless Calc/UNO jobs for
 bounded agent inspection, recalculation, rendering, conversion, and staging.
+The follow-on performance architecture that moves LibreOffice toward a cold
+compatibility sidecar is scoped separately in
+[`ADR-0002-AGENT-NATIVE-PERFORMANCE.md`](ADR-0002-AGENT-NATIVE-PERFORMANCE.md).
 
 ## Decision
 

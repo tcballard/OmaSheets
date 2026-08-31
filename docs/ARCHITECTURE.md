@@ -7,6 +7,8 @@ OmaSheets is not currently a LibreOffice source fork. It owns the Omarchy and
 agent-facing product layer while LibreOffice Calc is a replaceable document
 engine. The accepted rationale and native-shell evolution path are in
 [`ADR-0001-ENGINE-STRATEGY.md`](ADR-0001-ENGINE-STRATEGY.md).
+The proposed resident-kernel and compatibility-sidecar performance direction is
+in [`ADR-0002-AGENT-NATIVE-PERFORMANCE.md`](ADR-0002-AGENT-NATIVE-PERFORMANCE.md).
 
 ## Components
 
