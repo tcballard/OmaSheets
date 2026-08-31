@@ -10,12 +10,15 @@ Protocol. The server advertises a fixed protocol version and strict tool schemas
   table for ranges of up to 1,000 cells.
 - `search_workbook`: bounded literal search over displayed values or formulas.
 - `trace_formula`: bounded precedents, dependents, or both.
+- `analyze_workbook`: deterministic workbook-wide table profiles, data-quality
+  and formula findings, workbook-object inventory, and management-summary
+  opportunities, capped by the workbook and finding limits.
 - `render_workbook`: produce a verified PDF preview.
 - `change_history`: plans by default; receipts only for locally committed work.
 
 Each successful inspection returns a sealed `evidence_id`. Evidence is bound to
 the selected session, workbook revision and selected-file or live-window
-semantic source. It records the tool, bounded arguments and result digest; it
+semantic source. It records the tool, bounded arguments, bounded result and its digest; it
 does not contain a source path.
 
 ## Planning tools
@@ -47,12 +50,20 @@ approve, commit, reject, replace, or undo tool.
   source row or column count within the target range.
 - `sort_range`: bounded one-key ascending or descending sort with explicit
   header handling.
+- `upsert_chart`: create or replace a named column, bar, line, pie or scatter
+  chart from explicit source and anchor ranges.
+- `upsert_pivot`: create or replace a named pivot from explicit source, output,
+  row, column, filter and aggregate fields.
+- `refresh_pivot`: refresh an existing named pivot from its configured source.
 
 Operations use A1 references, explicit sheet names, exact matrix dimensions, and
 a 10,000-cell per-operation ceiling. Unknown operation fields are rejected.
 Structural operations that could destroy data are prominently marked in the
 review evidence. Staging fingerprints targeted values, formulas, and requested
 format properties before save, then requires the same fingerprints after reopen.
+Chart and pivot inventories are likewise compared after save and reopen.
+Formula writes reject network-capable functions, URLs and external-workbook
+references.
 
 Every MCP-created plan requires a workflow object containing a goal, summary,
 optional assumptions, one or more evidence IDs, and purpose groups that cover
@@ -97,7 +108,8 @@ Staging an active-window plan also publishes a bounded, path-free native review
 payload. This is a one-way presentation channel: agents cannot open, close,
 approve or otherwise control the overlay. Its before/after records come from
 the recalculated staged document and are rechecked before any human-approved
-copy is published.
+copy is published. Cited `analyze_workbook` findings are shown as separate
+read-only audit cards rather than being presented as workbook changes.
 
 ## Errors
 

@@ -21,6 +21,11 @@ class OperationTests(unittest.TestCase):
         with self.assertRaises(PolicyError):
             validate_operations([{"type": "set_formula", "sheet": "Data", "range": "A1", "formula": "SUM(A2:A3)"}])
 
+    def test_formula_writes_reject_network_and_external_workbook_access(self) -> None:
+        for formula in ('=WEBSERVICE("https://example.com")', "='file:///tmp/other.xlsx'#$Sheet1.A1", '=DDE("server";"topic";"item")'):
+            with self.subTest(formula=formula), self.assertRaises(PolicyError):
+                validate_operations([{"type": "set_formula", "sheet": "Data", "range": "A1", "formula": formula}])
+
     def test_type_specific_unknown_fields_are_rejected(self) -> None:
         with self.assertRaises(PolicyError):
             validate_operations([{"type": "clear_range", "sheet": "Data", "range": "A1", "value": "hidden"}])
@@ -108,6 +113,27 @@ class OperationTests(unittest.TestCase):
         operation["key_column"] = 4
         with self.assertRaises(PolicyError):
             validate_operations([operation])
+
+    def test_chart_and_pivot_operations_are_typed_and_bounded(self) -> None:
+        chart = {
+            "type": "upsert_chart", "sheet": "Summary", "name": "RevenueChart",
+            "source_sheet": "Data", "source_range": "A1:B20", "anchor_range": "D2:L18",
+            "chart_type": "column", "title": "Revenue by region",
+            "has_column_headers": True, "has_row_headers": False, "legend": True,
+        }
+        pivot = {
+            "type": "upsert_pivot", "sheet": "Summary", "name": "RevenuePivot",
+            "source_sheet": "Data", "source_range": "A1:D20", "output_cell": "A2",
+            "rows": ["Region"], "columns": [], "filters": ["Period"],
+            "values": [{"field": "Revenue", "function": "sum", "label": "Total revenue"}],
+        }
+        self.assertEqual(validate_operations([chart, pivot]), [chart, pivot])
+        chart["anchor_range"] = "D2"
+        with self.assertRaises(PolicyError):
+            validate_operations([chart])
+        pivot["values"][0]["function"] = "median"
+        with self.assertRaises(PolicyError):
+            validate_operations([pivot])
 
 
 if __name__ == "__main__":

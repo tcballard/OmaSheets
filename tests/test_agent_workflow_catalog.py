@@ -13,7 +13,7 @@ class AgentWorkflowCatalogTests(unittest.TestCase):
         skill = (root / "plugins/omasheets/skills/omasheets/SKILL.md").read_text().casefold()
         self.assertEqual(
             {scenario["id"] for scenario in scenarios},
-            {"explain", "clean", "variance", "reconcile", "summarise", "format"},
+            {"explain", "clean", "variance", "reconcile", "summarise", "format", "analyse", "management"},
         )
         for scenario in scenarios:
             with self.subTest(workflow=scenario["id"]):

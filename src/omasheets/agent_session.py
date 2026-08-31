@@ -13,7 +13,9 @@ AGENT_SESSION_PROMPT = (
     "Start from omasheets://session. If OmaSheets MCP tools are unavailable, use "
     "`omasheets agent-session resource`, `omasheets agent-session tools`, and the bounded "
     "`omasheets agent-session call` bridge. Inspect the evidence you need, clarify material "
-    "ambiguity, and propose a verified plan. Never publish workbook bytes."
+    "ambiguity, and propose a verified plan. For workbook-wide analysis or a management "
+    "summary, run analyze_workbook first, cite its findings, and use typed chart and pivot "
+    "operations where useful. Never publish workbook bytes."
 )
 
 

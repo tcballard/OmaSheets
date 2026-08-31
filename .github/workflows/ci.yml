@@ -187,6 +187,12 @@ jobs:
               launcher, "agent-session", "call", "describe_workbook", "--arguments",
               json.dumps({"session_id": session["session_id"], "include_formulas": True}),
           ], text=True, capture_output=True, check=True).stdout)
+          audit = json.loads(subprocess.run([
+              launcher, "agent-session", "call", "analyze_workbook", "--arguments",
+              json.dumps({"session_id": session["session_id"], "focus": "all", "max_findings": 20}),
+          ], text=True, capture_output=True, check=True).stdout)
+          assert audit["summary"]["sheet_count"] == 1
+          assert audit["method"] == "deterministic_bounded_profile_v1"
           process = subprocess.Popen(
               [launcher, "mcp", "serve"], text=True,
               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -213,16 +219,21 @@ jobs:
               {"type": "set_formula", "sheet": "Revenue", "range": "C3", "formula": "=SUM(A3:B3)"},
               {"type": "fill_down", "sheet": "Revenue", "range": "C3:C4", "source_rows": 1},
               {"type": "sort_range", "sheet": "Revenue", "range": "A2:C4", "key_column": 1, "ascending": False, "has_header": False},
+              {"type": "add_sheet", "sheet": "Summary"},
+              {"type": "set_range_values", "sheet": "Revenue", "range": "D1:F4", "values": [["Region", "Period", "Revenue"], ["North", "Q1", 20], ["South", "Q1", 30], ["North", "Q2", 25]]},
+              {"type": "upsert_pivot", "sheet": "Summary", "name": "RevenuePivot", "source_sheet": "Revenue", "source_range": "D1:F4", "output_cell": "A2", "rows": ["Region"], "columns": [], "filters": ["Period"], "values": [{"field": "Revenue", "function": "sum", "label": "Total revenue"}]},
+              {"type": "upsert_chart", "sheet": "Summary", "name": "RevenueChart", "source_sheet": "Revenue", "source_range": "D1:F4", "anchor_range": "H2:P18", "chart_type": "column", "title": "Revenue by region", "has_column_headers": True, "has_row_headers": True, "legend": True},
           ]
           workflow = {
               "goal": "Create a checked descending revenue variance input",
               "summary": "Insert two data rows, calculate totals, fill the formula, and order the inspected range.",
               "assumptions": ["The source figures are comparable."],
-              "evidence_ids": [observed["evidence_id"]],
+              "evidence_ids": [observed["evidence_id"], audit["evidence_id"]],
               "groups": [
                   {"title": "Add inputs", "purpose": "Add the requested revenue observations.", "operation_indexes": [0, 1]},
                   {"title": "Calculate totals", "purpose": "Use reference-aware formula filling.", "operation_indexes": [2, 3]},
                   {"title": "Order results", "purpose": "Present the largest revenue first.", "operation_indexes": [4]},
+                  {"title": "Build management summary", "purpose": "Create a reviewable pivot and chart from explicit source data.", "operation_indexes": [5, 6, 7, 8]},
               ],
           }
           first = call(1, "plan_changes", {
@@ -230,6 +241,10 @@ jobs:
               "operations": operations, "workflow": workflow,
           })
           assert first["workflow"]["evidence"][0]["tool"] == "describe_workbook"
+          assert first["workflow"]["evidence"][1]["tool"] == "analyze_workbook"
+          assert first["verification"]["comparison"]["workbook_objects_match"] is True
+          assert len(first["semantic_diff"]["object_changes"]["after"]["charts"]) == 1
+          assert len(first["semantic_diff"]["object_changes"]["after"]["pivots"]) == 1
           workflow["goal"] = "Create the corrected checked revenue input"
           workflow["summary"] = "Revise the proposal while retaining evidence and exact operation groups."
           revised = call(2, "revise_plan", {
