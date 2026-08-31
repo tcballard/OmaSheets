@@ -118,10 +118,19 @@ class CalcEngine:
             "--dir", "/run",
         ]
         command.extend(_runtime_path_arguments(tuple(Path(item) for item in ("/bin", "/sbin", "/lib", "/lib64"))))
-        if Path("/etc/fonts").exists():
-            command.extend(["--ro-bind", "/etc/fonts", "/etc/fonts"])
-        if Path("/etc/machine-id").exists():
-            command.extend(["--ro-bind", "/etc/machine-id", "/etc/machine-id"])
+        for runtime_path in (
+            "/etc/fonts",
+            "/etc/passwd",
+            "/etc/group",
+            "/etc/nsswitch.conf",
+            "/etc/host.conf",
+            "/etc/hosts",
+            "/etc/localtime",
+            "/etc/machine-id",
+            "/var/cache/fontconfig",
+        ):
+            if Path(runtime_path).exists():
+                command.extend(["--ro-bind", runtime_path, runtime_path])
         command.extend([
             "--bind", str(job), "/job",
             "--ro-bind", str(self.worker_path), "/omasheets-worker.py",

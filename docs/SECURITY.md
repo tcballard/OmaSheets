@@ -42,6 +42,8 @@ Production jobs require Bubblewrap and run with:
 - a new user, PID, IPC, UTS, cgroup, and network namespace;
 - a minimal read-only runtime filesystem;
 - read-only loader paths or equivalent merged-`/usr` compatibility symlinks;
+- read-only NSS identity, machine identity, timezone and fontconfig runtime
+  files required for headless LibreOffice bootstrap;
 - a private writable job directory and fresh Calc profile;
 - no inherited home, SSH agent, cloud credentials, or arbitrary environment;
 - macro execution and automatic link/update behavior disabled;
