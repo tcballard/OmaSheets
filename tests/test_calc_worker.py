@@ -204,7 +204,7 @@ class CalcWorkerTests(unittest.TestCase):
                 raise AssertionError("non-object operations must not resolve target sheets")
             return sheet
 
-        sheets = SimpleNamespace(getByName=get_sheet)
+        sheets = SimpleNamespace(getByName=get_sheet, hasByName=lambda name: name == "Summary")
         document = SimpleNamespace(getSheets=lambda: sheets)
         result = _object_fingerprints(document, [{"type": "add_sheet", "sheet": "New"}, {
             "type": "upsert_chart", "sheet": "Summary", "name": "RevenueChart",
