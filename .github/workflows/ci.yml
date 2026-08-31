@@ -232,9 +232,23 @@ jobs:
           assert agent_resource["ready"] is True
           assert not ({"approve", "commit", "publish", "replace", "undo"} & {tool["name"] for tool in agent_tools})
           observed = json.loads(subprocess.run([
-              launcher, "agent-session", "call", "describe_workbook", "--arguments",
-              json.dumps({"session_id": session["session_id"], "include_formulas": True}),
+              launcher, "agent-session", "call", "query_workbook", "--arguments",
+              json.dumps({
+                  "session_id": session["session_id"],
+                  "queries": [
+                      {
+                          "id": "structure", "tool": "describe_workbook",
+                          "arguments": {"include_formulas": True},
+                      },
+                      {
+                          "id": "inputs", "tool": "read_range",
+                          "arguments": {"sheet": "Revenue", "range": "A1:C2"},
+                      },
+                  ],
+              }),
           ], text=True, capture_output=True, check=True).stdout)
+          assert [item["id"] for item in observed["items"]] == ["structure", "inputs"]
+          assert observed["items"][0]["result"]["formula_records_included"] is True
           audit = json.loads(subprocess.run([
               launcher, "agent-session", "call", "analyze_workbook", "--arguments",
               json.dumps({"session_id": session["session_id"], "focus": "all", "max_findings": 20}),
@@ -288,7 +302,7 @@ jobs:
               "session_id": session["session_id"], "expected_revision": 1,
               "operations": operations, "workflow": workflow,
           })
-          assert first["workflow"]["evidence"][0]["tool"] == "describe_workbook"
+          assert first["workflow"]["evidence"][0]["tool"] == "query_workbook"
           assert first["workflow"]["evidence"][1]["tool"] == "analyze_workbook"
           assert first["verification"]["comparison"]["workbook_objects_match"] is True
           assert len(first["semantic_diff"]["object_changes"]["after"]["charts"]) == 1
@@ -306,25 +320,27 @@ jobs:
           assert process.wait(timeout=10) == 0, process.stderr.read()
           PY
           test "$(sha256sum "$RUNNER_TEMP/lok-input/smoke.xlsx" | cut -d' ' -f1)" = "$original_sha"
-      - name: Measure installed dense-workbook agent analysis
+      - name: Measure installed agent-analysis corpus
         run: |
           performance_root="$GITHUB_WORKSPACE/.ci-performance"
           plugin="$HOME/.config/omarchy/plugins/io.github.tcballard.omasheets"
-          session=$(
-            "$HOME/.local/bin/omasheets" select \
-              "$performance_root/xlsx/dense-ci.xlsx" | jq -r .session_id
-          )
-          test -n "$session"
-          arguments=$(jq -cn --arg session "$session" \
-            '{session_id: $session, focus: "all", max_findings: 20}')
-          python "$plugin/scripts/performance.py" run \
-            --name agent-analyze-dense-ci \
-            --interval 0.05 \
-            --timeout 120 \
-            --max-samples 1024 \
-            --output "$performance_root/agent-analyze-dense-ci.json" \
-            -- "$HOME/.local/bin/omasheets" agent-session call \
-              analyze_workbook --arguments "$arguments"
+          for fixture in dense-ci sparse-ci formula-ci; do
+            session=$(
+              "$HOME/.local/bin/omasheets" select \
+                "$performance_root/xlsx/$fixture.xlsx" | jq -r .session_id
+            )
+            test -n "$session"
+            arguments=$(jq -cn --arg session "$session" \
+              '{session_id: $session, focus: "all", max_findings: 20}')
+            python "$plugin/scripts/performance.py" run \
+              --name "agent-analyze-$fixture" \
+              --interval 0.05 \
+              --timeout 120 \
+              --max-samples 1024 \
+              --output "$performance_root/agent-analyze-$fixture.json" \
+              -- "$HOME/.local/bin/omasheets" agent-session call \
+                analyze_workbook --arguments "$arguments"
+          done
       - name: Verify agent-performance evidence
         run: |
           PERFORMANCE_ROOT="$GITHUB_WORKSPACE/.ci-performance" python - <<'PY'
@@ -333,37 +349,39 @@ jobs:
           from pathlib import Path
 
           root = Path(os.environ["PERFORMANCE_ROOT"])
-          report = json.loads((root / "agent-analyze-dense-ci.json").read_text())
           manifest = json.loads((root / "fixture-manifest.json").read_text())
-          assert report["schema"] == "OMASHEETS_PERFORMANCE_V1"
-          assert report["name"] == "agent-analyze-dense-ci"
-          assert report["exit_code"] == 0
-          assert report["timed_out"] is False
-          assert report["wall_seconds"] > 0
-          assert report["sampling"]["observed_samples"] >= 1
-          memory = report["memory"]
-          assert memory["available"] is True
-          for key in ("peak_rss_bytes", "peak_pss_bytes", "peak_uss_bytes"):
-              assert isinstance(memory[key], int) and memory[key] > 0, (key, memory)
-          assert isinstance(memory["peak_process_count"], int)
-          assert memory["peak_process_count"] >= 2, memory
-          dense = next(
-              item for item in manifest["source_manifest"]["fixtures"]
-              if item["name"] == "dense-ci"
-          )
-          assert dense["used_range_cells"] <= 250_000
-          converted = next(
-              item for item in manifest["converted_fixtures"]
-              if item["file"] == "dense-ci.xlsx"
-          )
-          assert converted["bytes"] > 0 and len(converted["sha256"]) == 64
+          fixtures = manifest["source_manifest"]["fixtures"]
+          converted = manifest["converted_fixtures"]
+          for name in ("dense-ci", "sparse-ci", "formula-ci"):
+              report = json.loads((root / f"agent-analyze-{name}.json").read_text())
+              assert report["schema"] == "OMASHEETS_PERFORMANCE_V1"
+              assert report["name"] == f"agent-analyze-{name}"
+              assert report["exit_code"] == 0
+              assert report["timed_out"] is False
+              assert report["termination_complete"] is None
+              assert report["wall_seconds"] > 0
+              assert report["sampling"]["observed_samples"] >= 1
+              memory = report["memory"]
+              assert memory["available"] is True
+              for key in ("peak_rss_bytes", "peak_pss_bytes", "peak_uss_bytes"):
+                  assert isinstance(memory[key], int) and memory[key] > 0, (name, key, memory)
+              assert isinstance(memory["peak_process_count"], int)
+              assert memory["peak_process_count"] >= 2, (name, memory)
+              source = next(item for item in fixtures if item["name"] == name)
+              assert source["used_range_cells"] <= 250_000
+              workbook = next(item for item in converted if item["file"] == f"{name}.xlsx")
+              assert workbook["bytes"] > 0 and len(workbook["sha256"]) == 64
+          formula = next(item for item in fixtures if item["name"] == "formula-ci")
+          assert formula["formula_cells"] == 16_000
+          sparse = next(item for item in fixtures if item["name"] == "sparse-ci")
+          assert sparse["data_density"] < 0.01
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: omasheets-agent-performance-linux-x86_64
           path: |
-            .ci-performance/agent-analyze-dense-ci.json
+            .ci-performance/agent-analyze-*-ci.json
             .ci-performance/fixture-manifest.json
           if-no-files-found: error
           retention-days: 14
@@ -389,27 +407,6 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/window-runtime"
           session=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-          PYTHONPATH="$XDG_DATA_HOME/omasheets/app/lib" python - <<'PY'
-          import os
-          from pathlib import Path
-          from omasheets.diff_overlay import publish_overlay
-
-          runtime = Path(os.environ["RUNNER_TEMP"], "window-runtime")
-          publish_overlay(runtime / "window-diff.overlay", {
-              "plan_id": "b" * 32,
-              "session_id": "a" * 32,
-              "revision": 1,
-              "status": "verified",
-              "operations": [{"type": "set_value", "sheet": "Sheet1", "range": "B2", "value": 42}],
-              "destructive_operations": [],
-              "warnings": [],
-              "semantic_diff": {"target_changes": [{
-                  "sheet": "Sheet1", "range": "B2",
-                  "before": {"values": [[41]], "formulas": [[""]]},
-                  "after": {"values": [[42]], "formulas": [[""]]},
-              }]},
-          })
-          PY
           xvfb-run -a "$XDG_DATA_HOME/omasheets/app/bin/omasheets-window" \
             --smoke-test "$RUNNER_TEMP/omasheets-window.png" \
             --context "$RUNNER_TEMP/window-runtime/context.json" \
@@ -424,6 +421,48 @@ jobs:
             sleep 0.05
           done
           test -S "$RUNNER_TEMP/window-runtime/window-bridge.sock"
+          PYTHONPATH="$XDG_DATA_HOME/omasheets/app/lib" python - <<'PY'
+          import os
+          from pathlib import Path
+          import time
+          from omasheets.diff_overlay import publish_overlay
+
+          overlay = Path(os.environ["RUNNER_TEMP"], "window-runtime/window-diff.overlay")
+
+          def plan(plan_id, changes):
+              return {
+                  "plan_id": plan_id * 32,
+                  "session_id": "a" * 32,
+                  "revision": 1,
+                  "status": "verified",
+                  "operations": [
+                      {"type": "set_value", "sheet": "Sheet1", "range": address, "value": after}
+                      for address, _before, after in changes
+                  ],
+                  "destructive_operations": [],
+                  "warnings": [],
+                  "semantic_diff": {"target_changes": [
+                      {
+                          "sheet": "Sheet1", "range": address,
+                          "before": {"values": [[before]], "formulas": [[""]]},
+                          "after": {"values": [[after]], "formulas": [[""]]},
+                      }
+                      for address, before, after in changes
+                  ]},
+              }
+
+          # Publish only after the window and directory monitor are live, then
+          # atomically replace and delete/recreate the same path. The final
+          # smoke report must reflect the replacement rather than initial load.
+          publish_overlay(overlay, plan("b", [("B2", 41, 42)]))
+          time.sleep(0.2)
+          publish_overlay(overlay, plan("c", [("B2", 41, 42), ("C2", 5, 6)]))
+          time.sleep(0.2)
+          overlay.unlink()
+          time.sleep(0.2)
+          publish_overlay(overlay, plan("d", [("B2", 41, 42), ("C2", 5, 6)]))
+          time.sleep(0.2)
+          PY
           python - <<'PY'
           import os
           from pathlib import Path
@@ -462,7 +501,7 @@ jobs:
           assert report["loaded"] is True and report["parts"] == 1
           assert report["scrolling"] is True and report["selection"] is True
           assert report["window_owned_by"] == "omasheets"
-          assert report["diff_overlay"] is True and report["diff_change_count"] == 1
+          assert report["diff_overlay"] is True and report["diff_change_count"] == 2
           performance = report["performance"]
           assert performance["load_ms"] <= 15_000
           assert performance["first_paint_observed"] is True
