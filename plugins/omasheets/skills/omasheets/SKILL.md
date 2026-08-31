@@ -23,9 +23,14 @@ local OmaSheets application.
    superseded plan as current.
 8. Use `apply_plan` only to hand the sealed plan to local review.
 
-Good first workflows include explaining a selected formula, cleaning a bounded
-data range, building a variance analysis, reconciling two sheets, creating a
-checked summary, and standardising presentation without changing values.
+Good first workflows are:
+
+- `explain`: explain a selected formula or result.
+- `clean`: clean a bounded data range.
+- `variance`: build or explain a variance analysis.
+- `reconcile`: reconcile values across two sheets.
+- `summarise`: create a checked summary.
+- `format`: standardise presentation without changing values.
 
 Never ask for or pass an arbitrary local path. Never claim a plan has been
 applied until a local commit receipt is present. `.xlsm` is read-only and `.xls`
