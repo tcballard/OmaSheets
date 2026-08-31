@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -68,6 +69,30 @@ class PerformanceTests(unittest.TestCase):
         self.assertIsNone(sample.uss_bytes)
         self.assertEqual(sample.source, "status")
 
+    def test_proc_sampler_keeps_descendant_that_starts_another_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            proc = Path(temporary)
+            for pid, parent, group, rss in (
+                (301, 1, 77, 100),
+                (302, 301, 302, 80),
+            ):
+                process = proc / str(pid)
+                process.mkdir()
+                (process / "stat").write_text(
+                    f"{pid} (worker name) S {parent} {group} {group} 0 0\n"
+                )
+                (process / "smaps_rollup").write_text(
+                    f"Rss: {rss} kB\nPss: {rss} kB\nPrivate_Clean: 0 kB\n"
+                    f"Private_Dirty: {rss} kB\nPrivate_Hugetlb: 0 kB\n"
+                )
+
+            sample = ProcProcessGroupSampler(proc).sample(77, 0)
+
+        self.assertEqual(sample.process_count, 2)
+        self.assertEqual(sample.rss_bytes, 180 * 1024)
+        self.assertEqual(sample.pss_bytes, 180 * 1024)
+        self.assertEqual(sample.uss_bytes, 180 * 1024)
+
     def test_sample_retention_is_bounded_but_peaks_cover_all_observations(self):
         samples = _SampleAccumulator(2)
         for index, rss in enumerate((1, 9, 3)):
@@ -115,6 +140,29 @@ class PerformanceTests(unittest.TestCase):
         self.assertEqual(sparse["logical_data_cells"], 50_000_000)
         self.assertEqual(formula["formula_cells"], 800_000)
         self.assertEqual(formula["value_cells"], 200_000)
+
+    def test_ci_fixture_profile_fits_the_agent_analysis_limits(self):
+        manifest = fixture_manifest("ci")
+        dense, sparse, formula = manifest["fixtures"]
+        self.assertEqual([item["name"] for item in manifest["fixtures"]], [
+            "dense-ci", "sparse-ci", "formula-ci",
+        ])
+        self.assertTrue(all(item["used_range_cells"] <= 250_000 for item in manifest["fixtures"]))
+        self.assertEqual(dense["used_range_cells"], 240_020)
+        self.assertEqual(dense["data_density"], 1.0)
+        self.assertEqual(sparse["used_range_cells"], 240_020)
+        self.assertLess(sparse["data_density"], 0.01)
+        self.assertEqual(formula["formula_cells"], 16_000)
+        self.assertLessEqual(formula["formula_cells"], 20_000)
+
+    def test_performance_cli_accepts_ci_fixture_profile(self):
+        command = [
+            sys.executable,
+            str(Path(__file__).resolve().parents[1] / "scripts" / "performance.py"),
+            "specs", "--profile", "ci",
+        ]
+        completed = subprocess.run(command, check=True, capture_output=True, text=True)
+        self.assertEqual(json.loads(completed.stdout)["profile"], "ci")
 
     def test_fods_generation_is_deterministic_and_formula_counts_are_exact(self):
         spec = FixtureSpec("formula-test", "formula", 3, 5)

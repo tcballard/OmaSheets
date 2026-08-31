@@ -163,6 +163,54 @@ jobs:
           test -s "$RUNNER_TEMP/lok-input/smoke.xls"
           test -s "$RUNNER_TEMP/lok-input/smoke.xlsx"
           test -s "$RUNNER_TEMP/lok-input/large.xlsx"
+      - name: Generate bounded agent-performance fixtures
+        run: |
+          performance_root="$GITHUB_WORKSPACE/.ci-performance"
+          mkdir -p "$performance_root/source" "$performance_root/xlsx"
+          python scripts/performance.py fixtures \
+            --profile ci --directory "$performance_root/source"
+          for source in "$performance_root/source/"*.fods; do
+            libreoffice --headless --convert-to xlsx \
+              --outdir "$performance_root/xlsx" "$source"
+          done
+          test -s "$performance_root/xlsx/dense-ci.xlsx"
+          test -s "$performance_root/xlsx/sparse-ci.xlsx"
+          test -s "$performance_root/xlsx/formula-ci.xlsx"
+          PERFORMANCE_ROOT="$performance_root" PYTHONPATH=src python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+          from omasheets.performance import write_bounded_json
+
+          root = Path(os.environ["PERFORMANCE_ROOT"])
+          source = json.loads((root / "source" / "ci-manifest.json").read_text())
+          converted = []
+          for fixture in source["fixtures"]:
+              workbook = root / "xlsx" / f"{Path(fixture['file']).stem}.xlsx"
+              converted.append({
+                  "source_file": fixture["file"],
+                  "source_sha256": fixture["sha256"],
+                  "file": workbook.name,
+                  "bytes": workbook.stat().st_size,
+                  "sha256": hashlib.sha256(workbook.read_bytes()).hexdigest(),
+              })
+          write_bounded_json(root / "fixture-manifest.json", {
+              "schema": "OMASHEETS_PERFORMANCE_CI_FIXTURES_V1",
+              "profile": "ci",
+              "source_manifest": source,
+              "converted_format": "xlsx",
+              "conversion_tool": subprocess.check_output(
+                  ["libreoffice", "--version"], text=True,
+              ).strip(),
+              "converted_fixtures": converted,
+              "notes": [
+                  "The FODS sources are deterministic; converted XLSX bytes are observed CI artifacts.",
+                  "The analyzed XLSX identity is its recorded byte size and SHA-256, not an assumed reproducible conversion.",
+              ],
+          })
+          PY
       - name: Exercise the installed agentic workbook loop
         run: |
           original_sha=$(sha256sum "$RUNNER_TEMP/lok-input/smoke.xlsx" | cut -d' ' -f1)
@@ -258,6 +306,67 @@ jobs:
           assert process.wait(timeout=10) == 0, process.stderr.read()
           PY
           test "$(sha256sum "$RUNNER_TEMP/lok-input/smoke.xlsx" | cut -d' ' -f1)" = "$original_sha"
+      - name: Measure installed dense-workbook agent analysis
+        run: |
+          performance_root="$GITHUB_WORKSPACE/.ci-performance"
+          plugin="$HOME/.config/omarchy/plugins/io.github.tcballard.omasheets"
+          session=$(
+            "$HOME/.local/bin/omasheets" select \
+              "$performance_root/xlsx/dense-ci.xlsx" | jq -r .session_id
+          )
+          test -n "$session"
+          arguments=$(jq -cn --arg session "$session" \
+            '{session_id: $session, focus: "all", max_findings: 20}')
+          python "$plugin/scripts/performance.py" run \
+            --name agent-analyze-dense-ci \
+            --interval 0.05 \
+            --timeout 120 \
+            --max-samples 1024 \
+            --output "$performance_root/agent-analyze-dense-ci.json" \
+            -- "$HOME/.local/bin/omasheets" agent-session call \
+              analyze_workbook --arguments "$arguments"
+      - name: Verify agent-performance evidence
+        run: |
+          PERFORMANCE_ROOT="$GITHUB_WORKSPACE/.ci-performance" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["PERFORMANCE_ROOT"])
+          report = json.loads((root / "agent-analyze-dense-ci.json").read_text())
+          manifest = json.loads((root / "fixture-manifest.json").read_text())
+          assert report["schema"] == "OMASHEETS_PERFORMANCE_V1"
+          assert report["name"] == "agent-analyze-dense-ci"
+          assert report["exit_code"] == 0
+          assert report["timed_out"] is False
+          assert report["wall_seconds"] > 0
+          assert report["sampling"]["observed_samples"] >= 1
+          memory = report["memory"]
+          assert memory["available"] is True
+          for key in ("peak_rss_bytes", "peak_pss_bytes", "peak_uss_bytes"):
+              assert isinstance(memory[key], int) and memory[key] > 0, (key, memory)
+          assert isinstance(memory["peak_process_count"], int)
+          assert memory["peak_process_count"] >= 2, memory
+          dense = next(
+              item for item in manifest["source_manifest"]["fixtures"]
+              if item["name"] == "dense-ci"
+          )
+          assert dense["used_range_cells"] <= 250_000
+          converted = next(
+              item for item in manifest["converted_fixtures"]
+              if item["file"] == "dense-ci.xlsx"
+          )
+          assert converted["bytes"] > 0 and len(converted["sha256"]) == 64
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: omasheets-agent-performance-linux-x86_64
+          path: |
+            .ci-performance/agent-analyze-dense-ci.json
+            .ci-performance/fixture-manifest.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Render the workbook through LibreOfficeKit
         run: |
           "$XDG_DATA_HOME/omasheets/app/bin/omasheets-lok-render" \

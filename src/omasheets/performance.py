@@ -54,13 +54,18 @@ class MemorySample:
 
 
 class ProcProcessGroupSampler:
-    """Sum memory for a command and descendants inheriting its process group."""
+    """Sum memory for an isolated command group and all of its descendants.
+
+    Descendants are retained even if they create another process group or
+    session.  That matters for Bubblewrap's ``--new-session`` boundary: it
+    must not make the Calc worker disappear from an OmaSheets measurement.
+    """
 
     def __init__(self, proc_root: Path = Path("/proc")) -> None:
         self.proc_root = proc_root
 
     @staticmethod
-    def _process_group(stat: str) -> int | None:
+    def _process_identity(stat: str) -> tuple[int, int] | None:
         # The command name is parenthesised and may itself contain spaces or ')'.
         closing = stat.rfind(")")
         if closing < 0:
@@ -69,9 +74,14 @@ class ProcProcessGroupSampler:
         if len(fields) < 3:
             return None
         try:
-            return int(fields[2])
+            return int(fields[1]), int(fields[2])
         except ValueError:
             return None
+
+    @classmethod
+    def _process_group(cls, stat: str) -> int | None:
+        identity = cls._process_identity(stat)
+        return None if identity is None else identity[1]
 
     @staticmethod
     def _kilobytes(path: Path, wanted: set[str]) -> dict[str, int]:
@@ -114,7 +124,7 @@ class ProcProcessGroupSampler:
     def _members(self, process_group: int) -> list[int]:
         if not self.proc_root.is_dir():
             return []
-        members: list[int] = []
+        processes: dict[int, tuple[int, int]] = {}
         try:
             entries = self.proc_root.iterdir()
         except OSError:
@@ -126,9 +136,26 @@ class ProcProcessGroupSampler:
                 stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
             except (FileNotFoundError, PermissionError, ProcessLookupError, OSError):
                 continue
-            if self._process_group(stat) == process_group:
-                members.append(int(entry.name))
-        return sorted(members)
+            identity = self._process_identity(stat)
+            if identity is not None:
+                processes[int(entry.name)] = identity
+
+        # The measured process is a session leader with pid == process_group.
+        # Start with that complete group, then follow parent links so a child
+        # that calls setsid() is still observed while its parent is alive.
+        members = {
+            pid for pid, (_parent, group) in processes.items()
+            if group == process_group
+        }
+        while True:
+            descendants = {
+                pid for pid, (parent, _group) in processes.items()
+                if parent in members
+            }
+            expanded = members | descendants
+            if expanded == members:
+                return sorted(members)
+            members = expanded
 
     def sample(self, process_group: int, at_seconds: float) -> MemorySample:
         members = self._members(process_group)
@@ -184,7 +211,7 @@ class _SampleAccumulator:
 
     def report(self) -> dict:
         return {
-            "measurement": "sum of the isolated command process group",
+            "measurement": "sum of the isolated command process group and descendant processes",
             "available": any(self.peaks[key] is not None for key in ("rss_bytes", "pss_bytes", "uss_bytes")),
             "peak_rss_bytes": self.peaks["rss_bytes"],
             "peak_pss_bytes": self.peaks["pss_bytes"],
@@ -352,6 +379,7 @@ class FixtureSpec:
             "columns": self.columns,
             "logical_data_cells": logical,
             "header_cells": self.columns,
+            "used_range_cells": logical + self.columns,
             "value_cells": values,
             "formula_cells": formulas,
             "populated_data_cells": values + formulas,
@@ -374,7 +402,17 @@ def fixture_specs(profile: str = "standard") -> tuple[FixtureSpec, ...]:
             FixtureSpec("sparse-1m-x50", "sparse", 1_000_000, 50, 100, 10),
             FixtureSpec("formula-100k-x10", "formula", 100_000, 10),
         )
-    raise ValueError("fixture profile must be smoke or standard")
+    if profile == "ci":
+        # Each used range, including its header, remains beneath CalcEngine's
+        # 250,000 inspected-cell limit.  The formula case also stays below the
+        # separate 20,000-formula limit so every shape can traverse the agent
+        # analysis path in hosted acceptance when needed.
+        return (
+            FixtureSpec("dense-ci", "dense", 12_000, 20),
+            FixtureSpec("sparse-ci", "sparse", 12_000, 20, 100, 5),
+            FixtureSpec("formula-ci", "formula", 2_000, 10),
+        )
+    raise ValueError("fixture profile must be smoke, ci, or standard")
 
 
 _FODS_HEADER = """<?xml version="1.0" encoding="UTF-8"?>
