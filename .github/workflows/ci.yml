@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
-      - run: pacman -Syu --noconfirm --needed git cmake libreoffice-fresh libreoffice-fresh-sdk ttf-dejavu
+      - run: pacman -Syu --noconfirm --needed git cmake gtk3 libreoffice-fresh libreoffice-fresh-sdk ttf-dejavu xorg-server-xvfb
       - uses: actions/checkout@v7
       - run: cmake -S spikes/libreofficekit -B build/lok-spike -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build/lok-spike --parallel 2
@@ -78,7 +78,10 @@ jobs:
           mkdir -p "$RUNNER_TEMP/lok-input"
           libreoffice --headless --convert-to 'xls:MS Excel 97' \
             --outdir "$RUNNER_TEMP/lok-input" spikes/libreofficekit/fixtures/smoke.fods
+          libreoffice --headless --convert-to xlsx \
+            --outdir "$RUNNER_TEMP/lok-input" spikes/libreofficekit/fixtures/smoke.fods
           test -s "$RUNNER_TEMP/lok-input/smoke.xls"
+          test -s "$RUNNER_TEMP/lok-input/smoke.xlsx"
       - name: Render the workbook through LibreOfficeKit
         run: |
           build/lok-spike/omasheets-lok-render \
@@ -96,4 +99,28 @@ jobs:
           assert report["parts"] == 1
           assert tile.startswith(b"P6\n320 200\n255\n")
           assert len(tile) == len(b"P6\n320 200\n255\n") + 320 * 200 * 3
+          PY
+      - name: Open the OmaSheets-owned interactive window
+        run: |
+          xvfb-run -a build/lok-spike/omasheets-window \
+            --smoke-test "$RUNNER_TEMP/omasheets-window.png" "$RUNNER_TEMP/lok-input/smoke.xlsx" \
+            | tee "$RUNNER_TEMP/window-report.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads(Path(os.environ["RUNNER_TEMP"], "window-report.json").read_text())
+          screenshot = Path(os.environ["RUNNER_TEMP"], "omasheets-window.png").read_bytes()
+          assert report == {
+              "editable": True,
+              "engine": "libreofficekitgtk",
+              "loaded": True,
+              "parts": 1,
+              "scrolling": True,
+              "selection": True,
+              "window_owned_by": "omasheets",
+          }
+          assert screenshot.startswith(b"\x89PNG\r\n\x1a\n")
+          assert len(screenshot) > 10_000
           PY

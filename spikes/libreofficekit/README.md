@@ -1,9 +1,9 @@
 # LibreOfficeKit native-rendering spike
 
-This spike proves the document-engine half of an OmaSheets-owned workbook
-window. It loads a spreadsheet through LibreOfficeKit, initializes the tiled
-renderer, paints the first viewport into memory, and writes a dependency-free
-PPM image for inspection.
+This spike now contains both the document-engine proof and the first real
+OmaSheets-owned workbook window. The window embeds LibreOfficeKitGTK's
+interactive tiled view inside OmaSheets chrome; it is not a re-skinned Calc
+window.
 
 It is deliberately not a product editor. LibreOfficeKit's tiled rendering and
 editing API is unstable, and this process must remain isolated from the future
@@ -15,10 +15,11 @@ Arch's `libreoffice-fresh` package supplies the runtime and
 `libreoffice-fresh-sdk` supplies the headers used by the spike.
 
 ```bash
-sudo pacman -S --needed cmake libreoffice-fresh libreoffice-fresh-sdk
+sudo pacman -S --needed cmake gtk3 libreoffice-fresh libreoffice-fresh-sdk
 cmake -S spikes/libreofficekit -B build/lok-spike
 cmake --build build/lok-spike
 build/lok-spike/omasheets-lok-render workbook.xls /tmp/omasheets-tile.ppm
+build/lok-spike/omasheets-window workbook.xls
 sudo cmake --install build/lok-spike
 omasheets lok status
 omasheets lok render workbook.xls --output /tmp/omasheets-cli-tile.ppm
@@ -30,6 +31,24 @@ profile and removes it on exit; the helper never reuses the person's normal
 LibreOffice profile.
 The output path must be new: both the native helper and Python launcher refuse
 to replace an existing file.
+
+## Interactive window
+
+`omasheets-window` provides:
+
+- horizontal and vertical scrolling with visible-area updates sent to the
+  engine;
+- mouse selection and direct keyboard editing through `LOKDocView`;
+- live cell address and formula/value display;
+- sheet switching, zoom, undo/redo, copy/paste, bold and italic actions;
+- a human-only **Save a Copy** flow which refuses to replace an existing path;
+- an isolated temporary LibreOffice profile for every window;
+- dirty-close confirmation and password prompts; and
+- a clear status/error surface owned by OmaSheets.
+
+The GTK widget is an engine-facing component. Window layout, controls, product
+identity, save policy, profile isolation, and launch authority belong to
+OmaSheets.
 
 The PR smoke test runs in Arch Linux, creates a genuine Excel 97 `.xls` from
 [`fixtures/smoke.fods`](fixtures/smoke.fods), loads it through LibreOfficeKit,
@@ -44,7 +63,9 @@ renders a 320×200 tile, and validates the output header and byte count.
 | Can it recognize a Calc document? | Non-spreadsheet document types are rejected. |
 | Can it render into an OmaSheets-owned buffer? | `paintTile` fills a bounded RGBA/BGRA buffer which is exported as PPM. |
 | Is the user's LibreOffice profile reused? | No; every helper process receives a one-shot profile URL. |
-| Is this a complete native editor? | No. Input events, callbacks, accessibility, scrolling, selection, formula editing, and crash sandboxing remain open. |
+| Is there an OmaSheets-owned window? | Yes. CI launches it under Xvfb and captures the rendered workbook window. |
+| Are scrolling and selection wired? | Yes. GTK scroll adjustments update the LOK visible area; LOKDocView owns pointer selection and keyboard editing. |
+| Is this a complete native editor? | No. Accessibility evidence, complex dialogs, performance targets, crash sandboxing, and Wayland acceptance remain open. |
 
 ## Promotion gate
 

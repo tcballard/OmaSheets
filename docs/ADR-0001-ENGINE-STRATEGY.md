@@ -39,9 +39,12 @@ packaging, crash containment, input handling, accessibility, rendering latency,
 and spreadsheet-specific editing before it becomes the main UI path.
 
 The first such spike lives in [`../spikes/libreofficekit/`](../spikes/libreofficekit/README.md).
-It proves package discovery, isolated initialization, Calc document loading, and
-bounded tile rendering against a real `.xls` in CI. It does not change the
-accepted v0.0.1 engine path or resolve the remaining promotion gates.
+It proves package discovery, isolated initialization, Calc document loading,
+bounded tile rendering, and an OmaSheets-owned GTK workbook window against a
+real `.xls` in CI. The window includes scrolling, selection, keyboard editing,
+sheet switching and save-copy controls. It remains an explicit experimental
+path until Wayland, accessibility, complex-dialog, performance and crash
+containment gates pass.
 
 ## Why not fork now
 
