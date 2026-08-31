@@ -18,13 +18,16 @@ user-local product bootstrap. The same action can be run in a terminal:
 ~/.config/omarchy/plugins/io.github.tcballard.omasheets/bin/omasheets-plugin install
 ```
 
-The bootstrap checks dependencies, compiles the native window from the installed
-checkout, and installs only OmaSheets-owned files. It never invokes a package
-manager or requests privilege. If dependencies are missing, it stops and prints
-this explicit Omarchy command for the user to approve and run:
+The bootstrap checks runtime dependencies, downloads the native bundle from the
+matching `v0.0.1` GitHub release, verifies it against the exact installed
+checkout, and installs only OmaSheets-owned files. No compiler, CMake,
+`pkgconf`, or LibreOffice SDK is installed or required on the user's machine.
+The bootstrap never invokes a package manager or requests privilege. If runtime
+dependencies are missing, it stops and prints this explicit Omarchy command for
+the user to approve and run:
 
 ```bash
-omarchy pkg add gcc make cmake pkgconf gtk3 libreoffice-fresh libreoffice-fresh-sdk bubblewrap
+omarchy pkg add gtk3 libreoffice-fresh bubblewrap
 ```
 
 Current Arch `libreoffice-fresh` ships the system Python `uno` module and
@@ -45,9 +48,13 @@ The bootstrap installs these surfaces together:
 - OmaSheets MIME associations in `$XDG_CONFIG_HOME/mimeapps.list`.
 
 Private workbook state, receipts and installation journals live under
-`$XDG_STATE_HOME/omasheets/`; build artifacts live under
+`$XDG_STATE_HOME/omasheets/`; the verified release download is cached under
 `$XDG_CACHE_HOME/omasheets/`; sockets and live snapshots live under
 `$XDG_RUNTIME_DIR/omasheets/`. Runtime and state directories are mode `0700`.
+
+The published v0.0.1 native bundle targets Omarchy's Linux `x86_64` platform.
+Installation fails before changing product state on any architecture without a
+matching release bundle.
 
 Verify the result:
 

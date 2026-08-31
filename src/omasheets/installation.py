@@ -12,11 +12,12 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from . import __version__
 from .errors import ConflictError
 from .integration import IntegrationPaths, install as install_integration, uninstall as uninstall_integration
+from .native_bundle import download_native_bundle, install_native_bundle
 from .store import read_json, write_json_atomic
 
 PLUGIN_NAME = "omasheets"
@@ -27,8 +28,7 @@ PLUGIN_ENTRY = {
     "category": "Productivity",
 }
 ARCH_PACKAGES = (
-    "gcc", "make", "cmake", "pkgconf", "gtk3", "libreoffice-fresh",
-    "libreoffice-fresh-sdk", "bubblewrap",
+    "gtk3", "libreoffice-fresh", "bubblewrap",
 )
 
 
@@ -51,7 +51,7 @@ class InstallPaths:
         config = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
         return cls(
             app=data / "omasheets/app",
-            build=cache / "omasheets/native-build",
+            build=cache / "omasheets/native-bundle",
             launcher=home / ".local/bin/omasheets",
             codex_plugin=home / ".codex/plugins/omasheets",
             codex_marketplace=home / ".agents/plugins/marketplace.json",
@@ -91,7 +91,7 @@ def _tree_sha(path: Path) -> str:
 
 def source_identity(root: Path) -> dict[str, str]:
     completed = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        ["git", "-C", str(root), "ls-files", "-z", "--cached"],
         capture_output=True, check=True,
     )
     files = [Path(raw.decode()) for raw in completed.stdout.split(b"\0") if raw]
@@ -115,13 +115,8 @@ def source_identity(root: Path) -> dict[str, str]:
 
 def dependency_report() -> dict[str, Any]:
     checks = [
-        ("cmake", shutil.which("cmake")),
-        ("C++ compiler", shutil.which("c++")),
-        ("make", shutil.which("make")),
-        ("pkg-config", shutil.which("pkg-config")),
-        ("GTK3", _pkg_config("gtk+-3.0")),
+        ("GTK3", _first_existing("/usr/lib/libgtk-3.so", "/usr/lib/libgtk-3.so.0")),
         ("LibreOffice", _first_existing("/usr/bin/soffice", "/usr/bin/libreoffice")),
-        ("LibreOfficeKit headers", _first_existing("/usr/include/libreoffice/LibreOfficeKit/LibreOfficeKit.hxx")),
         ("LibreOfficeKitGTK", _first_existing(
             "/usr/lib/libreofficekitgtk.so",
             "/usr/lib/liblibreofficekitgtk.so",
@@ -140,14 +135,6 @@ def dependency_report() -> dict[str, Any]:
 
 def _first_existing(*values: str) -> str | None:
     return next((value for value in values if Path(value).is_file()), None)
-
-
-def _pkg_config(package: str) -> str | None:
-    executable = shutil.which("pkg-config")
-    if not executable:
-        return None
-    result = subprocess.run([executable, "--modversion", package], text=True, capture_output=True)
-    return result.stdout.strip() if result.returncode == 0 else None
 
 
 def _python_uno() -> str | None:
@@ -209,7 +196,7 @@ def _write_bytes(path: Path, data: bytes, mode: int = 0o600) -> None:
 def install(
     source_root: Path, paths: InstallPaths | None = None, *,
     check_dependencies: bool = True,
-    runner: Callable[..., subprocess.CompletedProcess[Any]] = subprocess.run,
+    bundle_path: Path | None = None,
 ) -> dict[str, Any]:
     paths = paths or InstallPaths.discover()
     source_root = source_root.resolve(strict=True)
@@ -245,20 +232,18 @@ def install(
             source_root / "src/omasheets", stage / "lib/omasheets",
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
         )
-        build = paths.build
-        if build.exists():
-            shutil.rmtree(build)
-        runner([
-            "cmake", "-S", str(source_root / "native/libreofficekit"), "-B", str(build),
-            "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={stage}",
-            f"-DOMASHEETS_SOURCE_SHA256={identity['sha256']}",
-            f"-DOMASHEETS_SOURCE_COMMIT={identity['commit']}",
-        ], check=True)
-        runner(["cmake", "--build", str(build), "--parallel", "2"], check=True)
-        runner(["cmake", "--install", str(build)], check=True)
+        configured_bundle = bundle_path or (
+            Path(value) if (value := os.environ.get("OMASHEETS_NATIVE_BUNDLE_PATH")) else None
+        )
+        if configured_bundle is None:
+            configured_bundle = download_native_bundle(__version__, paths.build)
+        configured_bundle = configured_bundle.expanduser().resolve(strict=True)
+        native_manifest = install_native_bundle(
+            configured_bundle, stage, version=__version__, source=identity,
+        )
         provenance = {
             "schema": 1, "version": __version__, "source": identity,
-            "build_contract": "native/libreofficekit/CMakeLists.txt",
+            "native_bundle": native_manifest,
         }
         _write_bytes(stage / "provenance.json", (json.dumps(provenance, indent=2, sort_keys=True) + "\n").encode())
         os.replace(stage, paths.app)

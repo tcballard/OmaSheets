@@ -17,22 +17,26 @@ the official lifecycle has no install or uninstall hooks. `Panel.qml` therefore
 uses `manifest.__sourceDir` to invoke a fixed-argv repository-local bootstrap.
 The user explicitly starts that bootstrap from the widget or terminal.
 
-The bootstrap checks external Arch dependencies without installing them, builds
-`native/libreofficekit` from the checkout, and installs the Python package,
-native binaries, stable launcher, Codex plugin/MCP configuration, desktop entry
-and MIME associations together. Application bytes live below `XDG_DATA_HOME`,
-build output below `XDG_CACHE_HOME`, journals below `XDG_STATE_HOME`, and live
-sockets/snapshots below `XDG_RUNTIME_DIR`.
+The bootstrap checks external runtime dependencies without installing them. It
+downloads the native release bundle for the product version and architecture,
+then verifies the detached release checksum and the bundle's exact source
+identity and file hashes before installing the Python package, native binaries,
+stable launcher, Codex plugin/MCP configuration, desktop entry and MIME
+associations together. Application bytes live below `XDG_DATA_HOME`, the
+release download below `XDG_CACHE_HOME`, journals below `XDG_STATE_HOME`, and
+live sockets/snapshots below `XDG_RUNTIME_DIR`.
 
 An installation journal records exact hashes and previous shared-file content.
 Uninstall restores unchanged shared files, surgically removes OmaSheets entries
 from concurrently edited MIME/marketplace files, and preserves modified owned
 files as explicit conflicts.
 
-The installer hashes the complete tracked source set and passes that identity
-plus the Git commit into the native compiler. Both binaries expose the embedded
-identity through `--provenance`; Arch CI compares it with the installed checkout
-and the installation receipt.
+Release CI hashes the complete tracked source set and passes that identity plus
+the Git commit into the native compiler. Both binaries expose the embedded
+identity through `--provenance`. The installer accepts only a bundle whose
+manifest matches the version, platform, architecture, source commit and tracked
+source digest of its checkout. Compiler-free Arch CI then compares the embedded
+binary identity with that checkout and the installation receipt.
 
 ### Native window
 
