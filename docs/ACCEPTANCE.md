@@ -60,12 +60,15 @@ LibreOfficeKit to the default human editor.
 ## Agent read and staged change
 
 1. Start `omasheets mcp serve` through an MCP client.
-2. Describe the workbook, read a range, search, and trace one formula.
-3. Stage a scalar value or formula change. Confirm the original hash is
+2. Read `omasheets://window` while changing cells and sheets in the native
+   window. Confirm address, formula, sheet, zoom and visible rectangle follow
+   within 100 ms, and confirm the resource contains no filesystem path.
+3. Describe the workbook, read a range, search, and trace one formula.
+4. Stage a scalar value or formula change. Confirm the original hash is
    unchanged and the panel reports the operation count.
-4. Invoke the MCP apply handoff. Confirm it returns local review instructions
+5. Invoke the MCP apply handoff. Confirm it returns local review instructions
    and still does not write a workbook.
-5. Click **Review in terminal**. Type a wrong token first and confirm no output
+6. Click **Review in terminal**. Type a wrong token first and confirm no output
    file appears. Repeat and type the exact token; confirm a new `-omasheets`
    copy appears and the original remains unchanged.
 

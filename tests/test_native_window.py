@@ -27,6 +27,21 @@ class NativeWindowTests(unittest.TestCase):
             self.assertNotIn("shell", popen.call_args.kwargs)
             self.assertTrue(popen.call_args.kwargs["close_fds"])
 
+    def test_launch_passes_private_agent_context_as_fixed_arguments(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workbook = Path(temporary) / "book.xlsx"
+            context = Path(temporary) / "window-context.json"
+            workbook.write_bytes(b"xlsx")
+            with patch("omasheets.native_window.window_executable", return_value=Path("/usr/bin/omasheets-window")), patch(
+                "omasheets.native_window.subprocess.Popen"
+            ) as popen:
+                popen.return_value.pid = 85
+                open_window(workbook, context_path=context, session_id="a" * 32, revision=3)
+            self.assertEqual(popen.call_args.args[0], [
+                "/usr/bin/omasheets-window", "--context", str(context),
+                "--session", "a" * 32, "--revision", "3", str(workbook),
+            ])
+
     def test_launch_rejects_unsupported_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             document = Path(temporary) / "notes.txt"

@@ -124,13 +124,89 @@ class OmaSheetsService:
             "document_engine": {
                 "name": "LibreOffice Calc",
                 "adapter": "isolated_uno_worker",
+                "interactive_adapter": "libreofficekitgtk",
                 "network_access": False,
                 "macro_execution": False,
+            },
+            "live_window_context": {
+                "resource": "omasheets://window",
+                "agent_control": False,
+                "selection_and_viewport_visible": True,
             },
             "agent_operations": list(SUPPORTED_OPERATIONS),
             "agent_publish_authority": False,
             "local_review_required": True,
         }
+
+    @property
+    def window_context_path(self) -> Path:
+        return self.paths.runtime / "window-context.json"
+
+    def prepare_window_context(self, session_id: str) -> Path:
+        """Create the private, path-free handoff consumed by the native window."""
+
+        session = self._session(session_id)
+        write_json_atomic(self.window_context_path, {
+            "version": 1,
+            "active": False,
+            "session_id": session_id,
+            "revision": session["revision"],
+            "sheet": 0,
+            "address": "",
+            "formula": "",
+            "zoom": 1.0,
+            "dirty": False,
+            "visible": {"x": 0, "y": 0, "width": 0, "height": 0},
+            "updated_at_ms": 0,
+        })
+        return self.window_context_path
+
+    def window_context_resource(self) -> dict[str, Any]:
+        """Return bounded live UI context without granting UI or write control."""
+
+        current = self.current_resource()
+        if not current.get("selected"):
+            return {"active": False, "selected": False}
+        if not self.window_context_path.exists():
+            return {"active": False, "selected": True, "session_id": current["session_id"]}
+        try:
+            context = read_json(self.window_context_path)
+            if context.get("session_id") != current["session_id"] or context.get("version") != 1:
+                raise ValueError("stale context")
+            visible = context.get("visible")
+            if not isinstance(visible, dict) or set(visible) != {"x", "y", "width", "height"}:
+                raise ValueError("invalid visible area")
+            if not all(isinstance(visible[name], int) and 0 <= visible[name] <= 2_147_483_647 for name in visible):
+                raise ValueError("invalid visible coordinate")
+            address = context.get("address")
+            formula = context.get("formula")
+            if not isinstance(address, str) or len(address) > 64 or not isinstance(formula, str) or len(formula) > 8192:
+                raise ValueError("invalid selection")
+            sheet = context.get("sheet")
+            zoom = context.get("zoom")
+            updated_at_ms = context.get("updated_at_ms")
+            if not isinstance(sheet, int) or isinstance(sheet, bool) or not 0 <= sheet <= 1024:
+                raise ValueError("invalid sheet")
+            if not isinstance(zoom, (int, float)) or isinstance(zoom, bool) or not 0.25 <= zoom <= 5.0:
+                raise ValueError("invalid zoom")
+            if not isinstance(updated_at_ms, int) or isinstance(updated_at_ms, bool) or updated_at_ms < 0:
+                raise ValueError("invalid timestamp")
+            return {
+                "active": context.get("active") is True,
+                "selected": True,
+                "session_id": current["session_id"],
+                "revision": current["revision"],
+                "sheet": sheet,
+                "address": address,
+                "formula": formula,
+                "zoom": float(zoom),
+                "dirty": context.get("dirty") is True,
+                "visible": visible,
+                "updated_at_ms": updated_at_ms,
+                "agent_control": False,
+            }
+        except (OSError, ValueError, TypeError):
+            return {"active": False, "selected": True, "session_id": current["session_id"], "unavailable": True}
 
     def pending_resource(self) -> dict[str, Any]:
         if not self.current_path.exists():

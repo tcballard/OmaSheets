@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -79,6 +80,23 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(capabilities["document_engine"]["adapter"], "isolated_uno_worker")
         self.assertIn("set_range_values", capabilities["agent_operations"])
         self.assertIn("format_cells", capabilities["agent_operations"])
+        self.assertEqual(capabilities["live_window_context"]["resource"], "omasheets://window")
+        self.assertFalse(capabilities["live_window_context"]["agent_control"])
+
+    def test_live_window_context_is_path_free_and_session_bound(self):
+        session = self.service.select_workbook(self.source)
+        path = self.service.prepare_window_context(session["session_id"])
+        context = self.service.window_context_resource()
+        self.assertFalse(context["active"])
+        self.assertEqual(context["session_id"], session["session_id"])
+        self.assertNotIn(str(self.source), str(context))
+        payload = json.loads(path.read_text())
+        payload.update({"active": True, "address": "C9", "formula": "=SUM(A1:A8)", "updated_at_ms": 4})
+        path.write_text(json.dumps(payload))
+        context = self.service.window_context_resource()
+        self.assertTrue(context["active"])
+        self.assertEqual(context["address"], "C9")
+        self.assertFalse(context["agent_control"])
 
     def test_legacy_conversion_creates_a_receipt_and_preserves_source(self):
         legacy = self.source.with_name("legacy.xls")

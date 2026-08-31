@@ -32,15 +32,28 @@ def status() -> dict[str, Any]:
     }
 
 
-def open_window(path: Path) -> int:
+def open_window(
+    path: Path,
+    *,
+    context_path: Path | None = None,
+    session_id: str | None = None,
+    revision: int | None = None,
+) -> int:
     source = path.expanduser().resolve(strict=True)
     workbook_format(source)
     identify_regular_file(source)
     executable = window_executable()
     if executable is None:
         raise EngineError("omasheets-window is not installed; see spikes/libreofficekit/README.md")
+    argv = [str(executable)]
+    supplied = (context_path is not None, session_id is not None, revision is not None)
+    if any(supplied) and not all(supplied):
+        raise EngineError("window context requires path, session and revision")
+    if context_path is not None:
+        argv.extend(["--context", str(context_path), "--session", session_id, "--revision", str(revision)])
+    argv.append(str(source))
     process = subprocess.Popen(
-        [str(executable), str(source)],
+        argv,
         close_fds=True,
         start_new_session=True,
     )

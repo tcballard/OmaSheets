@@ -30,6 +30,11 @@ reject unknown arguments. Hidden implementation arguments cannot be smuggled in
 by a client. `apply_plan` is a read-only handoff that returns local review
 instructions; it does not commit.
 
+The native window publishes a coalesced, private XDG-runtime context record for
+the current immutable session. MCP exposes a validated, path-free projection as
+`omasheets://window`, joining human selection and viewport state to semantic
+agent tools without turning MCP into a remote-control channel.
+
 ### Local approval surface
 
 The Omarchy panel launches a local terminal review. Approval requires an exact
