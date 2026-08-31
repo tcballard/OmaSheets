@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from omasheets.calc_worker import (
     _apply,
@@ -8,6 +10,7 @@ from omasheets.calc_worker import (
     _named_ranges,
     _style_color,
     _style_table,
+    _startup_diagnostic,
     _target_fingerprints,
 )
 
@@ -253,6 +256,21 @@ class CalcWorkerTests(unittest.TestCase):
         self.assertTrue(result["items"][0]["content_redacted"])
         self.assertNotIn("/home/tom", str(result))
         self.assertEqual(result["items"][1]["content"], "$Sheet1.$B$2")
+
+    def test_startup_diagnostic_is_bounded_and_removes_paths_and_urls(self):
+        with TemporaryDirectory() as temporary:
+            diagnostic = Path(temporary) / "startup.log"
+            diagnostic.write_text(
+                "ignored\nbootstrap failed at /job/profile because https://example.test/detail was unavailable\n",
+                encoding="utf-8",
+            )
+            result = _startup_diagnostic(diagnostic)
+        self.assertIn("bootstrap failed", result)
+        self.assertIn("<path>", result)
+        self.assertIn("<url>", result)
+        self.assertNotIn("/job/profile", result)
+        self.assertNotIn("example.test", result)
+        self.assertLessEqual(len(result), 256)
 
 
 if __name__ == "__main__":
