@@ -34,6 +34,7 @@ class CalcEngineTests(unittest.TestCase):
         self.assertNotIn("--share-net", command)
         self.assertNotIn(str(Path.home()), command)
         self.assertIn("/omasheets-worker.py", command)
+        self.assertEqual(command[command.index("SAL_USE_VCLPLUGIN") + 1], "svp")
         if Path("/etc/passwd").exists():
             self.assertIn("/etc/passwd", command)
 
