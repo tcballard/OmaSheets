@@ -879,8 +879,15 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
                 key for key, value in comparison.items()
                 if key != "new_formula_errors" and value is not True
             )
+            detail = ""
+            if "workbook_objects_match" in failed:
+                detail = "; objects=" + json.dumps(
+                    {"expected": expected_objects, "reopened": reopened_objects},
+                    sort_keys=True, separators=(",", ":"),
+                )[:320]
             raise RuntimeError(
-                "staged workbook did not survive save and reopen verification: " + ", ".join(failed)
+                "staged workbook did not survive save and reopen verification: "
+                + ", ".join(failed) + detail
             )
         status = "manual_review_required" if action == "convert_xls" else "verified"
         result = {
