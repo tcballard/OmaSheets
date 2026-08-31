@@ -10,6 +10,7 @@ from .errors import PolicyError
 _A1 = re.compile(r"^\$?([A-Z]{1,3})\$?([1-9][0-9]{0,6})(?::\$?([A-Z]{1,3})\$?([1-9][0-9]{0,6}))?$")
 _SHEET = re.compile(r"^[^\x00-\x1f\\/?*\[\]:]{1,128}$")
 _COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
+_COLUMN = re.compile(r"^[A-Z]{1,3}$")
 _MAX_RANGE_CELLS = 10_000
 
 _FIELDS: dict[str, tuple[set[str], set[str]]] = {
@@ -30,6 +31,16 @@ _FIELDS: dict[str, tuple[set[str], set[str]]] = {
     "format_cells": (
         {"type", "sheet", "range", "number_format", "bold", "text_color", "background_color", "wrap_text"},
         {"type", "sheet", "range"},
+    ),
+    "insert_rows": ({"type", "sheet", "row", "count"}, {"type", "sheet", "row", "count"}),
+    "delete_rows": ({"type", "sheet", "row", "count"}, {"type", "sheet", "row", "count"}),
+    "insert_columns": ({"type", "sheet", "column", "count"}, {"type", "sheet", "column", "count"}),
+    "delete_columns": ({"type", "sheet", "column", "count"}, {"type", "sheet", "column", "count"}),
+    "fill_down": ({"type", "sheet", "range", "source_rows"}, {"type", "sheet", "range", "source_rows"}),
+    "fill_right": ({"type", "sheet", "range", "source_columns"}, {"type", "sheet", "range", "source_columns"}),
+    "sort_range": (
+        {"type", "sheet", "range", "key_column", "ascending", "has_header"},
+        {"type", "sheet", "range", "key_column", "ascending", "has_header"},
     ),
 }
 SUPPORTED_OPERATIONS = tuple(_FIELDS)
@@ -164,9 +175,48 @@ def validate_operations(operations: list[dict[str, Any]]) -> list[dict[str, Any]
                 ):
                     raise PolicyError(f"operation {index} has an invalid {key}")
 
+        if kind in {"insert_rows", "delete_rows"}:
+            row = operation["row"]
+            count = operation["count"]
+            if (
+                not isinstance(row, int) or isinstance(row, bool) or not 1 <= row <= 1_048_576
+                or not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 10_000
+                or row + count - 1 > 1_048_576
+            ):
+                raise PolicyError(f"operation {index} has invalid row bounds")
+        if kind in {"insert_columns", "delete_columns"}:
+            column = operation["column"]
+            count = operation["count"]
+            if not isinstance(column, str) or _COLUMN.fullmatch(column.upper()) is None:
+                raise PolicyError(f"operation {index} has an invalid column")
+            if (
+                not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 1_000
+                or _column_number(column.upper()) + count - 1 > 16_384
+            ):
+                raise PolicyError(f"operation {index} has invalid column bounds")
+        if kind == "fill_down":
+            rows, _ = shape or (0, 0)
+            count = operation["source_rows"]
+            if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count < rows:
+                raise PolicyError(f"operation {index} has an invalid source row count")
+        if kind == "fill_right":
+            _, columns = shape or (0, 0)
+            count = operation["source_columns"]
+            if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count < columns:
+                raise PolicyError(f"operation {index} has an invalid source column count")
+        if kind == "sort_range":
+            _, columns = shape or (0, 0)
+            key_column = operation["key_column"]
+            if not isinstance(key_column, int) or isinstance(key_column, bool) or not 1 <= key_column <= columns:
+                raise PolicyError(f"operation {index} has an invalid sort key column")
+            for key in ("ascending", "has_header"):
+                if not isinstance(operation[key], bool):
+                    raise PolicyError(f"operation {index} has an invalid {key}")
         item = dict(operation)
         if "range" in item:
             item["range"] = item["range"].upper()
+        if "column" in item:
+            item["column"] = item["column"].upper()
         for key in ("text_color", "background_color"):
             if key in item:
                 item[key] = item[key].upper()
@@ -175,5 +225,5 @@ def validate_operations(operations: list[dict[str, Any]]) -> list[dict[str, Any]
 
 
 def destructive_operations(operations: list[dict[str, Any]]) -> list[int]:
-    destructive = {"clear_range", "delete_sheet"}
+    destructive = {"clear_range", "delete_sheet", "delete_rows", "delete_columns", "sort_range"}
     return [index for index, operation in enumerate(operations) if operation["type"] in destructive]

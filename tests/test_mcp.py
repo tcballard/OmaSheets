@@ -34,6 +34,9 @@ class FakeService:
     def window_context_resource(self):
         return {"active": True, "address": "B7", "agent_control": False}
 
+    def agent_context_resource(self):
+        return {"active": True, "selection": {"address": "B7"}}
+
 
 def request(method, params=None, request_id=1):
     supplied = dict(params or {})
@@ -100,6 +103,48 @@ class McpTests(unittest.TestCase):
         }))
         self.assertEqual(response["error"]["code"], -32602)
 
+    def test_agent_plans_require_explainable_workflow_context(self) -> None:
+        arguments = {
+            "session_id": "a" * 32,
+            "expected_revision": 1,
+            "operations": [{"type": "set_value", "sheet": "S", "range": "A1", "value": 1}],
+        }
+        response = self.server.handle(request("tools/call", {"name": "plan_changes", "arguments": arguments}))
+        self.assertEqual(response["error"]["code"], -32602)
+
+        arguments["workflow"] = {
+            "goal": "Correct the selected total",
+            "summary": "Replace the stale scalar after inspecting the workbook.",
+            "evidence_ids": ["c" * 32],
+            "groups": [{
+                "title": "Correct total", "purpose": "Use the verified source value.",
+                "operation_indexes": [0],
+            }],
+        }
+        response = self.server.handle(request("tools/call", {"name": "plan_changes", "arguments": arguments}))
+        self.assertNotIn("error", response)
+
+    def test_revise_plan_is_a_distinct_non_publication_tool(self) -> None:
+        response = self.server.handle(request("tools/call", {
+            "name": "revise_plan",
+            "arguments": {
+                "plan_id": "b" * 32,
+                "expected_revision": 1,
+                "operations": [{"type": "clear_range", "sheet": "S", "range": "A1"}],
+                "workflow": {
+                    "goal": "Remove the stale value",
+                    "summary": "Clear only the inspected cell.",
+                    "evidence_ids": ["c" * 32],
+                    "groups": [{
+                        "title": "Clear stale value", "purpose": "Remove obsolete input.",
+                        "operation_indexes": [0],
+                    }],
+                },
+            },
+        }))
+        self.assertNotIn("error", response)
+        self.assertEqual(self.service.calls[0][0], "revise_plan")
+
     def test_unknown_tool_uses_invalid_params(self) -> None:
         response = self.server.handle(request("tools/call", {"name": "commit_plan", "arguments": {}}))
         self.assertEqual(response["error"]["code"], -32602)
@@ -122,6 +167,11 @@ class McpTests(unittest.TestCase):
         payload = json.loads(response["result"]["contents"][0]["text"])
         self.assertEqual(payload["address"], "B7")
         self.assertFalse(payload["agent_control"])
+
+    def test_agent_entry_resource_is_selection_aware(self) -> None:
+        response = self.server.handle(request("resources/read", {"uri": "omasheets://agent"}))
+        payload = json.loads(response["result"]["contents"][0]["text"])
+        self.assertEqual(payload["selection"]["address"], "B7")
 
     def test_stdio_rejects_and_drains_oversized_messages(self) -> None:
         source = io.StringIO("x" * 40 + "\nnot json\n")

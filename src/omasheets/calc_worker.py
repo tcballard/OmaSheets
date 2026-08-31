@@ -326,6 +326,28 @@ def _matrix_values(values: list[list[Any]]) -> tuple[tuple[Any, ...], ...]:
     return tuple(rows)
 
 
+def _column_index(name: str) -> int:
+    value = 0
+    for character in name:
+        value = value * 26 + ord(character) - ord("A") + 1
+    return value - 1
+
+
+def _sort(area, operation: dict[str, Any]) -> None:
+    descriptor = area.createSortDescriptor()
+    for item in descriptor:
+        if item.Name == "ContainsHeader":
+            item.Value = operation["has_header"]
+        elif item.Name == "SortFields":
+            fields = item.Value
+            if not fields:
+                raise RuntimeError("Calc did not provide a sort-field descriptor")
+            fields[0].Field = operation["key_column"] - 1
+            fields[0].IsAscending = operation["ascending"]
+            item.Value = fields[:1]
+    area.sort(descriptor)
+
+
 def _apply(document, operations: list[dict[str, Any]]) -> None:
     sheets = document.getSheets()
     for operation in operations:
@@ -336,6 +358,19 @@ def _apply(document, operations: list[dict[str, Any]]) -> None:
             sheets.removeByName(operation["sheet"])
         elif kind == "rename_sheet":
             sheets.getByName(operation["sheet"]).setName(operation["new_name"])
+        elif kind in {"insert_rows", "delete_rows"}:
+            rows = sheets.getByName(operation["sheet"]).getRows()
+            if kind == "insert_rows":
+                rows.insertByIndex(operation["row"] - 1, operation["count"])
+            else:
+                rows.removeByIndex(operation["row"] - 1, operation["count"])
+        elif kind in {"insert_columns", "delete_columns"}:
+            columns = sheets.getByName(operation["sheet"]).getColumns()
+            index = _column_index(operation["column"])
+            if kind == "insert_columns":
+                columns.insertByIndex(index, operation["count"])
+            else:
+                columns.removeByIndex(index, operation["count"])
         else:
             area = sheets.getByName(operation["sheet"]).getCellRangeByName(operation["range"])
             if kind == "clear_range":
@@ -368,6 +403,16 @@ def _apply(document, operations: list[dict[str, Any]]) -> None:
                     area.CellBackColor = _color(operation["background_color"])
                 if "wrap_text" in operation:
                     area.IsTextWrapped = operation["wrap_text"]
+            elif kind == "fill_down":
+                import uno
+
+                area.fillAuto(uno.getConstantByName("com.sun.star.sheet.FillDirection.TO_BOTTOM"), operation["source_rows"])
+            elif kind == "fill_right":
+                import uno
+
+                area.fillAuto(uno.getConstantByName("com.sun.star.sheet.FillDirection.TO_RIGHT"), operation["source_columns"])
+            elif kind == "sort_range":
+                _sort(area, operation)
 
 
 def _format_snapshot(document, area, operation: dict[str, Any]) -> dict[str, Any]:

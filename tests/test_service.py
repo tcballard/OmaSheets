@@ -107,6 +107,12 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(context["address"], "C9")
         self.assertFalse(context["agent_control"])
 
+        agent = self.service.agent_context_resource()
+        self.assertTrue(agent["ready"])
+        self.assertEqual(agent["focus"]["address"], "C9")
+        self.assertFalse(agent["workflow_contract"]["agent_publish_authority"])
+        self.assertNotIn(str(self.source), str(agent))
+
     def test_agent_staging_uses_dirty_live_window_snapshot(self):
         session = self.service.select_workbook(self.source)
         path = self.service.prepare_window_context(session["session_id"])
@@ -198,6 +204,56 @@ class ServiceTests(unittest.TestCase):
         handoff = self.service.apply_plan_handoff(plan["plan_id"], plan["revision"])
         self.assertEqual(handoff["status"], "local_review_required")
         self.assertEqual(self.service.get_plan(plan["plan_id"])["status"], "verified")
+
+    def test_read_evidence_is_sealed_into_an_explainable_plan(self):
+        session = self.service.select_workbook(self.source)
+        observation = self.service.describe_workbook(session["session_id"])
+        operations = [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}]
+        plan = self.service.plan_changes(session["session_id"], 1, operations, {
+            "goal": "Correct the selected total",
+            "summary": "Replace the stale value after inspecting workbook structure.",
+            "assumptions": ["The requested value is authoritative."],
+            "evidence_ids": [observation["evidence_id"]],
+            "groups": [{
+                "title": "Correct total", "purpose": "Apply the requested scalar correction.",
+                "operation_indexes": [0],
+            }],
+        })
+        self.assertEqual(plan["workflow"]["goal"], "Correct the selected total")
+        self.assertEqual(plan["workflow"]["evidence"][0]["tool"], "describe_workbook")
+        self.assertNotIn(str(self.source), str(plan["workflow"]))
+
+    def test_revising_a_plan_supersedes_but_does_not_mutate_it(self):
+        session = self.service.select_workbook(self.source)
+        observation = self.service.describe_workbook(session["session_id"])
+
+        def context(goal):
+            return {
+                "goal": goal,
+                "summary": "Use the inspected workbook state.",
+                "evidence_ids": [observation["evidence_id"]],
+                "groups": [{
+                    "title": "Update value", "purpose": "Implement the revised instruction.",
+                    "operation_indexes": [0],
+                }],
+            }
+
+        first = self.service.plan_changes(
+            session["session_id"], 1,
+            [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}],
+            context("Set the total to two"),
+        )
+        second = self.service.revise_plan(
+            first["plan_id"], 1,
+            [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 3}],
+            context("Use three instead"),
+        )
+        superseded = self.service.get_plan(first["plan_id"])
+        self.assertEqual(superseded["status"], "superseded")
+        self.assertEqual(superseded["superseded_by"], second["plan_id"])
+        self.assertEqual(second["supersedes_plan_id"], first["plan_id"])
+        with self.assertRaises(ConflictError):
+            self.service.apply_plan_handoff(first["plan_id"], 1)
 
     def test_changed_source_invalidates_session(self):
         session = self.service.select_workbook(self.source)

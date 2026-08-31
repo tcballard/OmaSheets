@@ -8,7 +8,7 @@ from urllib.parse import quote, unquote
 
 from .store import write_text_atomic
 
-VERSION = "OMASHEETS_DIFF_V1"
+VERSION = "OMASHEETS_DIFF_V2"
 MAX_ITEMS = 200
 MAX_FIELD_CHARS = 512
 MAX_FILE_BYTES = 256 * 1024
@@ -73,8 +73,14 @@ def build_overlay(plan: dict[str, Any]) -> dict[str, Any]:
     targets = _target_map(plan.get("semantic_diff") or {})
     items: list[dict[str, str]] = []
     total = 0
-    for operation in plan.get("operations", []):
+    workflow = plan.get("workflow") or {}
+    group_by_operation = {}
+    for group in workflow.get("groups", []):
+        for index in group.get("operation_indexes", []):
+            group_by_operation[index] = group.get("title", "Workbook changes")
+    for operation_index, operation in enumerate(plan.get("operations", [])):
         kind = operation["type"]
+        group = group_by_operation.get(operation_index, "Workbook changes")
         sheet = operation.get("sheet", "")
         address = operation.get("range", "")
         target = targets.get((sheet, address), {})
@@ -86,7 +92,7 @@ def build_overlay(plan: dict[str, Any]) -> dict[str, Any]:
                 if len(items) < MAX_ITEMS:
                     proposed = operation.get("formula", operation.get("value", kind.replace("_", " ")))
                     items.append({
-                        "kind": kind, "sheet": sheet, "range": address,
+                        "kind": kind, "group": group, "sheet": sheet, "range": address,
                         "before": "Current content", "after": _display(proposed),
                     })
                 continue
@@ -113,6 +119,7 @@ def build_overlay(plan: dict[str, Any]) -> dict[str, Any]:
                     if len(items) < MAX_ITEMS:
                         items.append({
                             "kind": kind,
+                            "group": group,
                             "sheet": sheet,
                             "range": f"{_column_name(origin_column + column)}{origin_row + row}",
                             "before": _display(old),
@@ -135,13 +142,14 @@ def build_overlay(plan: dict[str, Any]) -> dict[str, Any]:
             old, new = "Current content", kind.replace("_", " ")
         items.append({
             "kind": kind,
+            "group": group,
             "sheet": sheet,
             "range": address or "Sheet",
             "before": _display(old),
             "after": _display(new),
         })
     return {
-        "version": 1,
+        "version": 2,
         "session_id": plan["session_id"],
         "revision": plan["revision"],
         "plan_id": plan["plan_id"],
@@ -149,6 +157,13 @@ def build_overlay(plan: dict[str, Any]) -> dict[str, Any]:
         "operation_count": len(plan.get("operations", [])),
         "destructive_count": len(plan.get("destructive_operations", [])),
         "warning_count": len(plan.get("warnings", [])),
+        "goal": _display(workflow.get("goal", "Proposed workbook changes")),
+        "summary": _display(workflow.get("summary", "Review the verified changes below.")),
+        "assumptions": [_display(item) for item in workflow.get("assumptions", [])],
+        "groups": [{
+            "title": _display(group.get("title", "Workbook changes")),
+            "purpose": _display(group.get("purpose", "Review these operations.")),
+        } for group in workflow.get("groups", [])],
         "total_changes": total,
         "truncated": total > len(items),
         "items": items,
@@ -163,10 +178,17 @@ def encode_overlay(overlay: dict[str, Any]) -> str:
     for key in (
         "session_id", "revision", "plan_id", "status", "operation_count",
         "destructive_count", "warning_count", "total_changes", "truncated",
+        "goal", "summary",
     ):
         lines.append(f"meta\t{key}\t{encoded(str(overlay[key]).lower() if isinstance(overlay[key], bool) else overlay[key])}")
+    lines.append(f"meta\tassumption_count\t{len(overlay['assumptions'])}")
+    lines.append(f"meta\tgroup_count\t{len(overlay['groups'])}")
+    for assumption in overlay["assumptions"]:
+        lines.append(f"assumption\t{encoded(assumption)}")
+    for group in overlay["groups"]:
+        lines.append(f"group\t{encoded(group['title'])}\t{encoded(group['purpose'])}")
     for item in overlay["items"]:
-        lines.append("item\t" + "\t".join(encoded(item[key]) for key in ("kind", "sheet", "range", "before", "after")))
+        lines.append("item\t" + "\t".join(encoded(item[key]) for key in ("kind", "group", "sheet", "range", "before", "after")))
     payload = "\n".join(lines) + "\n"
     if len(payload.encode()) > MAX_FILE_BYTES:
         raise ValueError("diff overlay exceeds its file limit")
@@ -181,23 +203,32 @@ def decode_overlay(payload: str) -> dict[str, Any]:
         raise ValueError("unsupported diff overlay")
     metadata: dict[str, str] = {}
     items = []
+    assumptions = []
+    groups = []
     for line in lines[1:]:
         fields = line.split("\t")
         if fields[0] == "meta" and len(fields) == 3:
             metadata[fields[1]] = unquote(fields[2])
-        elif fields[0] == "item" and len(fields) == 6 and len(items) < MAX_ITEMS:
+        elif fields[0] == "assumption" and len(fields) == 2 and len(assumptions) < 20:
+            assumptions.append(unquote(fields[1]))
+        elif fields[0] == "group" and len(fields) == 3 and len(groups) < 20:
+            groups.append({"title": unquote(fields[1]), "purpose": unquote(fields[2])})
+        elif fields[0] == "item" and len(fields) == 7 and len(items) < MAX_ITEMS:
             values = [unquote(value) for value in fields[1:]]
-            items.append(dict(zip(("kind", "sheet", "range", "before", "after"), values, strict=True)))
+            items.append(dict(zip(("kind", "group", "sheet", "range", "before", "after"), values, strict=True)))
         else:
             raise ValueError("malformed diff overlay")
     required = {
         "session_id", "revision", "plan_id", "status", "operation_count",
         "destructive_count", "warning_count", "total_changes", "truncated",
+        "goal", "summary", "assumption_count", "group_count",
     }
     if set(metadata) != required:
         raise ValueError("incomplete diff overlay")
+    if int(metadata["assumption_count"]) != len(assumptions) or int(metadata["group_count"]) != len(groups):
+        raise ValueError("incomplete workflow explanation")
     return {
-        "version": 1,
+        "version": 2,
         "session_id": metadata["session_id"],
         "revision": int(metadata["revision"]),
         "plan_id": metadata["plan_id"],
@@ -205,6 +236,10 @@ def decode_overlay(payload: str) -> dict[str, Any]:
         "operation_count": int(metadata["operation_count"]),
         "destructive_count": int(metadata["destructive_count"]),
         "warning_count": int(metadata["warning_count"]),
+        "goal": metadata["goal"],
+        "summary": metadata["summary"],
+        "assumptions": assumptions,
+        "groups": groups,
         "total_changes": int(metadata["total_changes"]),
         "truncated": metadata["truncated"] == "true",
         "items": items,

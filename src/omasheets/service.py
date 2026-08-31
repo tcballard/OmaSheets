@@ -23,6 +23,7 @@ from .paths import AppPaths
 from .policy import Actor, require_agent_readable, require_stageable, workbook_format
 from .store import read_json, write_json_atomic
 from .transactions import Publisher, plan_lock
+from .workflow import validate_workflow
 
 _IDENTIFIER = re.compile(r"^[0-9a-f]{32}$")
 
@@ -53,8 +54,9 @@ class OmaSheetsService:
         self.paths.ensure()
         self.sessions = self.paths.state / "sessions"
         self.plans = self.paths.state / "plans"
+        self.evidence = self.paths.state / "evidence"
         self.staging = self.paths.cache / "staging"
-        for directory in (self.sessions, self.plans, self.staging):
+        for directory in (self.sessions, self.plans, self.evidence, self.staging):
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.publisher = Publisher(paths)
 
@@ -152,6 +154,49 @@ class OmaSheetsService:
             "agent_operations": list(SUPPORTED_OPERATIONS),
             "agent_publish_authority": False,
             "local_review_required": True,
+        }
+
+    def agent_context_resource(self) -> dict[str, Any]:
+        """Give a newly opened agent a path-free, selection-aware starting point."""
+
+        current = self.current_resource()
+        if not current.get("selected"):
+            return {
+                "ready": False,
+                "instruction": "Select a workbook locally in OmaSheets before starting an agent workflow.",
+                "agent_publish_authority": False,
+            }
+        window = self.window_context_resource()
+        focus = None
+        if window.get("active"):
+            focus = {
+                "sheet_index": window["sheet"],
+                "address": window["address"],
+                "formula": window["formula"],
+                "visible": window["visible"],
+                "dirty": window["dirty"],
+                "live_document_bridge": window["live_document_bridge"],
+            }
+        return {
+            "ready": True,
+            "workbook": current,
+            "focus": focus,
+            "suggested_workflows": [
+                {"id": "explain", "label": "Explain this selection or formula"},
+                {"id": "clean", "label": "Clean and standardise a data range"},
+                {"id": "variance", "label": "Build or explain a variance analysis"},
+                {"id": "reconcile", "label": "Reconcile values across sheets"},
+                {"id": "summarise", "label": "Create a checked summary"},
+                {"id": "format", "label": "Standardise presentation without changing values"},
+            ],
+            "workflow_contract": {
+                "inspect_before_planning": True,
+                "cite_returned_evidence_ids": True,
+                "group_operations_by_purpose": True,
+                "revise_instead_of_mutating_verified_plans": True,
+                "local_review_required": True,
+                "agent_publish_authority": False,
+            },
         }
 
     @property
@@ -350,7 +395,11 @@ class OmaSheetsService:
         session = self._session(session_id)
         with self._agent_source(session) as (source, base):
             result = self.engine.describe(source, include_formulas=include_formulas)
+        evidence_id = self._record_evidence(
+            session, base, "describe_workbook", {"include_formulas": include_formulas}, result,
+        )
         result["document_source"] = base["kind"]
+        result["evidence_id"] = evidence_id
         result.update(self._public_session(session))
         result["formula_records_included"] = include_formulas
         if not include_formulas:
@@ -361,19 +410,22 @@ class OmaSheetsService:
         session = self._session(session_id)
         with self._agent_source(session) as (source, base):
             result = self.engine.read_range(source, **arguments)
-        return {**result, "document_source": base["kind"]}
+        evidence_id = self._record_evidence(session, base, "read_range", arguments, result)
+        return {**result, "document_source": base["kind"], "evidence_id": evidence_id}
 
     def search_workbook(self, session_id: str, **arguments: Any) -> dict[str, Any]:
         session = self._session(session_id)
         with self._agent_source(session) as (source, base):
             result = self.engine.search(source, **arguments)
-        return {**result, "document_source": base["kind"]}
+        evidence_id = self._record_evidence(session, base, "search_workbook", arguments, result)
+        return {**result, "document_source": base["kind"], "evidence_id": evidence_id}
 
     def trace_formula(self, session_id: str, **arguments: Any) -> dict[str, Any]:
         session = self._session(session_id)
         with self._agent_source(session) as (source, base):
             result = self.engine.trace(source, **arguments)
-        return {**result, "document_source": base["kind"]}
+        evidence_id = self._record_evidence(session, base, "trace_formula", arguments, result)
+        return {**result, "document_source": base["kind"], "evidence_id": evidence_id}
 
     def render_workbook(self, session_id: str, format: str = "pdf") -> dict[str, Any]:
         del format
@@ -383,14 +435,119 @@ class OmaSheetsService:
         with self._agent_source(session) as (source, base):
             result = self.engine.render(source, output=output)
         preview_identity = identify_regular_file(output)
-        return {**result, "artifact": str(output), "artifact_sha256": preview_identity.sha256, "document_source": base["kind"]}
+        public_result = {**result, "artifact_sha256": preview_identity.sha256}
+        evidence_id = self._record_evidence(session, base, "render_workbook", {"format": "pdf"}, public_result)
+        return {
+            **result, "artifact": str(output), "artifact_sha256": preview_identity.sha256,
+            "document_source": base["kind"], "evidence_id": evidence_id,
+        }
 
-    def plan_changes(self, session_id: str, expected_revision: int, operations: list[dict[str, Any]]) -> dict[str, Any]:
+    def _record_evidence(
+        self,
+        session: dict[str, Any],
+        base: dict[str, str],
+        tool: str,
+        arguments: dict[str, Any],
+        result: dict[str, Any],
+    ) -> str:
+        evidence_id = secrets.token_hex(16)
+        record = {
+            "evidence_id": evidence_id,
+            "session_id": session["session_id"],
+            "revision": session["revision"],
+            "base_source": base,
+            "tool": tool,
+            "arguments": arguments,
+            "result_sha256": _canonical_hash(result),
+            "observed_at": _now(),
+        }
+        record["seal"] = _canonical_hash(record)
+        write_json_atomic(self.evidence / f"{evidence_id}.json", record)
+        return evidence_id
+
+    def _load_evidence(self, evidence_id: str) -> dict[str, Any]:
+        if not isinstance(evidence_id, str) or _IDENTIFIER.fullmatch(evidence_id) is None:
+            raise ConflictError("invalid workflow evidence")
+        path = self.evidence / f"{evidence_id}.json"
+        if not path.exists():
+            raise ConflictError("workflow evidence was not found")
+        record = read_json(path)
+        sealed = dict(record)
+        seal = sealed.pop("seal", None)
+        if not isinstance(seal, str) or not secrets.compare_digest(seal, _canonical_hash(sealed)):
+            raise ConflictError("workflow evidence seal is invalid")
+        return record
+
+    def _resolve_evidence(
+        self, session_id: str, revision: int, base: dict[str, str], evidence_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        result = []
+        for evidence_id in evidence_ids:
+            record = self._load_evidence(evidence_id)
+            if (
+                record.get("session_id") != session_id
+                or record.get("revision") != revision
+                or record.get("base_source") != base
+            ):
+                raise ConflictError("workflow evidence does not match this workbook revision")
+            result.append({key: value for key, value in record.items() if key not in {"session_id", "seal"}})
+        return result
+
+    def plan_changes(
+        self,
+        session_id: str,
+        expected_revision: int,
+        operations: list[dict[str, Any]],
+        workflow: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._create_plan(session_id, expected_revision, operations, workflow)
+
+    def revise_plan(
+        self,
+        plan_id: str,
+        expected_revision: int,
+        operations: list[dict[str, Any]],
+        workflow: dict[str, Any],
+    ) -> dict[str, Any]:
+        with plan_lock(self.paths, plan_id):
+            previous = self._load_plan(plan_id)
+            if previous["status"] != "verified" or previous["revision"] != expected_revision:
+                raise ConflictError("only a current verified plan can be revised")
+            replacement = self._create_plan(
+                previous["session_id"], expected_revision, operations, workflow,
+                supersedes_plan_id=plan_id,
+            )
+            previous["status"] = "superseded"
+            previous["superseded_by"] = replacement["plan_id"]
+            previous["superseded_at"] = _now()
+            self._save_plan(previous)
+            return replacement
+
+    def _create_plan(
+        self,
+        session_id: str,
+        expected_revision: int,
+        operations: list[dict[str, Any]],
+        workflow: dict[str, Any] | None,
+        *,
+        supersedes_plan_id: str | None = None,
+    ) -> dict[str, Any]:
         session = self._session(session_id)
         if session["revision"] != expected_revision:
             raise ConflictError("workbook revision is stale")
         require_stageable(Path(session["source"]), actor=Actor.AGENT)
         normalized = validate_operations(operations)
+        normalized_workflow = validate_workflow(workflow, len(normalized)) if workflow is not None else {
+            "goal": "Propose workbook changes",
+            "summary": "Typed workbook operations staged through the local service.",
+            "assumptions": [],
+            "evidence_ids": [],
+            "groups": [{
+                "title": "Workbook changes",
+                "purpose": "Apply the requested typed operations.",
+                "operation_indexes": list(range(len(normalized))),
+            }],
+        }
         plan_id = secrets.token_hex(16)
         plan_dir = self.staging / plan_id
         plan_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -398,6 +555,9 @@ class OmaSheetsService:
         staged = plan_dir / f"staged{extension}"
         preview = plan_dir / "preview.pdf"
         with self._agent_source(session) as (source, base):
+            workflow_evidence = self._resolve_evidence(
+                session_id, expected_revision, base, normalized_workflow["evidence_ids"],
+            ) if normalized_workflow["evidence_ids"] else []
             evidence = self.engine.stage(source, normalized, output=staged, preview=preview)
         staged_identity = identify_regular_file(staged)
         preview_identity = identify_regular_file(preview)
@@ -414,6 +574,8 @@ class OmaSheetsService:
             "preview_artifact": str(preview),
             "preview_sha256": preview_identity.sha256,
             "operations": normalized,
+            "workflow": {**normalized_workflow, "evidence": workflow_evidence},
+            "supersedes_plan_id": supersedes_plan_id,
             "destructive_operations": destructive_operations(normalized),
             "semantic_diff": evidence.get("semantic_diff", {}),
             "verification": evidence.get("verification", {}),
