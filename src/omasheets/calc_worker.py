@@ -275,6 +275,8 @@ def _object_fingerprints(document, operations: list[dict[str, Any]]) -> dict[str
     sheets = document.getSheets()
     for operation in operations:
         if operation["type"] == "upsert_chart":
+            if not sheets.hasByName(operation["sheet"]):
+                continue
             sheet = sheets.getByName(operation["sheet"])
             title = None
             table_charts = sheet.getCharts()
@@ -303,6 +305,8 @@ def _object_fingerprints(document, operations: list[dict[str, Any]]) -> dict[str
             if title is not None:
                 charts.append({"sheet": operation["sheet"], "name": operation["name"], "title": title})
         elif operation["type"] in {"upsert_pivot", "refresh_pivot"}:
+            if not sheets.hasByName(operation["sheet"]):
+                continue
             sheet = sheets.getByName(operation["sheet"])
             tables = sheet.getDataPilotTables()
             if tables.hasByName(operation["name"]):
