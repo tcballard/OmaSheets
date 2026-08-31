@@ -1,5 +1,12 @@
 #define LOK_USE_UNSTABLE_API
 
+#ifndef OMASHEETS_SOURCE_SHA256
+#define OMASHEETS_SOURCE_SHA256 "unknown"
+#endif
+#ifndef OMASHEETS_SOURCE_COMMIT
+#define OMASHEETS_SOURCE_COMMIT "unknown"
+#endif
+
 #include <LibreOfficeKit/LibreOfficeKitGtk.h>
 
 #include <algorithm>
@@ -1183,6 +1190,12 @@ bool supported(const fs::path& path)
 
 int main(int argc, char** argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "--provenance") {
+        std::cout << "{\"component\":\"omasheets-window\",\"source_commit\":\""
+                  << OMASHEETS_SOURCE_COMMIT << "\",\"source_sha256\":\""
+                  << OMASHEETS_SOURCE_SHA256 << "\"}\n";
+        return 0;
+    }
     gtk_init(&argc, &argv);
     WindowState state;
     std::string stage = "arguments";

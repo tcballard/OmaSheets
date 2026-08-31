@@ -175,7 +175,7 @@ class ServiceTests(unittest.TestCase):
             receipt = self.service.commit_native_overlay(plan["plan_id"], 1, destination)
         self.assertTrue(destination.exists())
         self.assertEqual(self.source.read_bytes(), b"workbook")
-        self.assertEqual(receipt["target"], str(destination))
+        self.assertEqual(receipt["target"], str(destination.resolve()))
         self.assertFalse(overlay_path(self.paths.runtime).exists())
 
     def test_legacy_conversion_creates_a_receipt_and_preserves_source(self):

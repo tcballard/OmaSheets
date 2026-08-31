@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(omasheets_lok_spike LANGUAGES CXX)
+project(omasheets_native LANGUAGES CXX)
+
+set(OMASHEETS_SOURCE_SHA256 "unknown" CACHE STRING "Digest of the source tree used for this build")
+set(OMASHEETS_SOURCE_COMMIT "unknown" CACHE STRING "Git commit used for this build")
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
@@ -27,11 +30,19 @@ target_compile_features(omasheets-lok-render PRIVATE cxx_std_20)
 target_compile_options(omasheets-lok-render PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_include_directories(omasheets-lok-render PRIVATE "${LIBREOFFICEKIT_INCLUDE_DIR}")
 target_link_libraries(omasheets-lok-render PRIVATE "${CMAKE_DL_LIBS}")
+target_compile_definitions(omasheets-lok-render PRIVATE
+  OMASHEETS_SOURCE_SHA256="${OMASHEETS_SOURCE_SHA256}"
+  OMASHEETS_SOURCE_COMMIT="${OMASHEETS_SOURCE_COMMIT}"
+)
 
 add_executable(omasheets-window window.cpp)
 target_compile_features(omasheets-window PRIVATE cxx_std_20)
 target_compile_options(omasheets-window PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_include_directories(omasheets-window PRIVATE "${LIBREOFFICEKIT_INCLUDE_DIR}")
 target_link_libraries(omasheets-window PRIVATE PkgConfig::GTK3 "${LIBREOFFICEKIT_GTK_LIBRARY}")
+target_compile_definitions(omasheets-window PRIVATE
+  OMASHEETS_SOURCE_SHA256="${OMASHEETS_SOURCE_SHA256}"
+  OMASHEETS_SOURCE_COMMIT="${OMASHEETS_SOURCE_COMMIT}"
+)
 
 install(TARGETS omasheets-lok-render omasheets-window RUNTIME DESTINATION bin)
