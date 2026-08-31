@@ -18,6 +18,10 @@ class LibreOfficeKitSpikeTests(unittest.TestCase):
             result = status()
         self.assertFalse(result["experimental"])
         self.assertTrue(result["ready"])
+        self.assertEqual(
+            [check["name"] for check in result["checks"]],
+            ["libreofficekit-program", "omasheets-lok-render"],
+        )
 
     def test_render_uses_an_argv_vector_and_validates_the_report(self):
         with tempfile.TemporaryDirectory() as temporary:

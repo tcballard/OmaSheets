@@ -14,7 +14,6 @@ from .identity import identify_regular_file
 from .policy import workbook_format
 
 DEFAULT_PROGRAM = Path("/usr/lib/libreoffice/program")
-DEFAULT_HEADERS = Path("/usr/include/libreoffice/LibreOfficeKit/LibreOfficeKit.hxx")
 MAX_RENDER_DIMENSION = 4096
 
 
@@ -36,7 +35,6 @@ def status() -> dict[str, Any]:
     renderer = renderer_executable()
     checks = [
         {"name": "libreofficekit-program", "ok": program.is_dir(), "detail": str(program)},
-        {"name": "libreofficekit-headers", "ok": DEFAULT_HEADERS.is_file(), "detail": str(DEFAULT_HEADERS)},
         {
             "name": "omasheets-lok-render",
             "ok": renderer is not None,
