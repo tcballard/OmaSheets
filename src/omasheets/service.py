@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import secrets
 from contextlib import contextmanager
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from . import __version__
+from .diff_overlay import decode_overlay, overlay_path, publish_overlay
 from .errors import ConflictError, EngineError
 from .identity import FileIdentity, identify_regular_file
 from .live_bridge import request_live_snapshot
@@ -141,6 +143,12 @@ class OmaSheetsService:
                 "unsaved_state_visible": True,
                 "agent_mutates_open_document": False,
             },
+            "agent_diff_overlay": {
+                "native": True,
+                "verified_before_after_values": True,
+                "maximum_visible_changes": 200,
+                "mutates_open_document": False,
+            },
             "agent_operations": list(SUPPORTED_OPERATIONS),
             "agent_publish_authority": False,
             "local_review_required": True,
@@ -154,6 +162,7 @@ class OmaSheetsService:
         """Create the private, path-free handoff consumed by the native window."""
 
         session = self._session(session_id)
+        overlay_path(self.paths.runtime).unlink(missing_ok=True)
         write_json_atomic(self.window_context_path, {
             "version": 1,
             "active": False,
@@ -413,6 +422,7 @@ class OmaSheetsService:
         }
         plan["seal"] = _canonical_hash(plan)
         self._save_plan(plan)
+        self._publish_plan_overlay(plan)
         return self._public_plan(plan)
 
     def _save_plan(self, plan: dict[str, Any]) -> None:
@@ -420,6 +430,11 @@ class OmaSheetsService:
         sealed.pop("seal", None)
         plan["seal"] = _canonical_hash(sealed)
         write_json_atomic(self.plans / f"{plan['plan_id']}.json", plan)
+
+    def _publish_plan_overlay(self, plan: dict[str, Any]) -> None:
+        window = self.window_context_resource()
+        if window.get("active") and window.get("session_id") == plan["session_id"]:
+            publish_overlay(overlay_path(self.paths.runtime), plan)
 
     def get_plan(self, plan_id: str) -> dict[str, Any]:
         return self._public_plan(self._load_plan(plan_id))
@@ -503,6 +518,7 @@ class OmaSheetsService:
                 "review_prepared_at": _now(),
             })
             self._save_plan(plan)
+            self._publish_plan_overlay(plan)
             return {
                 "plan_id": plan_id,
                 "expected_revision": expected_revision,
@@ -551,7 +567,32 @@ class OmaSheetsService:
             plan["status"] = "committed"
             plan["committed_at"] = _now()
             self._save_plan(plan)
+            overlay_path(self.paths.runtime).unlink(missing_ok=True)
             return receipt
+
+    def commit_native_overlay(self, plan_id: str, expected_revision: int, destination: Path) -> dict[str, Any]:
+        """Publish only when the active native window presents this exact plan."""
+
+        window = self.window_context_resource()
+        path = overlay_path(self.paths.runtime)
+        try:
+            details = path.stat()
+            if details.st_uid != os.getuid() or details.st_mode & 0o077 or details.st_size > 256 * 1024:
+                raise ValueError("unsafe overlay file")
+            overlay = decode_overlay(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise ConflictError("native review overlay is unavailable") from exc
+        if (
+            not window.get("active")
+            or window.get("session_id") != overlay["session_id"]
+            or overlay["plan_id"] != plan_id
+            or overlay["revision"] != expected_revision
+        ):
+            raise ConflictError("native review overlay is stale")
+        review = self.prepare_local_review(
+            plan_id, expected_revision, mode="copy", destination=destination,
+        )
+        return self.commit_local_review(plan_id, expected_revision, review["approval_token"])
 
     def undo_receipt(self, receipt_id: str, token: str) -> dict[str, Any]:
         """Local-only undo entry point; never exposed through AgentService."""
