@@ -313,10 +313,24 @@ def _object_fingerprints(document, operations: list[dict[str, Any]]) -> dict[str
                 table = tables.getByName(operation["name"])
                 source = table.getSourceRange()
                 output = table.getOutputRange()
+                output_start = [output.Sheet, output.StartColumn, output.StartRow]
+                if operation["type"] == "upsert_pivot":
+                    anchor = sheet.getCellRangeByName(operation["output_cell"]).getCellAddress()
+                    # Calc regenerates an OOXML pivot with its reported output
+                    # range one row below the insertion anchor. Both reports
+                    # describe the same table: the extra row is the OOXML
+                    # field-header surface. Normalize only that bounded shift;
+                    # any sheet, column, or larger row movement still fails.
+                    if (
+                        output.Sheet == anchor.Sheet
+                        and output.StartColumn == anchor.Column
+                        and output.StartRow in {anchor.Row, anchor.Row + 1}
+                    ):
+                        output_start = [anchor.Sheet, anchor.Column, anchor.Row]
                 pivots.append({
                     "sheet": operation["sheet"], "name": operation["name"],
                     "source": [source.Sheet, source.StartColumn, source.StartRow, source.EndColumn, source.EndRow],
-                    "output_start": [output.Sheet, output.StartColumn, output.StartRow],
+                    "output_start": output_start,
                 })
     return {"charts": charts, "pivots": pivots}
 
