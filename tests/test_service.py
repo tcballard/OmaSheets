@@ -7,7 +7,6 @@ import zipfile
 
 from omasheets.errors import ConflictError, EngineError
 from omasheets.diff_overlay import decode_overlay, overlay_path
-from omasheets.identity import identify_regular_file
 from omasheets.live_bridge import LiveSnapshot
 from omasheets.paths import AppPaths
 from omasheets.service import OmaSheetsService
@@ -159,7 +158,7 @@ class ServiceTests(unittest.TestCase):
         with zipfile.ZipFile(snapshot, "w") as archive:
             archive.writestr("xl/workbook.xml", "<workbook><sheets/></workbook>")
             archive.writestr("xl/worksheets/sheet1.xml", "<worksheet><sheetData><v>2</v></sheetData></worksheet>")
-        live = LiveSnapshot(snapshot, identify_regular_file(snapshot), "xlsx", "c" * 64)
+        live = LiveSnapshot(snapshot, "xlsx", "c" * 64)
         with patch("omasheets.service.request_live_snapshot", return_value=live):
             plan = self.service.plan_changes(
                 session["session_id"], 1,
@@ -183,7 +182,7 @@ class ServiceTests(unittest.TestCase):
             with zipfile.ZipFile(snapshot, "w") as archive:
                 archive.writestr("xl/workbook.xml", "<workbook><sheets/></workbook>")
                 archive.writestr("xl/worksheets/sheet1.xml", f"<worksheet><sheetData><v>{index}</v></sheetData></worksheet>")
-            snapshots.append(LiveSnapshot(snapshot, identify_regular_file(snapshot), "xlsx", semantic_hash))
+            snapshots.append(LiveSnapshot(snapshot, "xlsx", semantic_hash))
         with patch("omasheets.service.request_live_snapshot", side_effect=snapshots):
             plan = self.service.plan_changes(
                 session["session_id"], 1,
@@ -207,9 +206,7 @@ class ServiceTests(unittest.TestCase):
         for index in range(2):
             snapshot = self.source.with_name(f"fresh-live-{index}.xlsx")
             snapshot.write_bytes(f"live-{index}".encode())
-            snapshots.append(LiveSnapshot(
-                snapshot, identify_regular_file(snapshot), "xlsx", f"{index + 1:064x}",
-            ))
+            snapshots.append(LiveSnapshot(snapshot, "xlsx", f"{index + 1:064x}"))
         with patch("omasheets.service.request_live_snapshot", side_effect=snapshots) as request:
             self.service.describe_workbook(session["session_id"])
             self.service.describe_workbook(session["session_id"])
@@ -229,7 +226,7 @@ class ServiceTests(unittest.TestCase):
         context_path.write_text(json.dumps(context))
         snapshot = self.source.with_name("batch-live.xlsx")
         snapshot.write_bytes(b"live-workbook")
-        live = LiveSnapshot(snapshot, identify_regular_file(snapshot), "xlsx", "c" * 64)
+        live = LiveSnapshot(snapshot, "xlsx", "c" * 64)
         queries = [
             {"id": "structure", "tool": "describe_workbook", "arguments": {"include_formulas": False}},
             {
@@ -259,9 +256,7 @@ class ServiceTests(unittest.TestCase):
 
         plan_snapshot = self.source.with_name("batch-plan-live.xlsx")
         plan_snapshot.write_bytes(b"same-semantic-live-workbook")
-        plan_live = LiveSnapshot(
-            plan_snapshot, identify_regular_file(plan_snapshot), "xlsx", live.semantic_sha256,
-        )
+        plan_live = LiveSnapshot(plan_snapshot, "xlsx", live.semantic_sha256)
         with patch("omasheets.service.request_live_snapshot", return_value=plan_live):
             plan = self.service.plan_changes(
                 session["session_id"], 1,
@@ -320,7 +315,7 @@ class ServiceTests(unittest.TestCase):
             with zipfile.ZipFile(snapshot, "w") as archive:
                 archive.writestr("xl/workbook.xml", "<workbook><sheets/></workbook>")
                 archive.writestr("xl/worksheets/sheet1.xml", "<worksheet><sheetData><v>1</v></sheetData></worksheet>")
-            snapshots.append(LiveSnapshot(snapshot, identify_regular_file(snapshot), "xlsx", "c" * 64))
+            snapshots.append(LiveSnapshot(snapshot, "xlsx", "c" * 64))
         destination = self.source.with_name("approved-copy.xlsx")
         with patch("omasheets.service.request_live_snapshot", side_effect=snapshots):
             plan = self.service.plan_changes(

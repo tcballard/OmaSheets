@@ -1,10 +1,12 @@
 import hashlib
+import os
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
 
+from omasheets import live_bridge
 from omasheets.errors import EngineError
 from omasheets.live_bridge import bridge_path, request_live_snapshot, semantic_snapshot_hash
 from omasheets.paths import AppPaths
@@ -71,6 +73,106 @@ class LiveBridgeTests(unittest.TestCase):
             workbook.write_bytes(b"binary-workbook-two")
             second = semantic_snapshot_hash(workbook, "xls")
             self.assertNotEqual(first, second)
+
+    def test_semantic_hash_rejects_in_place_change_during_single_open_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workbook = Path(temporary) / "book.xls"
+            workbook.write_bytes(b"binary-workbook")
+            original_stream_digest = live_bridge._stream_digest
+
+            def mutate_after_read(handle):
+                result = original_stream_digest(handle)
+                with workbook.open("ab") as writer:
+                    writer.write(b"-changed")
+                return result
+
+            with patch("omasheets.live_bridge._stream_digest", side_effect=mutate_after_read):
+                with self.assertRaisesRegex(EngineError, "changed while it was hashed"):
+                    semantic_snapshot_hash(workbook, "xls")
+
+    def test_semantic_hash_rejects_fifo_swap_without_blocking(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workbook = Path(temporary) / "book.xls"
+            workbook.write_bytes(b"binary-workbook")
+            real_open = os.open
+            swapped = False
+
+            def swap_before_open(path, flags, mode=0o777, *, dir_fd=None):
+                nonlocal swapped
+                if Path(path) == workbook and not swapped:
+                    workbook.unlink()
+                    os.mkfifo(workbook)
+                    swapped = True
+                if dir_fd is None:
+                    return real_open(path, flags, mode)
+                return real_open(path, flags, mode, dir_fd=dir_fd)
+
+            with patch("omasheets.live_bridge.os.open", side_effect=swap_before_open):
+                with self.assertRaisesRegex(EngineError, "changed while it was opened"):
+                    semantic_snapshot_hash(workbook, "xls")
+
+            self.assertTrue(swapped)
+
+    def test_snapshot_swap_during_hash_is_rejected_and_cleaned_up(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            paths = AppPaths(root / "state", root / "cache", root / "runtime")
+            paths.ensure()
+            expected = paths.runtime / f"snapshot-{'a' * 32}-{'e' * 32}.xlsx"
+            replacement = paths.runtime / "replacement.xlsx"
+
+            class FakeConnection:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_):
+                    return None
+
+                def settimeout(self, _):
+                    pass
+
+                def connect(self, _):
+                    pass
+
+                def sendall(self, request):
+                    _, session, nonce = request.decode("ascii").strip().split()
+                    snapshot = paths.runtime / f"snapshot-{session}-{nonce}.xlsx"
+                    with zipfile.ZipFile(snapshot, "w") as archive:
+                        archive.writestr("xl/workbook.xml", "<workbook><sheets/></workbook>")
+                    snapshot.chmod(0o600)
+
+                def recv(self, _):
+                    return b'{"ok":true,"format":"xlsx"}\n'
+
+            original_member_digest = live_bridge._member_digest
+            swapped = False
+
+            def swap_path_during_hash(archive, name):
+                nonlocal swapped
+                if not swapped:
+                    with zipfile.ZipFile(replacement, "w") as replacement_archive:
+                        replacement_archive.writestr(
+                            "xl/workbook.xml",
+                            "<workbook><sheets><sheet name='swapped'/></sheets></workbook>",
+                        )
+                    replacement.chmod(0o600)
+                    os.replace(replacement, expected)
+                    swapped = True
+                return original_member_digest(archive, name)
+
+            with patch("omasheets.live_bridge._validate_socket"), patch(
+                "omasheets.live_bridge.socket.socket", return_value=FakeConnection()
+            ), patch(
+                "omasheets.live_bridge.secrets.token_hex", return_value="e" * 32
+            ), patch(
+                "omasheets.live_bridge._member_digest", side_effect=swap_path_during_hash
+            ):
+                with self.assertRaisesRegex(EngineError, "changed while it was hashed"):
+                    request_live_snapshot(paths, "a" * 32, ".xlsx")
+
+            self.assertTrue(swapped)
+            self.assertFalse(expected.exists())
+            self.assertFalse(replacement.exists())
 
     def test_snapshot_request_is_bounded_and_returns_private_exact_path(self):
         with tempfile.TemporaryDirectory() as temporary:
