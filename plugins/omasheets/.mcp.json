@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "omasheets": {
+      "command": "omasheets",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
