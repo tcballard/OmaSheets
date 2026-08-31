@@ -75,6 +75,21 @@ class InstallationTests(unittest.TestCase):
         self.assertTrue(self.paths.launcher.exists())
         self.assertTrue(self.paths.journal.exists())
 
+    def test_launcher_quotes_shell_metacharacters_in_install_path(self):
+        paths = InstallPaths(
+            app=self.paths.app.with_name("app $(touch nope) 'quoted'"),
+            build=self.paths.build,
+            launcher=self.paths.launcher,
+            codex_plugin=self.paths.codex_plugin,
+            codex_marketplace=self.paths.codex_marketplace,
+            journal=self.paths.journal,
+            integration=self.paths.integration,
+        )
+        install(ROOT, paths, check_dependencies=False, runner=self.fake_cmake)
+        launcher = paths.launcher.read_text()
+        self.assertIn("'\"'\"'", launcher)
+        self.assertNotIn('PYTHONPATH="', launcher)
+
 
 if __name__ == "__main__":
     unittest.main()

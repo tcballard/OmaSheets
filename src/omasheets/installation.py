@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -156,8 +157,8 @@ def _launcher(app: Path) -> bytes:
     module_root = app / "lib"
     return (
         "#!/bin/bash\nset -euo pipefail\n"
-        f"export PYTHONPATH={json.dumps(str(module_root))}\n"
-        f"export PATH={json.dumps(str(app / 'bin'))}:\"$PATH\"\n"
+        f"export PYTHONPATH={shlex.quote(str(module_root))}\n"
+        f"export PATH={shlex.quote(str(app / 'bin'))}:\"$PATH\"\n"
         "exec /usr/bin/python -m omasheets.cli \"$@\"\n"
     ).encode()
 
