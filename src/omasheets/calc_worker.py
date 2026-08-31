@@ -409,6 +409,18 @@ def _target_fingerprints(document, operations: list[dict[str, Any]]) -> list[dic
     return result
 
 
+def _target_changes(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    prior = {(item["sheet"], item["range"]): item for item in before}
+    following = {(item["sheet"], item["range"]): item for item in after}
+    return [
+        {
+            "sheet": key[0], "range": key[1],
+            "before": prior.get(key, {}), "after": following.get(key, {}),
+        }
+        for key in sorted(set(prior) | set(following))
+    ]
+
+
 def _store(document, path: Path, filter_name: str) -> None:
     document.storeAsURL(_url(path), (_property("FilterName", filter_name), _property("Overwrite", False)))
 
@@ -461,6 +473,7 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
             return {"result": {"format": "pdf", "engine": {"name": "LibreOffice Calc"}}, "artifacts": {"preview": "out/preview.pdf"}}
 
         before = _inspect(document, limits, include_formulas=True)
+        before_targets = _target_fingerprints(document, request["arguments"].get("operations", []))
         if action == "stage":
             _apply(document, request["arguments"]["operations"])
             extension = source.suffix.lower()
@@ -504,6 +517,7 @@ def run(request: dict[str, Any]) -> dict[str, Any]:
                 "operation_count": len(request["arguments"].get("operations", [])),
                 "before": _inventory(before),
                 "after": _inventory(after),
+                "target_changes": _target_changes(before_targets, expected_targets),
             },
             "verification": {
                 "status": status,

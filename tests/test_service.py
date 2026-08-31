@@ -6,6 +6,7 @@ from unittest.mock import patch
 import zipfile
 
 from omasheets.errors import ConflictError
+from omasheets.diff_overlay import decode_overlay, overlay_path
 from omasheets.identity import identify_regular_file
 from omasheets.live_bridge import LiveSnapshot
 from omasheets.paths import AppPaths
@@ -88,6 +89,8 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(capabilities["live_window_context"]["agent_control"])
         self.assertTrue(capabilities["live_document_bridge"]["unsaved_state_visible"])
         self.assertFalse(capabilities["live_document_bridge"]["agent_mutates_open_document"])
+        self.assertTrue(capabilities["agent_diff_overlay"]["native"])
+        self.assertFalse(capabilities["agent_diff_overlay"]["mutates_open_document"])
 
     def test_live_window_context_is_path_free_and_session_bound(self):
         session = self.service.select_workbook(self.source)
@@ -124,6 +127,9 @@ class ServiceTests(unittest.TestCase):
                 [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}],
             )
         self.assertEqual(plan["base_source"], {"kind": "live_window", "sha256": live.semantic_sha256})
+        overlay = decode_overlay(overlay_path(self.paths.runtime).read_text())
+        self.assertEqual(overlay["plan_id"], plan["plan_id"])
+        self.assertEqual(overlay["items"][0]["range"], "A1")
         self.assertFalse(snapshot.exists())
 
     def test_live_plan_conflicts_when_in_memory_workbook_changes(self):
@@ -146,6 +152,31 @@ class ServiceTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ConflictError, "workbook state changed"):
                 self.service.apply_plan_handoff(plan["plan_id"], 1)
+
+    def test_native_overlay_confirmation_publishes_only_a_new_copy(self):
+        session = self.service.select_workbook(self.source)
+        context_path = self.service.prepare_window_context(session["session_id"])
+        context = json.loads(context_path.read_text())
+        context.update({"active": True, "live_document_bridge": True, "updated_at_ms": 4})
+        context_path.write_text(json.dumps(context))
+        snapshots = []
+        for index in range(3):
+            snapshot = self.source.with_name(f"native-review-{index}.xlsx")
+            with zipfile.ZipFile(snapshot, "w") as archive:
+                archive.writestr("xl/workbook.xml", "<workbook><sheets/></workbook>")
+                archive.writestr("xl/worksheets/sheet1.xml", "<worksheet><sheetData><v>1</v></sheetData></worksheet>")
+            snapshots.append(LiveSnapshot(snapshot, identify_regular_file(snapshot), "xlsx", "c" * 64))
+        destination = self.source.with_name("approved-copy.xlsx")
+        with patch("omasheets.service.request_live_snapshot", side_effect=snapshots):
+            plan = self.service.plan_changes(
+                session["session_id"], 1,
+                [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}],
+            )
+            receipt = self.service.commit_native_overlay(plan["plan_id"], 1, destination)
+        self.assertTrue(destination.exists())
+        self.assertEqual(self.source.read_bytes(), b"workbook")
+        self.assertEqual(receipt["target"], str(destination))
+        self.assertFalse(overlay_path(self.paths.runtime).exists())
 
     def test_legacy_conversion_creates_a_receipt_and_preserves_source(self):
         legacy = self.source.with_name("legacy.xls")
