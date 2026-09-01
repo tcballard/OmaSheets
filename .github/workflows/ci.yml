@@ -42,11 +42,11 @@ jobs:
       - run: python -m pip install --disable-pip-version-check build
       - run: python -m build --wheel
       - run: python -m venv /tmp/omasheets-wheel
-      - run: /tmp/omasheets-wheel/bin/pip install --disable-pip-version-check --no-deps dist/omasheets-0.0.1-py3-none-any.whl
+      - run: /tmp/omasheets-wheel/bin/pip install --disable-pip-version-check --no-deps dist/omasheets-0.0.2-py3-none-any.whl
       - run: |
           cd /tmp
           /tmp/omasheets-wheel/bin/omasheets --version
-          /tmp/omasheets-wheel/bin/python -c 'import omasheets; assert omasheets.__version__ == "0.0.1"'
+          /tmp/omasheets-wheel/bin/python -c 'import omasheets; assert omasheets.__version__ == "0.0.2"'
 
   omarchy-plugin:
     name: Omarchy plugin contract

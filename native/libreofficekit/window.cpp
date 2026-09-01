@@ -3,6 +3,7 @@
 #ifndef OMASHEETS_SOURCE_SHA256
 #define OMASHEETS_SOURCE_SHA256 "unknown"
 #endif
+
 #ifndef OMASHEETS_SOURCE_COMMIT
 #define OMASHEETS_SOURCE_COMMIT "unknown"
 #endif
@@ -473,7 +474,7 @@ void post_command(WindowState* state, const char* command)
 {
     if (!state->loaded || !state->editable) {
         if (state->loaded)
-            set_status(state, "This workbook format is read-only in v0.0.1");
+            set_status(state, "This workbook format is read-only");
         return;
     }
     lok_doc_view_post_command(LOK_DOC_VIEW(state->view), command, nullptr, FALSE);

@@ -5,7 +5,7 @@ workbook kernel. It loads `.xlsx` through Formualizer's Calamine adapter,
 constructs the Arrow-backed workbook model, recalculates formulas, and emits a
 bounded JSON timing and inventory report.
 
-It is deliberately **not** part of the installed v0.0.1 product. LibreOffice
+It is deliberately **not** part of the installed product. LibreOffice
 remains the compatibility and publication authority until a candidate passes
 the workbook corpus, performance budgets, and save/reopen checks.
 

@@ -40,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     for required in (
         "README.md", "INSTALL.md", "docs/ACCEPTANCE.md", "docs/SECURITY.md",
         "docs/AGENT_PROTOCOL.md", "docs/AGENT_WORKFLOWS.md", "docs/PERFORMANCE.md",
+        "docs/ADR-0003-EVENT-SOURCED-NATIVE-CORE.md", "docs/ROADMAP.md",
         "bin/omasheets-plugin", "scripts/install.py", "scripts/build_native_bundle.py",
         "scripts/performance.py", "src/omasheets/performance.py",
         "src/omasheets/native_bundle.py", ".github/workflows/release.yml",

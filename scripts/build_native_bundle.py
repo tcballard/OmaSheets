@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--build-dir", type=Path)
     arguments = parser.parse_args(argv)
     if (platform_id(), normalized_architecture()) != ("linux", "x86_64"):
-        parser.error("v0.0.1 release bundles are supported only on linux/x86_64")
+        parser.error(f"v{__version__} release bundles are supported only on linux/x86_64")
 
     identity = source_identity(ROOT)
     arguments.output.mkdir(parents=True, exist_ok=True)

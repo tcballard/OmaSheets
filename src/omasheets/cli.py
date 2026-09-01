@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     select = commands.add_parser("select", help="Select a local workbook for agent access")
     select.add_argument("path", type=Path)
     status = commands.add_parser("status", help="Show bounded local panel status")
-    status.add_argument("--json", action="store_true", help="Emit JSON (the stable v0.0.1 format)")
+    status.add_argument("--json", action="store_true", help="Emit stable JSON")
     open_command = commands.add_parser("open", help="Open workbooks in LibreOffice Calc")
     open_command.add_argument("paths", nargs="+", type=Path)
     commands.add_parser("open-current", help="Open the selected workbook in LibreOffice Calc")

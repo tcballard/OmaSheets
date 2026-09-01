@@ -1,4 +1,4 @@
-# Install OmaSheets v0.0.1 on Omarchy
+# Install OmaSheets v0.0.2 on Omarchy
 
 OmaSheets targets Omarchy `quattro`. Install and enable its Omarchy surface
 from the repository with:
@@ -19,7 +19,7 @@ user-local product bootstrap. The same action can be run in a terminal:
 ```
 
 The bootstrap checks runtime dependencies, downloads the native bundle from the
-matching `v0.0.1` GitHub release, verifies it against the exact installed
+matching `v0.0.2` GitHub release, verifies it against the exact installed
 checkout, and installs only OmaSheets-owned files. No compiler, CMake,
 `pkgconf`, or LibreOffice SDK is installed or required on the user's machine.
 The bootstrap never invokes a package manager or requests privilege. If runtime
@@ -59,7 +59,7 @@ Private workbook state, receipts and installation journals live under
 `$XDG_CACHE_HOME/omasheets/`; sockets and live snapshots live under
 `$XDG_RUNTIME_DIR/omasheets/`. Runtime and state directories are mode `0700`.
 
-The published v0.0.1 native bundle targets Omarchy's Linux `x86_64` platform.
+The v0.0.2 native bundle targets Omarchy's Linux `x86_64` platform.
 Installation fails before changing product state on any architecture without a
 matching release bundle.
 

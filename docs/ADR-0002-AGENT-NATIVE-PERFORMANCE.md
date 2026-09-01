@@ -8,7 +8,7 @@
 OmaSheets aims to be the spreadsheet built for agents: responsive for an
 interactive human, predictable under workbook-wide requests, and bounded when
 an agent asks for more work than the machine should accept. Merely repackaging
-Calc cannot deliver that outcome. The current v0.0.1 path deliberately buys
+Calc cannot deliver that outcome. The initial v0.0.1 path deliberately buys
 format, calculation, chart, pivot and rendering compatibility from
 LibreOffice, but a live workbook window and every isolated agent job each pay
 for a substantial general-purpose office engine.

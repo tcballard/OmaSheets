@@ -86,9 +86,9 @@ closed. A clearly labelled development override may exist for tests only.
 - LibreOffice and Excel can differ in formulas, layout, names, charts, external
   links, pivot behavior, and unsupported features.
 - Full-workbook PDF preview is evidence, not a complete semantic proof.
-- Literal search is case-insensitive in v0.0.1; it is not a query language.
+- Literal search is case-insensitive; it is not a query language.
 - Formula tracing is bounded and cannot resolve every dynamic reference.
-- No custom verification scripts run inside the sandbox in v0.0.1.
+- No custom verification scripts run inside the sandbox.
 - Worker failures expose only the bounded structured error written to the
   private job result; process stderr and the inherited environment remain hidden.
 - Starting an agent session is an explicit local UI action. OmaSheets passes a

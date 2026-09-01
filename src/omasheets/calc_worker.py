@@ -637,7 +637,7 @@ def _trace(document, arguments: dict[str, Any], limits: dict[str, int]) -> dict[
         "precedents": precedents if arguments.get("direction", "both") in ("precedents", "both") else [],
         "dependents": [],
         "max_depth": arguments.get("max_depth", 5),
-        "warnings": ["v0.0.1 tracing resolves literal A1 precedents only; dynamic references and dependents may be incomplete"],
+        "warnings": ["Formula tracing resolves literal A1 precedents only; dynamic references and dependents may be incomplete"],
     }
 
 
