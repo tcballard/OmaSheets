@@ -76,7 +76,11 @@ enum Expr<R = CellId> {
     Reference(R),
     UnaryMinus(Box<Expr<R>>),
     Binary(BinaryOp, Box<Expr<R>>, Box<Expr<R>>),
-    Range(Vec<Expr<R>>),
+    Range {
+        items: Vec<Expr<R>>,
+        rows: usize,
+        columns: usize,
+    },
     Function(Function, Vec<Expr<R>>),
 }
 
@@ -137,6 +141,10 @@ enum Function {
     Exact,
     CountIf,
     SumIf,
+    Index,
+    Match,
+    VLookup,
+    XLookup,
 }
 
 #[derive(Clone, Debug)]
@@ -385,7 +393,7 @@ impl Workbook {
                 let right = self.evaluate(right);
                 apply_binary(*operator, left, right)
             }
-            Expr::Range(_) => Value::Error(CalcError::InvalidArguments),
+            Expr::Range { .. } => Value::Error(CalcError::InvalidArguments),
             Expr::Function(function, arguments) => self.evaluate_function(*function, arguments),
         }
     }
@@ -414,6 +422,12 @@ impl Workbook {
         }
         if matches!(function, Function::CountIf | Function::SumIf) {
             return self.evaluate_criteria_function(function, arguments);
+        }
+        if matches!(
+            function,
+            Function::Index | Function::Match | Function::VLookup | Function::XLookup
+        ) {
+            return self.evaluate_lookup_function(function, arguments);
         }
 
         let mut values = Vec::new();
@@ -519,12 +533,16 @@ impl Workbook {
             | Function::IfError
             | Function::Pi
             | Function::CountIf
-            | Function::SumIf => Value::Error(CalcError::InvalidArguments),
+            | Function::SumIf
+            | Function::Index
+            | Function::Match
+            | Function::VLookup
+            | Function::XLookup => Value::Error(CalcError::InvalidArguments),
         }
     }
 
     fn flatten_values(&self, expression: &Expr<usize>, output: &mut Vec<Value>) {
-        if let Expr::Range(items) = expression {
+        if let Expr::Range { items, .. } = expression {
             for item in items {
                 self.flatten_values(item, output);
             }
@@ -578,6 +596,156 @@ impl Workbook {
             Function::SumIf => Value::Number(sum),
             _ => unreachable!("validated above"),
         }
+    }
+
+    fn evaluate_lookup_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+        match function {
+            Function::Index if matches!(arguments.len(), 2 | 3) => {
+                let Some((items, rows, columns)) = range_parts(&arguments[0]) else {
+                    return Value::Error(CalcError::InvalidArguments);
+                };
+                let Ok(row) = positive_index(self.evaluate(&arguments[1])) else {
+                    return Value::Error(CalcError::InvalidArguments);
+                };
+                let column = if arguments.len() == 3 {
+                    match positive_index(self.evaluate(&arguments[2])) {
+                        Ok(column) => column,
+                        Err(error) => return Value::Error(error),
+                    }
+                } else if *columns == 1 {
+                    1
+                } else if *rows == 1 {
+                    return items
+                        .get(row - 1)
+                        .map(|item| self.evaluate(item))
+                        .unwrap_or(Value::Error(CalcError::InvalidReference));
+                } else {
+                    return Value::Error(CalcError::InvalidArguments);
+                };
+                if row > *rows || column > *columns {
+                    return Value::Error(CalcError::InvalidReference);
+                }
+                self.evaluate(&items[(row - 1) * *columns + column - 1])
+            }
+            Function::Match if matches!(arguments.len(), 2 | 3) => {
+                if arguments.len() == 3 {
+                    match number(self.evaluate(&arguments[2])) {
+                        Ok(0.0) => {}
+                        Ok(_) => return Value::Error(CalcError::InvalidArguments),
+                        Err(error) => return Value::Error(error),
+                    }
+                }
+                let lookup = self.evaluate(&arguments[0]);
+                if matches!(lookup, Value::Error(_)) {
+                    return lookup;
+                }
+                let Some((items, rows, columns)) = range_parts(&arguments[1]) else {
+                    return Value::Error(CalcError::InvalidArguments);
+                };
+                if *rows != 1 && *columns != 1 {
+                    return Value::Error(CalcError::InvalidArguments);
+                }
+                for (index, item) in items.iter().enumerate() {
+                    let candidate = self.evaluate(item);
+                    if matches!(candidate, Value::Error(_)) {
+                        return candidate;
+                    }
+                    if lookup_equal(&lookup, &candidate) {
+                        return Value::Number((index + 1) as f64);
+                    }
+                }
+                Value::Error(CalcError::InvalidReference)
+            }
+            Function::VLookup if arguments.len() == 4 => {
+                if !matches!(self.evaluate(&arguments[3]), Value::Boolean(false)) {
+                    return Value::Error(CalcError::InvalidArguments);
+                }
+                let lookup = self.evaluate(&arguments[0]);
+                if matches!(lookup, Value::Error(_)) {
+                    return lookup;
+                }
+                let Some((items, rows, columns)) = range_parts(&arguments[1]) else {
+                    return Value::Error(CalcError::InvalidArguments);
+                };
+                let Ok(column) = positive_index(self.evaluate(&arguments[2])) else {
+                    return Value::Error(CalcError::InvalidArguments);
+                };
+                if column > *columns {
+                    return Value::Error(CalcError::InvalidReference);
+                }
+                for row in 0..*rows {
+                    let candidate = self.evaluate(&items[row * *columns]);
+                    if matches!(candidate, Value::Error(_)) {
+                        return candidate;
+                    }
+                    if lookup_equal(&lookup, &candidate) {
+                        return self.evaluate(&items[row * *columns + column - 1]);
+                    }
+                }
+                Value::Error(CalcError::InvalidReference)
+            }
+            Function::XLookup if matches!(arguments.len(), 3 | 4) => {
+                let lookup = self.evaluate(&arguments[0]);
+                if matches!(lookup, Value::Error(_)) {
+                    return lookup;
+                }
+                let Some((lookup_items, lookup_rows, lookup_columns)) = range_parts(&arguments[1])
+                else {
+                    return Value::Error(CalcError::InvalidArguments);
+                };
+                let Some((return_items, return_rows, return_columns)) = range_parts(&arguments[2])
+                else {
+                    return Value::Error(CalcError::InvalidArguments);
+                };
+                if (*lookup_rows != 1 && *lookup_columns != 1)
+                    || (*return_rows != 1 && *return_columns != 1)
+                    || lookup_items.len() != return_items.len()
+                {
+                    return Value::Error(CalcError::InvalidArguments);
+                }
+                for (index, item) in lookup_items.iter().enumerate() {
+                    let candidate = self.evaluate(item);
+                    if matches!(candidate, Value::Error(_)) {
+                        return candidate;
+                    }
+                    if lookup_equal(&lookup, &candidate) {
+                        return self.evaluate(&return_items[index]);
+                    }
+                }
+                if arguments.len() == 4 {
+                    return self.evaluate(&arguments[3]);
+                }
+                Value::Error(CalcError::InvalidReference)
+            }
+            _ => Value::Error(CalcError::InvalidArguments),
+        }
+    }
+}
+
+fn range_parts<R>(expression: &Expr<R>) -> Option<(&[Expr<R>], &usize, &usize)> {
+    match expression {
+        Expr::Range {
+            items,
+            rows,
+            columns,
+        } => Some((items, rows, columns)),
+        _ => None,
+    }
+}
+
+fn positive_index(value: Value) -> Result<usize, CalcError> {
+    let value = number(value)?;
+    if value >= 1.0 && value.fract() == 0.0 && value <= usize::MAX as f64 {
+        Ok(value as usize)
+    } else {
+        Err(CalcError::InvalidArguments)
+    }
+}
+
+fn lookup_equal(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Text(left), Value::Text(right)) => left.eq_ignore_ascii_case(right),
+        _ => left == right,
     }
 }
 
@@ -947,12 +1115,18 @@ fn compile_expression(expression: Expr<CellId>, indices: &HashMap<CellId, usize>
             Box::new(compile_expression(*left, indices)),
             Box::new(compile_expression(*right, indices)),
         ),
-        Expr::Range(arguments) => Expr::Range(
-            arguments
+        Expr::Range {
+            items,
+            rows,
+            columns,
+        } => Expr::Range {
+            items: items
                 .into_iter()
                 .map(|argument| compile_expression(argument, indices))
                 .collect(),
-        ),
+            rows,
+            columns,
+        },
         Expr::Function(function, arguments) => Expr::Function(
             function,
             arguments
@@ -973,7 +1147,10 @@ fn collect_dependencies(expression: &Expr, output: &mut BTreeSet<CellId>) {
             collect_dependencies(left, output);
             collect_dependencies(right, output);
         }
-        Expr::Range(arguments) | Expr::Function(_, arguments) => {
+        Expr::Range {
+            items: arguments, ..
+        }
+        | Expr::Function(_, arguments) => {
             for argument in arguments {
                 collect_dependencies(argument, output);
             }
@@ -1216,7 +1393,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
             self.offset += 1;
         }
         let second = parse_a1(&self.source[second_start..self.offset], sheet)?;
-        Ok(Expr::Range(expand_range(first, second)?))
+        expand_range(first, second)
     }
 
     fn resolve_sheet(&self, name: &str) -> Result<u32, FormulaError> {
@@ -1317,6 +1494,10 @@ fn parse_function_name(name: &str) -> Result<Function, FormulaError> {
         "EXACT" => Ok(Function::Exact),
         "COUNTIF" => Ok(Function::CountIf),
         "SUMIF" => Ok(Function::SumIf),
+        "INDEX" => Ok(Function::Index),
+        "MATCH" => Ok(Function::Match),
+        "VLOOKUP" => Ok(Function::VLookup),
+        "XLOOKUP" => Ok(Function::XLookup),
         _ => Err(FormulaError::UnsupportedFunction(name.to_ascii_uppercase())),
     }
 }
@@ -1349,7 +1530,7 @@ fn parse_a1(reference: &str, sheet: u32) -> Result<CellId, FormulaError> {
     Ok(CellId::new(sheet, row - 1, column - 1))
 }
 
-fn expand_range(first: CellId, second: CellId) -> Result<Vec<Expr>, FormulaError> {
+fn expand_range(first: CellId, second: CellId) -> Result<Expr, FormulaError> {
     let first_row = first.row.min(second.row);
     let last_row = first.row.max(second.row);
     let first_column = first.column.min(second.column);
@@ -1370,7 +1551,11 @@ fn expand_range(first: CellId, second: CellId) -> Result<Vec<Expr>, FormulaError
             references.push(Expr::Reference(CellId::new(first.sheet, row, column)));
         }
     }
-    Ok(references)
+    Ok(Expr::Range {
+        items: references,
+        rows,
+        columns,
+    })
 }
 
 #[cfg(test)]
@@ -1618,6 +1803,39 @@ mod tests {
             .unwrap();
         assert_eq!(workbook.value(cell(0, 2)), Value::Number(3.0));
         assert_eq!(workbook.value(cell(1, 2)), Value::Number(120.0));
+    }
+
+    #[test]
+    fn evaluates_exact_lookup_functions_over_rectangular_ranges() {
+        let mut workbook = Workbook::default();
+        for (row, key, value) in [(0, "Alpha", 10.0), (1, "Beta", 20.0), (2, "Gamma", 30.0)] {
+            workbook.set_text(cell(row, 0), key);
+            workbook.set_number(cell(row, 1), value);
+        }
+
+        for (column, formula, expected) in [
+            (2, "=INDEX(B1:B3,2)", Value::Number(20.0)),
+            (3, "=INDEX(A1:B3,3,2)", Value::Number(30.0)),
+            (4, "=MATCH(\"beta\",A1:A3,0)", Value::Number(2.0)),
+            (5, "=VLOOKUP(\"Gamma\",A1:B3,2,FALSE)", Value::Number(30.0)),
+            (6, "=XLOOKUP(\"Beta\",A1:A3,B1:B3)", Value::Number(20.0)),
+            (
+                7,
+                "=XLOOKUP(\"Missing\",A1:A3,B1:B3,\"not found\")",
+                Value::Text("not found".into()),
+            ),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
+        }
+
+        workbook
+            .set_formula(cell(1, 2), "=VLOOKUP(\"Beta\",A1:B3,2,TRUE)")
+            .unwrap();
+        assert_eq!(
+            workbook.value(cell(1, 2)),
+            Value::Error(CalcError::InvalidArguments)
+        );
     }
 
     #[test]
