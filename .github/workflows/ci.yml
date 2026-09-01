@@ -97,7 +97,7 @@ jobs:
           performance = json.loads((root / "performance.json").read_text())
           assert performance["exit_code"] == 0
           assert performance["timed_out"] is False
-          assert performance["peak"]["rss_bytes"] > 0
+          assert performance["memory"]["peak_rss_bytes"] > 0
           PY
       - uses: actions/upload-artifact@v4
         with:
