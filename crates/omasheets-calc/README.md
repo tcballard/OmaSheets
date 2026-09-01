@@ -5,9 +5,18 @@ Excel-style expression parser, explicit calculation errors, dependency edges,
 cycle rejection and dirty transitive-closure recalculation. It is deliberately
 not connected to the v0.0.2 LibreOffice compatibility product.
 
-The first syntax slice is numeric literals, A1 references (including absolute
-markers), arithmetic operators, parentheses and `SUM` over arguments or a
-bounded rectangular range. Unsupported functions fail explicitly.
+The current syntax slice includes numeric, boolean and quoted-text literals;
+A1 references (including absolute markers); arithmetic and comparison
+operators; parentheses; and bounded rectangular ranges. Twenty function names
+are implemented across the initial head:
+
+- aggregate: `SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `PRODUCT`;
+- math: `ABS`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `INT`, `MOD`, `POWER`, `SQRT`;
+- logical: `IF`, `AND`, `OR`, `NOT`, `IFERROR`.
+
+`IF` and `IFERROR` evaluate only the selected branch. Unsupported functions,
+invalid arity, invalid coercions and oversized ranges fail explicitly rather
+than silently producing a plausible number.
 
 Run its focused checks with:
 
