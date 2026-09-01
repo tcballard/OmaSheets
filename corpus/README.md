@@ -77,29 +77,50 @@ clean machine before trusting a score.
 
 `scripts/fetch_corpus.py REGISTER.json DESTINATION` downloads one archive by
 `https` or `file` URL, refuses to continue unless its SHA-256 equals the
-register's `archive_sha256`, and extracts only `.xlsx` members: no symbolic
-links, no absolute or parent paths, at most 1,000 members of 512 MiB each,
-with the extension normalised to lowercase so `index` accepts every file.
-Existing archives and extraction directories are never replaced.
+register's `archive_sha256` (and its MD5 equals `upstream_md5` when the host
+publishes one), and extracts only `.xlsx` members: no symbolic links, no
+absolute or parent paths, at most 50,000 workbooks of 512 MiB each and 16 GiB
+in total, with the extension normalised to lowercase so every file is
+indexable. Zip archives use the standard library; `.7z` archives are unpacked
+through the `7z` command into a staging directory that is filtered with the
+same rules. Existing archives and extraction directories are never replaced.
 
 A source register records what the frozen manifest was built from:
 
 ```json
 {
   "schema": 1,
-  "name": "enron-sample",
-  "url": "https://example.invalid/archive.zip",
+  "name": "enron-figshare",
+  "url": "https://example.invalid/archive.7z",
+  "archive_format": "7z",
   "archive_sha256": "<64 lowercase hex characters>",
+  "upstream_md5": "<32 lowercase hex characters, optional>",
   "license": "exact license or access terms, with a link",
   "retrieved": "2026-09-01",
   "sampling": "how workbooks were selected and how many",
-  "sample_count": 0
+  "sample_count": 1000,
+  "manifest": "enron-figshare.jsonl"
 }
 ```
 
-Registers for real corpora live in `corpus/sources/` once the project owner
-has confirmed each source's license or access terms. None is registered yet;
-see `corpus/sources/README.md`.
+## Freeze a sample
+
+A manifest holds at most 1,000 workbooks, so large corpora are sampled:
+
+```bash
+python3 scripts/sample_corpus.py /path/to/corpus/enron-figshare \
+  corpus/sources/enron-figshare.jsonl --count 1000 --prefix enron
+```
+
+`sample_corpus.py` hashes every extracted `.xlsx`, collapses byte-identical
+files to the first relative path, sorts the unique digests and keeps the first
+`--count`. SHA-256 order is effectively uniform over unique workbooks, so the
+sample is reproducible from the same archive without a seed. The manifest
+records only the bounded ID, the archive-relative path and the digest.
+
+Registers and frozen manifests for real corpora live in `corpus/sources/`,
+each added only after the project owner confirmed the source's license or
+access terms. See `corpus/sources/README.md` for what is registered.
 
 ## Corpus policy
 

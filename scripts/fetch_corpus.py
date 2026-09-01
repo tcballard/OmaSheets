@@ -3,8 +3,9 @@
 
 The source register is a small JSON document kept beside the frozen manifest
 (see ``corpus/README.md``). It pins the archive URL and SHA-256, so a clean
-machine either reproduces the same bytes or stops. No workbook bytes, cell
-contents or local paths are ever written back into the repository.
+machine either reproduces the same bytes or stops. Zip archives are read with
+the standard library; ``.7z`` archives need the ``7z`` command. No workbook
+bytes, cell contents or local paths are ever written back into the repository.
 """
 
 from __future__ import annotations
@@ -13,14 +14,17 @@ import argparse
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
+import shutil
 import stat
+import subprocess
 import sys
 import urllib.request
 import zipfile
 
 MAX_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024
-MAX_MEMBERS = 1_000
+MAX_MEMBERS = 50_000
 MAX_MEMBER_BYTES = 512 * 1024 * 1024
+MAX_TOTAL_BYTES = 16 * 1024 * 1024 * 1024
 MAX_REGISTER_BYTES = 64 * 1024
 REQUIRED_FIELDS = (
     "schema",
@@ -32,6 +36,8 @@ REQUIRED_FIELDS = (
     "sampling",
 )
 ALLOWED_SCHEMES = ("https", "file")
+ARCHIVE_FORMATS = ("zip", "7z")
+SEVEN_ZIP_COMMANDS = ("7z", "7za", "7zr")
 
 
 class FetchError(Exception):
@@ -70,11 +76,30 @@ def load_register(path: Path) -> dict:
     url = register["url"]
     if not isinstance(url, str) or url.split(":", 1)[0] not in ALLOWED_SCHEMES:
         raise FetchError("source url must use https or file")
+    archive_format = register.get("archive_format", "zip")
+    if archive_format not in ARCHIVE_FORMATS:
+        raise FetchError("archive_format must be zip or 7z")
+    register["archive_format"] = archive_format
+    upstream_md5 = register.get("upstream_md5")
+    if upstream_md5 is not None and (
+        not isinstance(upstream_md5, str)
+        or len(upstream_md5) != 32
+        or any(character not in "0123456789abcdef" for character in upstream_md5)
+    ):
+        raise FetchError("upstream_md5 must be 32 lowercase hex characters when present")
     return register
 
 
 def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
+    return _digest(path, hashlib.sha256())
+
+
+def md5_file(path: Path) -> str:
+    """Only for cross-checking a digest the upstream host publishes."""
+    return _digest(path, hashlib.md5())  # noqa: S324 - provenance cross-check only
+
+
+def _digest(path: Path, digest) -> str:
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
@@ -109,11 +134,14 @@ def safe_member_path(name: str) -> PurePosixPath | None:
     return path.with_suffix(".xlsx")
 
 
-def extract_workbooks(archive: Path, destination: Path) -> dict:
+def extract_workbooks(archive: Path, destination: Path, archive_format: str = "zip") -> dict:
     if destination.exists():
         raise FetchError(f"refusing to extract into existing directory {destination.name}")
+    if archive_format == "7z":
+        return extract_7z_workbooks(archive, destination)
     extracted = 0
     skipped = 0
+    total = 0
     with zipfile.ZipFile(archive) as bundle:
         members = bundle.infolist()
         if len(members) > MAX_MEMBERS:
@@ -126,7 +154,10 @@ def extract_workbooks(archive: Path, destination: Path) -> dict:
                 skipped += 1
                 continue
             if member.file_size > MAX_MEMBER_BYTES:
-                raise FetchError(f"archive member exceeds the 512 MiB limit")
+                raise FetchError("archive member exceeds the 512 MiB limit")
+            total += member.file_size
+            if total > MAX_TOTAL_BYTES:
+                raise FetchError("archive workbooks exceed the 16 GiB limit")
             output = destination / Path(*target.parts)
             output.parent.mkdir(parents=True, exist_ok=True)
             with bundle.open(member) as source, output.open("xb") as sink:
@@ -141,9 +172,74 @@ def extract_workbooks(archive: Path, destination: Path) -> dict:
     return {"workbooks_extracted": extracted, "members_skipped": skipped}
 
 
+def seven_zip_command() -> str:
+    for candidate in SEVEN_ZIP_COMMANDS:
+        found = shutil.which(candidate)
+        if found:
+            return found
+    raise FetchError("extracting a .7z archive needs the 7z, 7za or 7zr command")
+
+
+def extract_7z_workbooks(archive: Path, destination: Path) -> dict:
+    """Unpack through 7-Zip into a staging directory, then keep only safe workbooks.
+
+    7-Zip decides the on-disk layout, so the staging tree is walked afterwards
+    and only regular, non-symlink ``.xlsx`` files below it are moved into the
+    destination with the extension normalised to lowercase.
+    """
+    command = seven_zip_command()
+    staging = destination.with_name(destination.name + ".staging")
+    if staging.exists():
+        raise FetchError(f"refusing to reuse existing staging directory {staging.name}")
+    staging.mkdir(parents=True)
+    try:
+        completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
+            [command, "x", "-y", "-bd", "-bso0", "-bsp0", f"-o{staging}", "--", str(archive)],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if completed.returncode != 0:
+            detail = completed.stderr.strip().splitlines()[-1:] or ["no detail"]
+            raise FetchError(f"7-Zip extraction failed: {detail[0][:200]}")
+        extracted = 0
+        skipped = 0
+        total = 0
+        destination.mkdir(parents=True)
+        for path in sorted(staging.rglob("*")):
+            if path.is_symlink() or not path.is_file():
+                if path.is_symlink():
+                    skipped += 1
+                continue
+            relative = path.relative_to(staging)
+            if len(relative.parts) > 64 or relative.suffix.lower() != ".xlsx":
+                skipped += 1
+                continue
+            if extracted >= MAX_MEMBERS:
+                raise FetchError(f"archive holds more than {MAX_MEMBERS} workbooks")
+            size = path.stat().st_size
+            if size > MAX_MEMBER_BYTES:
+                raise FetchError("archive member exceeds the 512 MiB limit")
+            total += size
+            if total > MAX_TOTAL_BYTES:
+                raise FetchError("archive workbooks exceed the 16 GiB limit")
+            output = destination / relative.with_suffix(".xlsx")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            if output.exists():
+                raise FetchError(f"archive names {relative.as_posix()} twice after normalisation")
+            shutil.move(str(path), str(output))
+            output.chmod(0o600)
+            extracted += 1
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    return {"workbooks_extracted": extracted, "members_skipped": skipped}
+
+
 def fetch(register_path: Path, destination: Path) -> dict:
     register = load_register(register_path)
-    archive = destination / "archives" / f"{register['name']}.zip"
+    archive = destination / "archives" / f"{register['name']}.{register['archive_format']}"
     download(register["url"], archive)
     observed = sha256_file(archive)
     if observed != register["archive_sha256"]:
@@ -152,10 +248,15 @@ def fetch(register_path: Path, destination: Path) -> dict:
             "archive digest drift: expected "
             f"{register['archive_sha256']} but downloaded {observed}"
         )
-    result = extract_workbooks(archive, destination / register["name"])
+    upstream_md5 = register.get("upstream_md5")
+    if upstream_md5 is not None and md5_file(archive) != upstream_md5:
+        archive.unlink()
+        raise FetchError("archive does not match the upstream-published MD5")
+    result = extract_workbooks(archive, destination / register["name"], register["archive_format"])
     return {
         "schema": 1,
         "name": register["name"],
+        "archive_format": register["archive_format"],
         "archive_sha256": observed,
         "archive_bytes": archive.stat().st_size,
         **result,

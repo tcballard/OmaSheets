@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "name": "enron-figshare",
+  "url": "https://ndownloader.figshare.com/files/3242531",
+  "archive_format": "7z",
+  "archive_sha256": "d73bd1ea5be929236541331a58ef8e255857fb8f7b2397ad629a30425bd9e149",
+  "upstream_md5": "188ec98d04c83a4725d9205cc75ce5a2",
+  "license": "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), as declared on figshare article 1221767, DOI 10.6084/m9.figshare.1221767.v2",
+  "retrieved": "2026-09-01",
+  "source": "Felienne Hermans, 'Enron Spreadsheets and Emails', figshare, spreadsheets.7z (992,635,888 bytes; 15,871 .xlsx and 58 .xls members); companion to Hermans and Murphy-Hill, 'Enron's Spreadsheets and Related Emails: A Dataset and Analysis', MSR 2015",
+  "sampling": "scripts/sample_corpus.py: hash every extracted .xlsx, collapse byte-identical files to the first path, sort unique SHA-256 digests, take the first 1000",
+  "sample_count": 1000,
+  "manifest": "enron-figshare.jsonl",
+  "notes": "Workbooks are fetched locally and never vendored. Member names carry the mailbox owner's name from the public FERC Enron release; extracted files stay on the local machine."
+}

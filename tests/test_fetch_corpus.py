@@ -1,8 +1,9 @@
 from contextlib import redirect_stderr
 from io import StringIO
 import json
-import os
 from pathlib import Path
+import shutil
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -110,6 +111,66 @@ class FetchCorpusTests(unittest.TestCase):
             with self.assertRaises(fetch_corpus.FetchError) as raised:
                 fetch_corpus.load_register(incomplete)
             self.assertIn("missing", str(raised.exception))
+
+    def test_upstream_md5_is_cross_checked_when_present(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "source.zip"
+            digest = _archive(archive)
+            register = _register(
+                root / "register.json",
+                url=archive.as_uri(),
+                archive_sha256=digest,
+                upstream_md5="0" * 32,
+            )
+            with self.assertRaises(fetch_corpus.FetchError) as raised:
+                fetch_corpus.fetch(register, root / "corpus")
+            self.assertIn("upstream-published MD5", str(raised.exception))
+            self.assertFalse((root / "corpus" / "archives" / "sample.zip").exists())
+            bad = _register(root / "bad.json", upstream_md5="xyz")
+            with self.assertRaises(fetch_corpus.FetchError):
+                fetch_corpus.load_register(bad)
+            bad_format = _register(root / "format.json", archive_format="rar")
+            with self.assertRaises(fetch_corpus.FetchError):
+                fetch_corpus.load_register(bad_format)
+
+    @unittest.skipUnless(shutil.which("7z") or shutil.which("7za"), "7-Zip is not installed")
+    def test_seven_zip_archives_are_staged_and_filtered(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tree = root / "tree"
+            (tree / "nested").mkdir(parents=True)
+            (tree / "nested" / "book.xlsx").write_bytes(b"workbook one")
+            (tree / "UPPER.XLSX").write_bytes(b"workbook two")
+            (tree / "notes.txt").write_bytes(b"not a workbook")
+            (tree / "link.xlsx").symlink_to("nested/book.xlsx")
+            archive = root / "source.7z"
+            command = shutil.which("7z") or shutil.which("7za")
+            subprocess.run(
+                [command, "a", "-snl", "-bso0", "-bsp0", str(archive), "."],
+                cwd=tree,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            register = _register(
+                root / "register.json",
+                url=archive.as_uri(),
+                archive_sha256=fetch_corpus.sha256_file(archive),
+                archive_format="7z",
+            )
+            report = fetch_corpus.fetch(register, root / "corpus")
+            self.assertEqual(report["archive_format"], "7z")
+            self.assertEqual(report["workbooks_extracted"], 2)
+            extracted = sorted(
+                path.relative_to(root / "corpus" / "sample").as_posix()
+                for path in (root / "corpus" / "sample").rglob("*")
+                if path.is_file()
+            )
+            self.assertEqual(extracted, ["UPPER.xlsx", "nested/book.xlsx"])
+            self.assertFalse((root / "corpus" / "sample.staging").exists())
+            self.assertFalse((root / "corpus" / "sample" / "link.xlsx").exists())
+            self.assertTrue((root / "corpus" / "archives" / "sample.7z").is_file())
 
     def test_command_line_reports_bounded_failures(self):
         with tempfile.TemporaryDirectory() as temporary:
