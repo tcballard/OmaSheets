@@ -1,14 +1,26 @@
 # OmaSheets
 
-Native agentic spreadsheets for Omarchy.
+**The spreadsheet agents can work on without silent writes.**
 
-OmaSheets v0.0.2 combines LibreOffice Calc's native Linux spreadsheet engine
-with a constrained agent interface. People can open legacy `.xls` files in a
-desktop application; agents can inspect, explain, stage, verify, and propose
-workbook changes without receiving silent write authority. The current release is
-built around a complete agent loop: start from the live selection, inspect the
-workbook, cite sealed observations, explain and group a verified proposal,
-revise it from human feedback, then hand it back for local approval.
+OmaSheets is an early-access spreadsheet app for Omarchy. Open an existing
+workbook, choose **Ask Agent**, and let your configured default agent inspect,
+explain, audit, and propose bounded changes to formulas, formatting, charts,
+pivots, or whole-workbook summaries. OmaSheets seals the evidence, recalculates
+and reopens staged output, and publishes nothing until you explicitly approve a
+local copy.
+
+```bash
+omarchy plugin add https://github.com/tcballard/OmaSheets.git --enable
+```
+
+Choose **Install OmaSheets** in the bar widget. The v0.0.2 release bundle
+installs the native window and local agent service without requiring a compiler
+or LibreOffice SDK. See [installation and reversible removal](INSTALL.md).
+
+**Current boundary:** LibreOffice Calc remains the compatibility and calculation
+engine in v0.0.2. Agents can read and stage changes; only an explicit local
+OmaSheets approval can publish them. The native event store, formula engine, and
+virtualised grid remain measured [roadmap](docs/ROADMAP.md) work.
 
 ## v0.0.2 scope
 
