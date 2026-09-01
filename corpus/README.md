@@ -55,4 +55,3 @@ success must not be presented as the roadmap's recalculation-parity gate.
   place and call it the same benchmark.
 - Use `scripts/performance.py run` around the release binary when collecting
   process-tree memory and wall-time evidence.
-
