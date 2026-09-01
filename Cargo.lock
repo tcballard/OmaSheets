@@ -933,6 +933,16 @@ name = "omasheets-calc"
 version = "0.0.0"
 
 [[package]]
+name = "omasheets-core"
+version = "0.0.0"
+dependencies = [
+ "omasheets-calc",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "omasheets-corpus"
 version = "0.0.0"
 dependencies = [

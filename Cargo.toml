@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/omasheets-calc",
+  "crates/omasheets-core",
   "crates/omasheets-corpus",
   "crates/omasheets-xlsx",
 ]
