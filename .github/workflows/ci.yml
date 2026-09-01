@@ -158,6 +158,33 @@ jobs:
           assert owned["unsupported_formulas"] == 0
           assert (root / "owned-score-1904.stdout").read_text() == ""
           PY
+      - name: Exercise operator precedence and typed cached results
+        run: |
+          evidence="$RUNNER_TEMP/omasheets-m0/operators"
+          mkdir -p "$evidence"
+          python scripts/generate_m0_xlsx.py \
+            "$evidence/operator-smoke.xlsx" --rows 1 --operator-rows 40 \
+            > "$evidence/fixture.json"
+          target/release/omasheets-xlsx-score \
+            "$evidence/operator-smoke.xlsx" \
+            > "$evidence/owned-score.json"
+          EVIDENCE="$evidence" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["EVIDENCE"])
+          fixture = json.loads((root / "fixture.json").read_text())
+          assert fixture["formula_cells"] == 1 + 40 * 9
+          owned = json.loads((root / "owned-score.json").read_text())
+          assert owned["sheets"] == 2
+          assert owned["formula_cells_observed"] == fixture["formula_cells"]
+          assert owned["formula_cells_loaded"] == fixture["formula_cells"]
+          assert owned["formula_cells_compared"] == fixture["formula_cells"]
+          assert owned["stored_values_matched"] == fixture["formula_cells"]
+          assert owned["stored_values_mismatched"] == 0
+          assert owned["unsupported_formulas"] == 0
+          PY
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
@@ -172,6 +199,8 @@ jobs:
             ${{ runner.temp }}/omasheets-m0/dates/fixture.json
             ${{ runner.temp }}/omasheets-m0/dates/owned-score.json
             ${{ runner.temp }}/omasheets-m0/dates/owned-score-1904.stderr
+            ${{ runner.temp }}/omasheets-m0/operators/fixture.json
+            ${{ runner.temp }}/omasheets-m0/operators/owned-score.json
           if-no-files-found: error
 
   omarchy-plugin:

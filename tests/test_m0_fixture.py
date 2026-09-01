@@ -97,11 +97,53 @@ class M0FixtureTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 generate_m0_xlsx.payloads(1, 1, "1901")
 
+    def test_operator_rows_add_text_and_boolean_cached_results(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workbook = Path(temporary) / "operators.xlsx"
+            report = generate_m0_xlsx.generate(
+                workbook, 1, date_rows=1, operator_rows=2
+            )
+            self.assertEqual(report["operator_rows"], 2)
+            self.assertEqual(report["operator_formula_cells"], 18)
+            self.assertEqual(report["formula_cells"], 1 + 7 + 18)
+            self.assertEqual(report["header_cells"], 21)
+            self.assertEqual(report["logical_cells"], 6 + 16 + 30)
+            with zipfile.ZipFile(workbook) as archive:
+                names = archive.namelist()
+                self.assertIn("xl/worksheets/sheet3.xml", names)
+                book = archive.read("xl/workbook.xml").decode()
+                rels = archive.read("xl/_rels/workbook.xml.rels").decode()
+                sheet = archive.read("xl/worksheets/sheet3.xml").decode()
+            self.assertIn('<sheet name="Operators" sheetId="3" r:id="rId3"/>', book)
+            self.assertIn('Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"', rels)
+            self.assertIn("<f>A3^2</f><v>4</v>", sheet)
+            self.assertIn('<c r="C3" t="str"><f>A3&amp;"|"&amp;B3</f><v>2|4</v></c>', sheet)
+            self.assertIn("<f>A3%</f><v>0.02</v>", sheet)
+            self.assertIn("<f>-A3^2</f><v>4</v>", sheet)
+            self.assertIn('<c r="F3" t="b"><f>ISBLANK(C3)</f><v>0</v></c>', sheet)
+            self.assertIn("<f>MEDIAN(A3,B3,D3)</f><v>2</v>", sheet)
+            self.assertIn("<f>SUMPRODUCT(A3:B3,A3:B3)</f><v>20</v>", sheet)
+            self.assertIn("<f>N(C3)</f><v>0</v>", sheet)
+            self.assertIn('<c r="J3" t="str"><f>T(C3)</f><v>2|4</v></c>', sheet)
+
+    def test_operator_rows_without_dates_skip_the_stylesheet(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workbook = Path(temporary) / "operators-only.xlsx"
+            generate_m0_xlsx.generate(workbook, 1, operator_rows=1)
+            with zipfile.ZipFile(workbook) as archive:
+                names = archive.namelist()
+                book = archive.read("xl/workbook.xml").decode()
+            self.assertIn("xl/worksheets/sheet2.xml", names)
+            self.assertNotIn("xl/styles.xml", names)
+            self.assertIn('<sheet name="Operators" sheetId="2" r:id="rId2"/>', book)
+
     def test_default_report_declares_no_date_rows(self):
         with tempfile.TemporaryDirectory() as temporary:
             report = generate_m0_xlsx.generate(Path(temporary) / "plain.xlsx", 2)
             self.assertEqual(report["date_rows"], 0)
             self.assertEqual(report["date_formula_cells"], 0)
+            self.assertEqual(report["operator_rows"], 0)
+            self.assertEqual(report["operator_formula_cells"], 0)
             self.assertEqual(report["formula_cells"], 2)
             self.assertEqual(report["date_system"], "1900")
 
@@ -125,6 +167,8 @@ class M0FixtureTests(unittest.TestCase):
                 generate_m0_xlsx.main(["fixture.xlsx", "--date-rows", "10001"])
             with self.assertRaises(SystemExit):
                 generate_m0_xlsx.main(["fixture.xlsx", "--date-system", "1901"])
+            with self.assertRaises(SystemExit):
+                generate_m0_xlsx.main(["fixture.xlsx", "--operator-rows", "10001"])
 
 
 if __name__ == "__main__":
