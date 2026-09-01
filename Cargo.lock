@@ -933,6 +933,7 @@ name = "omasheets-corpus"
 version = "0.0.0"
 dependencies = [
  "formualizer-workbook",
+ "libc",
  "serde",
  "serde_json",
  "sha2",

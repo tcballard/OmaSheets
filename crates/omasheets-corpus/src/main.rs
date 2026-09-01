@@ -22,6 +22,8 @@ const MAX_PROBE_STDOUT: usize = 1024 * 1024;
 const MAX_PROBE_STDERR: usize = 64 * 1024;
 const DEFAULT_TIMEOUT_SECONDS: u64 = 30;
 const MAX_TIMEOUT_SECONDS: u64 = 300;
+#[cfg(unix)]
+const MAX_PROBE_ADDRESS_SPACE_BYTES: libc::rlim_t = 2 * 1024 * 1024 * 1024;
 
 fn usage() -> &'static str {
     "usage:\n  omasheets-corpus index ROOT OUTPUT.jsonl\n  omasheets-corpus score MANIFEST.jsonl ROOT OUTPUT.json [--timeout-seconds N] [--require-all]"
@@ -169,6 +171,23 @@ fn open_new(path: &Path) -> Result<File, String> {
         .map_err(|error| format!("refusing to replace output: {error}"))
 }
 
+fn manifest_identifier(
+    digest: &str,
+    identifiers: &mut HashSet<String>,
+    digests: &mut HashSet<String>,
+) -> Result<String, String> {
+    if !digests.insert(digest.to_string()) {
+        return Err("duplicate workbook bytes require an explicit curated manifest".into());
+    }
+    for prefix in (16..=60).step_by(4) {
+        let candidate = format!("wb-{}", &digest[..prefix]);
+        if identifiers.insert(candidate.clone()) {
+            return Ok(candidate);
+        }
+    }
+    Err("SHA-256 prefix collision requires an explicit curated manifest".into())
+}
+
 fn walk_xlsx(root: &Path, current: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {
     let mut entries = fs::read_dir(current)
         .map_err(|error| error.to_string())?
@@ -210,35 +229,35 @@ fn index_command(root: &Path, output: &Path) -> Result<(), String> {
         return Err("corpus root contains no .xlsx files".into());
     }
 
-    let mut destination = open_new(output)?;
     let mut identifiers = HashSet::new();
+    let mut digests = HashSet::new();
+    let mut manifest = Vec::with_capacity(paths.len());
     for relative in paths {
         let digest = sha256(&root.join(&relative))?;
-        let mut prefix = 16;
-        let identifier = loop {
-            let candidate = format!("wb-{}", &digest[..prefix]);
-            if identifiers.insert(candidate.clone()) {
-                break candidate;
-            }
-            prefix += 4;
-            if prefix > digest.len() {
-                return Err("duplicate workbook bytes require an explicit curated manifest".into());
-            }
-        };
+        let identifier = manifest_identifier(&digest, &mut identifiers, &mut digests)?;
         let path = relative
             .to_str()
             .ok_or_else(|| "corpus paths must be UTF-8".to_string())?
             .replace('\\', "/");
-        let entry = ManifestEntry {
+        manifest.push(ManifestEntry {
             id: identifier,
             path,
             sha256: digest,
-        };
-        serde_json::to_writer(&mut destination, &entry).map_err(|error| error.to_string())?;
-        destination
-            .write_all(b"\n")
-            .map_err(|error| error.to_string())?;
+        });
     }
+
+    let mut payload = Vec::new();
+    for entry in manifest {
+        serde_json::to_writer(&mut payload, &entry).map_err(|error| error.to_string())?;
+        payload.push(b'\n');
+    }
+    if payload.len() as u64 > MAX_MANIFEST_BYTES {
+        return Err("generated manifest exceeds the 1 MiB limit".into());
+    }
+    let mut destination = open_new(output)?;
+    destination
+        .write_all(&payload)
+        .map_err(|error| error.to_string())?;
     destination.sync_all().map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -325,8 +344,30 @@ fn sanitize_error(error: impl ToString, path: &Path) -> String {
     redacted.chars().take(512).collect()
 }
 
+#[cfg(unix)]
+fn apply_probe_resource_limits() -> Result<(), String> {
+    let limit = libc::rlimit {
+        rlim_cur: MAX_PROBE_ADDRESS_SPACE_BYTES,
+        rlim_max: MAX_PROBE_ADDRESS_SPACE_BYTES,
+    };
+    let result = unsafe { libc::setrlimit(libc::RLIMIT_AS, &limit) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "failed to apply the probe address-space limit: {}",
+            io::Error::last_os_error()
+        ))
+    }
+}
+
+#[cfg(not(unix))]
+fn apply_probe_resource_limits() -> Result<(), String> {
+    Ok(())
+}
+
 fn probe_command(path: &Path) -> bool {
-    let (payload, succeeded) = match probe(path) {
+    let (payload, succeeded) = match apply_probe_resource_limits().and_then(|()| probe(path)) {
         Ok(report) => (serde_json::to_string(&report), true),
         Err(error) => (
             serde_json::to_string(&ProbeFailure {
@@ -643,6 +684,20 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_directory(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = env::temp_dir().join(format!(
+            "omasheets-corpus-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        directory
+    }
 
     #[test]
     fn manifest_ids_and_hashes_are_strict() {
@@ -650,6 +705,23 @@ mod tests {
         assert!(!valid_id("contains a space"));
         assert!(valid_sha256(&"a".repeat(64)));
         assert!(!valid_sha256(&"g".repeat(64)));
+    }
+
+    #[test]
+    fn generated_ids_remain_valid_when_digest_prefixes_collide() {
+        let mut identifiers = HashSet::new();
+        let mut digests = HashSet::new();
+        let first_digest = "a".repeat(64);
+        let second_digest = format!("{}{}", "a".repeat(16), "b".repeat(48));
+
+        let first = manifest_identifier(&first_digest, &mut identifiers, &mut digests).unwrap();
+        let second = manifest_identifier(&second_digest, &mut identifiers, &mut digests).unwrap();
+
+        assert!(valid_id(&first));
+        assert!(valid_id(&second));
+        assert_ne!(first, second);
+        assert_eq!(first.len(), 19);
+        assert_eq!(second.len(), 23);
     }
 
     #[test]
@@ -680,5 +752,36 @@ mod tests {
         assert!(!sanitized.contains("/private/corpus"));
         assert!(sanitized.contains("<input>"));
         assert_eq!(sanitized.chars().count(), 512);
+    }
+
+    #[test]
+    fn index_rejects_duplicate_bytes_before_creating_output() {
+        let root = test_directory("duplicate");
+        fs::write(root.join("a.xlsx"), b"same workbook").unwrap();
+        fs::write(root.join("b.xlsx"), b"same workbook").unwrap();
+        let output = root.join("manifest.jsonl");
+
+        let error = index_command(&root, &output).unwrap_err();
+
+        assert!(error.contains("duplicate workbook bytes"));
+        assert!(!output.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn index_preflights_every_input_before_creating_output() {
+        let root = test_directory("preflight");
+        fs::write(root.join("a.xlsx"), b"small workbook").unwrap();
+        File::create(root.join("b.xlsx"))
+            .unwrap()
+            .set_len(MAX_INPUT_BYTES + 1)
+            .unwrap();
+        let output = root.join("manifest.jsonl");
+
+        let error = index_command(&root, &output).unwrap_err();
+
+        assert!(error.contains("512 MiB"));
+        assert!(!output.exists());
+        fs::remove_dir_all(root).unwrap();
     }
 }
