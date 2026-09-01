@@ -2329,88 +2329,108 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
     }
 }
 
+/// Every function name the parser accepts, with its implementation. This
+/// table is the single registry: `parse_function_name` and
+/// [`supported_function_names`] both read it, and a test keeps
+/// `docs/FUNCTIONS.md` in step with it so documented counts cannot drift.
+const FUNCTION_REGISTRY: &[(&str, Function)] = &[
+    ("SUM", Function::Sum),
+    ("AVERAGE", Function::Average),
+    ("MIN", Function::Min),
+    ("MAX", Function::Max),
+    ("COUNT", Function::Count),
+    ("COUNTA", Function::CountA),
+    ("PRODUCT", Function::Product),
+    ("ABS", Function::Abs),
+    ("ROUND", Function::Round),
+    ("ROUNDUP", Function::RoundUp),
+    ("ROUNDDOWN", Function::RoundDown),
+    ("INT", Function::Int),
+    ("MOD", Function::Mod),
+    ("POWER", Function::Power),
+    ("SQRT", Function::Sqrt),
+    ("IF", Function::If),
+    ("AND", Function::And),
+    ("OR", Function::Or),
+    ("NOT", Function::Not),
+    ("IFERROR", Function::IfError),
+    ("SIGN", Function::Sign),
+    ("CEILING", Function::Ceiling),
+    ("FLOOR", Function::Floor),
+    ("TRUNC", Function::Trunc),
+    ("EXP", Function::Exp),
+    ("LN", Function::Ln),
+    ("LOG", Function::Log),
+    ("LOG10", Function::Log10),
+    ("PI", Function::Pi),
+    ("LEN", Function::Len),
+    ("LEFT", Function::Left),
+    ("RIGHT", Function::Right),
+    ("MID", Function::Mid),
+    ("TRIM", Function::Trim),
+    ("UPPER", Function::Upper),
+    ("LOWER", Function::Lower),
+    ("CONCAT", Function::Concat),
+    ("CONCATENATE", Function::Concat),
+    ("VALUE", Function::Value),
+    ("EXACT", Function::Exact),
+    ("COUNTIF", Function::CountIf),
+    ("SUMIF", Function::SumIf),
+    ("COUNTIFS", Function::CountIfs),
+    ("SUMIFS", Function::SumIfs),
+    ("AVERAGEIF", Function::AverageIf),
+    ("AVERAGEIFS", Function::AverageIfs),
+    ("INDEX", Function::Index),
+    ("MATCH", Function::Match),
+    ("VLOOKUP", Function::VLookup),
+    ("XLOOKUP", Function::XLookup),
+    ("DATE", Function::Date),
+    ("YEAR", Function::Year),
+    ("MONTH", Function::Month),
+    ("DAY", Function::Day),
+    ("EDATE", Function::EDate),
+    ("EOMONTH", Function::EoMonth),
+    ("WEEKDAY", Function::Weekday),
+    ("ISBLANK", Function::IsBlank),
+    ("ISNUMBER", Function::IsNumber),
+    ("ISTEXT", Function::IsText),
+    ("ISLOGICAL", Function::IsLogical),
+    ("ISERROR", Function::IsError),
+    ("N", Function::N),
+    ("T", Function::T),
+    ("SUMPRODUCT", Function::SumProduct),
+    ("MEDIAN", Function::Median),
+    ("CHOOSE", Function::Choose),
+    ("SUBTOTAL", Function::SubTotal),
+    ("STDEV", Function::StDev),
+    ("STDEV.S", Function::StDev),
+    ("STDEVP", Function::StDevP),
+    ("STDEV.P", Function::StDevP),
+    ("VAR", Function::Var),
+    ("VAR.S", Function::Var),
+    ("VARP", Function::VarP),
+    ("VAR.P", Function::VarP),
+    ("NA", Function::Na),
+    ("ISNA", Function::IsNa),
+    ("HLOOKUP", Function::HLookup),
+    ("FIND", Function::Find),
+    ("REPT", Function::Rept),
+    ("ROW", Function::Row),
+    ("COLUMN", Function::Column),
+];
+
+/// The supported function names in registry order.
+pub fn supported_function_names() -> impl Iterator<Item = &'static str> {
+    FUNCTION_REGISTRY.iter().map(|(name, _)| *name)
+}
+
 fn parse_function_name(name: &str) -> Result<Function, FormulaError> {
-    match name.to_ascii_uppercase().as_str() {
-        "SUM" => Ok(Function::Sum),
-        "AVERAGE" => Ok(Function::Average),
-        "MIN" => Ok(Function::Min),
-        "MAX" => Ok(Function::Max),
-        "COUNT" => Ok(Function::Count),
-        "COUNTA" => Ok(Function::CountA),
-        "PRODUCT" => Ok(Function::Product),
-        "ABS" => Ok(Function::Abs),
-        "ROUND" => Ok(Function::Round),
-        "ROUNDUP" => Ok(Function::RoundUp),
-        "ROUNDDOWN" => Ok(Function::RoundDown),
-        "INT" => Ok(Function::Int),
-        "MOD" => Ok(Function::Mod),
-        "POWER" => Ok(Function::Power),
-        "SQRT" => Ok(Function::Sqrt),
-        "IF" => Ok(Function::If),
-        "AND" => Ok(Function::And),
-        "OR" => Ok(Function::Or),
-        "NOT" => Ok(Function::Not),
-        "IFERROR" => Ok(Function::IfError),
-        "SIGN" => Ok(Function::Sign),
-        "CEILING" => Ok(Function::Ceiling),
-        "FLOOR" => Ok(Function::Floor),
-        "TRUNC" => Ok(Function::Trunc),
-        "EXP" => Ok(Function::Exp),
-        "LN" => Ok(Function::Ln),
-        "LOG" => Ok(Function::Log),
-        "LOG10" => Ok(Function::Log10),
-        "PI" => Ok(Function::Pi),
-        "LEN" => Ok(Function::Len),
-        "LEFT" => Ok(Function::Left),
-        "RIGHT" => Ok(Function::Right),
-        "MID" => Ok(Function::Mid),
-        "TRIM" => Ok(Function::Trim),
-        "UPPER" => Ok(Function::Upper),
-        "LOWER" => Ok(Function::Lower),
-        "CONCAT" | "CONCATENATE" => Ok(Function::Concat),
-        "VALUE" => Ok(Function::Value),
-        "EXACT" => Ok(Function::Exact),
-        "COUNTIF" => Ok(Function::CountIf),
-        "SUMIF" => Ok(Function::SumIf),
-        "COUNTIFS" => Ok(Function::CountIfs),
-        "SUMIFS" => Ok(Function::SumIfs),
-        "AVERAGEIF" => Ok(Function::AverageIf),
-        "AVERAGEIFS" => Ok(Function::AverageIfs),
-        "INDEX" => Ok(Function::Index),
-        "MATCH" => Ok(Function::Match),
-        "VLOOKUP" => Ok(Function::VLookup),
-        "XLOOKUP" => Ok(Function::XLookup),
-        "DATE" => Ok(Function::Date),
-        "YEAR" => Ok(Function::Year),
-        "MONTH" => Ok(Function::Month),
-        "DAY" => Ok(Function::Day),
-        "EDATE" => Ok(Function::EDate),
-        "EOMONTH" => Ok(Function::EoMonth),
-        "WEEKDAY" => Ok(Function::Weekday),
-        "ISBLANK" => Ok(Function::IsBlank),
-        "ISNUMBER" => Ok(Function::IsNumber),
-        "ISTEXT" => Ok(Function::IsText),
-        "ISLOGICAL" => Ok(Function::IsLogical),
-        "ISERROR" => Ok(Function::IsError),
-        "N" => Ok(Function::N),
-        "T" => Ok(Function::T),
-        "SUMPRODUCT" => Ok(Function::SumProduct),
-        "MEDIAN" => Ok(Function::Median),
-        "CHOOSE" => Ok(Function::Choose),
-        "SUBTOTAL" => Ok(Function::SubTotal),
-        "STDEV" | "STDEV.S" => Ok(Function::StDev),
-        "STDEVP" | "STDEV.P" => Ok(Function::StDevP),
-        "VAR" | "VAR.S" => Ok(Function::Var),
-        "VARP" | "VAR.P" => Ok(Function::VarP),
-        "NA" => Ok(Function::Na),
-        "ISNA" => Ok(Function::IsNa),
-        "HLOOKUP" => Ok(Function::HLookup),
-        "FIND" => Ok(Function::Find),
-        "REPT" => Ok(Function::Rept),
-        "ROW" => Ok(Function::Row),
-        "COLUMN" => Ok(Function::Column),
-        _ => Err(FormulaError::UnsupportedFunction(name.to_ascii_uppercase())),
-    }
+    let upper = name.to_ascii_uppercase();
+    FUNCTION_REGISTRY
+        .iter()
+        .find(|(candidate, _)| *candidate == upper)
+        .map(|(_, function)| *function)
+        .ok_or(FormulaError::UnsupportedFunction(upper))
 }
 
 fn parse_a1(reference: &str, sheet: u32) -> Result<CellId, FormulaError> {
@@ -3241,6 +3261,31 @@ mod tests {
             workbook.set_formula(cell(0, column), formula).unwrap();
             assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
         }
+    }
+
+    #[test]
+    fn documented_function_list_matches_the_registry() {
+        let documented = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/FUNCTIONS.md"
+        ))
+        .expect("docs/FUNCTIONS.md exists");
+        let mut listed: Vec<&str> = documented
+            .lines()
+            .filter_map(|line| line.strip_prefix("- `"))
+            .filter_map(|line| line.split('`').next())
+            .collect();
+        listed.sort_unstable();
+        let registry: Vec<&str> = supported_function_names().collect();
+        let mut sorted = registry.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), registry.len(), "registry names are unique");
+        assert_eq!(
+            listed, sorted,
+            "docs/FUNCTIONS.md must list exactly the parser registry"
+        );
+        assert!(documented.contains(&format!("{} function names", registry.len())));
     }
 
     #[test]
