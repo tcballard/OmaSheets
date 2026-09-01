@@ -21,6 +21,27 @@ the source's license or access terms.
   `scripts/sample_corpus.py`. Member names carry the mailbox owner's name, as
   in the upstream dataset.
 
+## Results
+
+`enron-figshare.score-summary.json` records the aggregate two-lane score of
+the frozen sample (engine commit, wall time, process-tree peak memory, both
+lane summaries, the owned lane's unsupported-function distribution and the
+failure kinds). Scored on 2026-09-01 on a 4-vCPU Linux container in 243 s:
+
+| Lane | Opened | Formula cells | Loaded | Compared | Matched |
+|---|---|---|---|---|---|
+| Formualizer candidate | 834 / 1000 | 419,854 | 419,854 (100%) | not implemented | not implemented |
+| Owned M0 engine | 971 / 1000 | 730,879 | 600,171 (82.1%) | 600,171 | 542,159 (90.3%) |
+
+The owned lane's 130,708 uncompiled cells split into syntax 52,523,
+unsupported function 44,259, invalid reference 24,123, unknown sheet 9,747
+and cycle 56. The unsupported functions by formula cells are led by CHOOSE
+(28,995 cells, 6 workbooks) and SUBTOTAL (9,965 cells, 24 workbooks); by
+workbooks they are led by NOW (97), TODAY (28), SUBTOTAL (24) and CELL (15).
+Mismatches are concentrated in 108 workbooks. These are real-corpus numbers
+for one frozen sample, not a product claim; the formula-gap runbook ranks its
+next tranche from this file.
+
 ## Not registered
 
 - EUSES: distributed under request-based access terms without a clear
