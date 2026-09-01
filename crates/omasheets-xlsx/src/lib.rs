@@ -7,7 +7,9 @@
 use calamine::{Data, Range, Reader, Xlsx, open_workbook};
 use omasheets_calc::serial_date::DATE_SYSTEM;
 use omasheets_calc::{CalcError, CellId, FormulaError, Value, Workbook};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::File;
 use std::io::Read;
@@ -36,11 +38,62 @@ pub struct SheetInfo {
     pub name: String,
 }
 
+/// Upper bound on distinct unsupported function names kept in a report, so a
+/// hostile workbook cannot inflate the bounded output.
+pub const MAX_REPORTED_FUNCTIONS: usize = 128;
+const MAX_FUNCTION_NAME_CHARS: usize = 64;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnsupportedFormula {
     pub cell: CellId,
+    /// The structured compile error, kept so reports can group by kind and by
+    /// function name without re-parsing the bounded reason text.
+    pub error: FormulaError,
     pub reason: String,
 }
+
+impl UnsupportedFormula {
+    /// Stable label for the kind of compile failure.
+    pub fn kind(&self) -> &'static str {
+        formula_error_kind(&self.error)
+    }
+}
+
+pub fn formula_error_kind(error: &FormulaError) -> &'static str {
+    match error {
+        FormulaError::Empty => "empty",
+        FormulaError::UnexpectedToken(_) => "syntax",
+        FormulaError::UnsupportedFunction(_) => "unsupported_function",
+        FormulaError::InvalidReference(_) => "invalid_reference",
+        FormulaError::UnknownSheet(_) => "unknown_sheet",
+        FormulaError::RangeTooLarge => "range_too_large",
+        FormulaError::Cycle(_) => "cycle",
+    }
+}
+
+/// Bounded, serialisable summary of one owned-engine import; the JSON printed
+/// by `omasheets-xlsx-score` and embedded per workbook by `omasheets-corpus`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ScoreReport {
+    pub schema: u8,
+    pub engine: String,
+    pub date_system: String,
+    pub source_sha256: String,
+    pub sheets: usize,
+    pub formula_cells_observed: usize,
+    pub formula_cells_loaded: usize,
+    pub formula_cells_compared: usize,
+    pub stored_values_matched: usize,
+    pub stored_values_mismatched: usize,
+    pub unsupported_formulas: usize,
+    /// Distinct unsupported function names and how many formula cells named
+    /// each, capped at [`MAX_REPORTED_FUNCTIONS`] entries.
+    pub unsupported_functions: BTreeMap<String, usize>,
+    /// Compile-failure kinds and how many formula cells hit each.
+    pub unsupported_reasons: BTreeMap<String, usize>,
+}
+
+pub const ENGINE_NAME: &str = "omasheets-owned-m0";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParitySummary {
@@ -79,6 +132,51 @@ impl ImportedWorkbook {
             stored_values_matched,
             stored_values_mismatched: formula_cells_compared - stored_values_matched,
             unsupported_formulas: self.unsupported.len(),
+        }
+    }
+
+    /// Distinct unsupported function names with formula-cell counts. Names are
+    /// truncated and the map is capped so the report stays bounded.
+    pub fn unsupported_functions(&self) -> BTreeMap<String, usize> {
+        let mut functions = BTreeMap::new();
+        for unsupported in &self.unsupported {
+            let FormulaError::UnsupportedFunction(name) = &unsupported.error else {
+                continue;
+            };
+            let name: String = name.chars().take(MAX_FUNCTION_NAME_CHARS).collect();
+            if functions.len() >= MAX_REPORTED_FUNCTIONS && !functions.contains_key(&name) {
+                continue;
+            }
+            *functions.entry(name).or_insert(0) += 1;
+        }
+        functions
+    }
+
+    /// Compile-failure kinds with formula-cell counts.
+    pub fn unsupported_reasons(&self) -> BTreeMap<String, usize> {
+        let mut reasons = BTreeMap::new();
+        for unsupported in &self.unsupported {
+            *reasons.entry(unsupported.kind().to_string()).or_insert(0) += 1;
+        }
+        reasons
+    }
+
+    pub fn report(&self) -> ScoreReport {
+        let parity = self.parity();
+        ScoreReport {
+            schema: 2,
+            engine: ENGINE_NAME.into(),
+            date_system: self.date_system.into(),
+            source_sha256: self.source_sha256.clone(),
+            sheets: self.sheets.len(),
+            formula_cells_observed: parity.formula_cells_observed,
+            formula_cells_loaded: parity.formula_cells_loaded,
+            formula_cells_compared: parity.formula_cells_compared,
+            stored_values_matched: parity.stored_values_matched,
+            stored_values_mismatched: parity.stored_values_mismatched,
+            unsupported_formulas: parity.unsupported_formulas,
+            unsupported_functions: self.unsupported_functions(),
+            unsupported_reasons: self.unsupported_reasons(),
         }
     }
 }
@@ -260,7 +358,8 @@ fn import_ranges(
             Ok(_) => stored_formula_values.push((cell, stored)),
             Err(error) => unsupported.push(UnsupportedFormula {
                 cell,
-                reason: bounded_formula_error(error),
+                reason: bounded_formula_error(&error),
+                error,
             }),
         }
     }
@@ -320,7 +419,7 @@ fn source_value(value: &Data) -> Value {
     }
 }
 
-fn bounded_formula_error(error: FormulaError) -> String {
+fn bounded_formula_error(error: &FormulaError) -> String {
     error.to_string().chars().take(256).collect()
 }
 
@@ -414,6 +513,53 @@ mod tests {
         );
         assert_eq!(imported.unsupported.len(), 1);
         assert_eq!(imported.parity().formula_cells_compared, 0);
+        assert_eq!(
+            imported.unsupported[0].error,
+            FormulaError::UnsupportedFunction("CUBEVALUE".into())
+        );
+        assert_eq!(imported.unsupported[0].kind(), "unsupported_function");
+    }
+
+    #[test]
+    fn reports_bounded_unsupported_function_and_reason_distributions() {
+        let imported = import_ranges(
+            ranges(
+                vec![Cell::new((0, 0), Data::Int(1))],
+                vec![
+                    Cell::new((0, 1), "TODAY()".into()),
+                    Cell::new((0, 2), "today()+1".into()),
+                    Cell::new((0, 3), "OFFSET(A1,1,1)".into()),
+                    Cell::new((0, 4), "1+".into()),
+                    Cell::new((0, 5), "Missing!A1".into()),
+                    Cell::new((0, 6), "A1+1".into()),
+                ],
+            ),
+            "i".repeat(64),
+            ImportLimits::default(),
+        )
+        .unwrap();
+        let report = imported.report();
+        assert_eq!(report.schema, 2);
+        assert_eq!(report.engine, ENGINE_NAME);
+        assert_eq!(report.date_system, "1900");
+        assert_eq!(report.formula_cells_observed, 6);
+        assert_eq!(report.formula_cells_loaded, 1);
+        assert_eq!(report.unsupported_formulas, 5);
+        assert_eq!(
+            report.unsupported_functions,
+            BTreeMap::from([("TODAY".to_string(), 2), ("OFFSET".to_string(), 1)])
+        );
+        assert_eq!(
+            report.unsupported_reasons,
+            BTreeMap::from([
+                ("unsupported_function".to_string(), 3),
+                ("syntax".to_string(), 1),
+                ("unknown_sheet".to_string(), 1),
+            ])
+        );
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.starts_with("{\"schema\":2,\"engine\":\"omasheets-owned-m0\""));
+        assert_eq!(serde_json::from_str::<ScoreReport>(&json).unwrap(), report);
     }
 
     #[test]
