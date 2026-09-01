@@ -19,6 +19,7 @@ fn run() -> Result<(), String> {
             "{{\n",
             "  \"schema\": 1,\n",
             "  \"engine\": \"omasheets-owned-m0\",\n",
+            "  \"date_system\": \"{date_system}\",\n",
             "  \"source_sha256\": \"{source_sha256}\",\n",
             "  \"sheets\": {sheets},\n",
             "  \"formula_cells_observed\": {observed},\n",
@@ -29,6 +30,7 @@ fn run() -> Result<(), String> {
             "  \"unsupported_formulas\": {unsupported}\n",
             "}}"
         ),
+        date_system = imported.date_system,
         source_sha256 = imported.source_sha256,
         sheets = imported.sheets.len(),
         observed = parity.formula_cells_observed,

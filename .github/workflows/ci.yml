@@ -118,6 +118,46 @@ jobs:
           assert performance["timed_out"] is False
           assert performance["memory"]["peak_rss_bytes"] > 0
           PY
+      - name: Exercise the owned 1900 serial-date boundary
+        run: |
+          evidence="$RUNNER_TEMP/omasheets-m0/dates"
+          mkdir -p "$evidence"
+          python scripts/generate_m0_xlsx.py \
+            "$evidence/date-smoke.xlsx" --rows 1 --date-rows 48 \
+            > "$evidence/fixture.json"
+          target/release/omasheets-xlsx-score \
+            "$evidence/date-smoke.xlsx" \
+            > "$evidence/owned-score.json"
+          python scripts/generate_m0_xlsx.py \
+            "$evidence/date-1904.xlsx" --rows 1 --date-rows 1 --date-system 1904 \
+            > "$evidence/fixture-1904.json"
+          if target/release/omasheets-xlsx-score "$evidence/date-1904.xlsx" \
+            > "$evidence/owned-score-1904.stdout" 2> "$evidence/owned-score-1904.stderr"; then
+            echo "1904 workbooks must be rejected explicitly" >&2
+            exit 1
+          fi
+          grep -F "uses the 1904 date system" "$evidence/owned-score-1904.stderr"
+          EVIDENCE="$evidence" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["EVIDENCE"])
+          fixture = json.loads((root / "fixture.json").read_text())
+          assert fixture["date_system"] == "1900"
+          assert fixture["formula_cells"] == 1 + 48 * 7
+          owned = json.loads((root / "owned-score.json").read_text())
+          assert owned["engine"] == "omasheets-owned-m0"
+          assert owned["date_system"] == "1900"
+          assert owned["sheets"] == 2
+          assert owned["formula_cells_observed"] == fixture["formula_cells"]
+          assert owned["formula_cells_loaded"] == fixture["formula_cells"]
+          assert owned["formula_cells_compared"] == fixture["formula_cells"]
+          assert owned["stored_values_matched"] == fixture["formula_cells"]
+          assert owned["stored_values_mismatched"] == 0
+          assert owned["unsupported_formulas"] == 0
+          assert (root / "owned-score-1904.stdout").read_text() == ""
+          PY
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
@@ -129,6 +169,9 @@ jobs:
             ${{ runner.temp }}/omasheets-m0/owned-score.json
             ${{ runner.temp }}/omasheets-m0/score.json
             ${{ runner.temp }}/omasheets-m0/performance.json
+            ${{ runner.temp }}/omasheets-m0/dates/fixture.json
+            ${{ runner.temp }}/omasheets-m0/dates/owned-score.json
+            ${{ runner.temp }}/omasheets-m0/dates/owned-score-1904.stderr
           if-no-files-found: error
 
   omarchy-plugin:
