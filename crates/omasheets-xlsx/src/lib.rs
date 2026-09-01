@@ -200,6 +200,9 @@ fn import_ranges(
         })
         .collect();
     let mut workbook = Workbook::default();
+    for sheet in &sheets {
+        workbook.define_sheet(sheet.index, sheet.name.clone());
+    }
     let mut formula_records = Vec::with_capacity(observed_formulas);
 
     for (sheet, (_, values, formulas)) in ranges.iter().enumerate() {
@@ -446,5 +449,32 @@ mod tests {
                 maximum: 0,
             }
         );
+    }
+
+    #[test]
+    fn registers_sheet_names_before_compiling_cross_sheet_formulas() {
+        let imported = import_ranges(
+            vec![
+                (
+                    "Inputs".into(),
+                    Range::from_sparse(vec![Cell::new((0, 0), Data::Int(2))]),
+                    Range::empty(),
+                ),
+                (
+                    "Summary".into(),
+                    Range::from_sparse(vec![Cell::new((0, 0), Data::Int(4))]),
+                    Range::from_sparse(vec![Cell::new((0, 0), "Inputs!A1*2".into())]),
+                ),
+            ],
+            "f".repeat(64),
+            ImportLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            imported.workbook.value(CellId::new(1, 0, 0)),
+            Value::Number(4.0)
+        );
+        assert_eq!(imported.parity().stored_values_matched, 1);
+        assert!(imported.unsupported.is_empty());
     }
 }
