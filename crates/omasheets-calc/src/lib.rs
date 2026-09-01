@@ -167,16 +167,9 @@ impl Workbook {
         dependencies: &BTreeSet<CellId>,
     ) -> Option<Vec<CellId>> {
         for dependency in dependencies {
-            let mut path = vec![changed];
+            let mut path = Vec::new();
             let mut visited = HashSet::new();
-            if self.find_dependency_path(
-                *dependency,
-                changed,
-                changed,
-                dependencies,
-                &mut visited,
-                &mut path,
-            ) {
+            if self.find_dependent_path(changed, *dependency, &mut visited, &mut path) {
                 path.push(changed);
                 return Some(path);
             }
@@ -184,39 +177,24 @@ impl Workbook {
         None
     }
 
-    fn find_dependency_path(
+    fn find_dependent_path(
         &self,
         current: CellId,
         target: CellId,
-        changed: CellId,
-        changed_dependencies: &BTreeSet<CellId>,
         visited: &mut HashSet<CellId>,
         path: &mut Vec<CellId>,
     ) -> bool {
         path.push(current);
         if current == target {
-            path.pop();
             return true;
         }
         if !visited.insert(current) {
             path.pop();
             return false;
         }
-        let dependencies = if current == changed {
-            Some(changed_dependencies)
-        } else {
-            self.cells.get(&current).map(|cell| &cell.dependencies)
-        };
-        if let Some(dependencies) = dependencies {
-            for dependency in dependencies {
-                if self.find_dependency_path(
-                    *dependency,
-                    target,
-                    changed,
-                    changed_dependencies,
-                    visited,
-                    path,
-                ) {
+        if let Some(dependents) = self.dependents.get(&current) {
+            for dependent in dependents {
+                if self.find_dependent_path(*dependent, target, visited, path) {
                     return true;
                 }
             }
@@ -614,7 +592,10 @@ mod tests {
         workbook.set_formula(cell(0, 1), "=A1 + 1").unwrap();
 
         let error = workbook.set_formula(cell(0, 0), "=B1 + 1").unwrap_err();
-        assert!(matches!(error, FormulaError::Cycle(_)));
+        assert_eq!(
+            error,
+            FormulaError::Cycle(vec![cell(0, 0), cell(0, 1), cell(0, 0)])
+        );
         assert_eq!(workbook.value(cell(0, 0)), Value::Number(1.0));
         assert_eq!(workbook.value(cell(0, 1)), Value::Number(2.0));
     }
@@ -628,6 +609,18 @@ mod tests {
             workbook.value(cell(0, 1)),
             Value::Error(CalcError::DivisionByZero)
         );
+    }
+
+    #[test]
+    fn constructs_a_long_append_only_chain_without_quadratic_cycle_walks() {
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(0, 0), 1.0);
+        for row in 1..10_000 {
+            workbook
+                .set_formula(cell(row, 0), &format!("=A{row} + 1"))
+                .unwrap();
+        }
+        assert_eq!(workbook.value(cell(9_999, 0)), Value::Number(10_000.0));
     }
 
     #[test]
