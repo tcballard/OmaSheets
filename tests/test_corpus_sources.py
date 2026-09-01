@@ -10,7 +10,24 @@ SOURCES = ROOT / "corpus" / "sources"
 
 class CorpusSourceTests(unittest.TestCase):
     def registers(self):
-        return sorted(SOURCES.glob("*.json"))
+        return sorted(
+            path for path in SOURCES.glob("*.json") if not path.name.endswith(".score-summary.json")
+        )
+
+    def test_score_summaries_are_aggregate_only(self):
+        summaries = sorted(SOURCES.glob("*.score-summary.json"))
+        for summary in summaries:
+            with self.subTest(summary=summary.name):
+                payload = json.loads(summary.read_text(encoding="utf-8"))
+                self.assertEqual(payload["schema"], 1)
+                self.assertTrue((SOURCES / f"{payload['source']}.json").is_file())
+                self.assertEqual(payload["manifest"], f"{payload['source']}.jsonl")
+                self.assertRegex(payload["manifest_sha256"], r"^[0-9a-f]{64}$")
+                for key in ("candidate_summary", "owned_summary", "owned_unsupported_functions"):
+                    self.assertIn(key, payload)
+                text = summary.read_text(encoding="utf-8")
+                for forbidden in ('"path"', '"entries"', ".xlsx"):
+                    self.assertNotIn(forbidden, text)
 
     def test_every_register_validates_and_names_a_frozen_manifest(self):
         registers = self.registers()
