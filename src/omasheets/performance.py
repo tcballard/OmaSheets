@@ -240,7 +240,59 @@ def _bounded_command(command: Sequence[str], include_command: bool) -> dict:
     return result
 
 
+def _proc_process_state_and_group(
+    pid: int,
+    proc_root: Path = Path("/proc"),
+) -> tuple[str, int] | None:
+    """Return Linux process state and group, when procfs is readable."""
+
+    try:
+        stat = (proc_root / str(pid) / "stat").read_text(
+            encoding="utf-8",
+            errors="replace",
+        )
+    except (FileNotFoundError, PermissionError, ProcessLookupError, OSError):
+        return None
+    closing = stat.rfind(")")
+    if closing < 0:
+        return None
+    fields = stat[closing + 1 :].split()
+    if len(fields) < 3:
+        return None
+    try:
+        return fields[0], int(fields[2])
+    except ValueError:
+        return None
+
+
+def _proc_group_has_live_members(
+    process_group: int,
+    proc_root: Path = Path("/proc"),
+) -> bool | None:
+    """Distinguish live process groups from zombie-only groups on Linux."""
+
+    if not proc_root.is_dir():
+        return None
+    try:
+        entries = tuple(proc_root.iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.name.isdecimal():
+            continue
+        metadata = _proc_process_state_and_group(int(entry.name), proc_root)
+        if metadata is None:
+            continue
+        state, group = metadata
+        if group == process_group and state not in {"Z", "X"}:
+            return True
+    return False
+
+
 def _process_group_exists(process_group: int) -> bool:
+    proc_result = _proc_group_has_live_members(process_group)
+    if proc_result is not None:
+        return proc_result
     try:
         os.killpg(process_group, 0)
     except ProcessLookupError:
@@ -251,6 +303,10 @@ def _process_group_exists(process_group: int) -> bool:
 
 
 def _process_exists(pid: int) -> bool:
+    metadata = _proc_process_state_and_group(pid)
+    if metadata is not None:
+        state, _group = metadata
+        return state not in {"Z", "X"}
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
