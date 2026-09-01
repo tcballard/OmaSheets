@@ -16,6 +16,8 @@ from omasheets.performance import (
     MemorySample,
     ProcProcessGroupSampler,
     _SampleAccumulator,
+    _proc_group_has_live_members,
+    _proc_process_state_and_group,
     bounded_json,
     fixture_manifest,
     generate_fixture,
@@ -108,6 +110,21 @@ class PerformanceTests(unittest.TestCase):
         self.assertEqual(sample.rss_bytes, 180 * 1024)
         self.assertEqual(sample.pss_bytes, 180 * 1024)
         self.assertEqual(sample.uss_bytes, 180 * 1024)
+
+    def test_proc_liveness_ignores_zombie_only_process_group(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            proc = Path(temporary)
+            zombie = proc / "401"
+            zombie.mkdir()
+            (zombie / "stat").write_text("401 (worker) Z 1 77 77 0 0\n")
+
+            self.assertEqual(_proc_process_state_and_group(401, proc), ("Z", 77))
+            self.assertFalse(_proc_group_has_live_members(77, proc))
+
+            live = proc / "402"
+            live.mkdir()
+            (live / "stat").write_text("402 (worker) S 1 77 77 0 0\n")
+            self.assertTrue(_proc_group_has_live_members(77, proc))
 
     def test_sample_retention_is_bounded_but_peaks_cover_all_observations(self):
         samples = _SampleAccumulator(2)

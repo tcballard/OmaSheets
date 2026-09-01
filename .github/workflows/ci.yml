@@ -72,6 +72,12 @@ jobs:
     steps:
       - run: pacman -Syu --noconfirm --needed git cmake gtk3 libreoffice-fresh libreoffice-fresh-sdk
       - uses: actions/checkout@v7
+      - name: Verify the release gate in Arch
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          PYTHONPATH=src python -m unittest discover -s tests -q
+          python -m compileall -q src tests scripts
+          python scripts/check_release.py
       - name: Build the release-native executables once
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
