@@ -68,7 +68,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/omasheets-m0"
           target/release/omasheets-calc-bench \
-            --formulas 10000 --iterations 10 \
+            --formulas 100000 --iterations 20 \
             > "$RUNNER_TEMP/omasheets-m0/calc-benchmark.json"
       - name: Exercise one immutable Excel-syntax workbook
         run: |
