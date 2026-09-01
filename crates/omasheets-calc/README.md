@@ -8,13 +8,13 @@ not connected to the v0.0.2 LibreOffice compatibility product.
 The current syntax slice includes numeric, boolean and quoted-text literals;
 A1 references (including absolute markers); unquoted (`Inputs!A1`) and quoted
 (`'Owner''s Data'!A1`) cross-sheet references; arithmetic and comparison
-operators; parentheses; and bounded rectangular ranges. Forty-five function
+operators; parentheses; and bounded rectangular ranges. Forty-nine function
 names are implemented across the initial head:
 
 - aggregate: `SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `PRODUCT`;
 - math: `ABS`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `INT`, `MOD`, `POWER`, `SQRT`;
 - logical: `IF`, `AND`, `OR`, `NOT`, `IFERROR`.
-- conditional aggregate: `COUNTIF`, `SUMIF`;
+- conditional aggregate: `COUNTIF(S)`, `SUMIF(S)`, `AVERAGEIF(S)`;
 - exact lookup: `INDEX`, `MATCH`, `VLOOKUP`, `XLOOKUP`;
 - extended math: `SIGN`, `CEILING`, `FLOOR`, `TRUNC`, `EXP`, `LN`, `LOG`,
   `LOG10`, `PI`;
