@@ -2,15 +2,15 @@
 
 Native agentic spreadsheets for Omarchy.
 
-OmaSheets v0.0.1 combines LibreOffice Calc's native Linux spreadsheet engine
+OmaSheets v0.0.2 combines LibreOffice Calc's native Linux spreadsheet engine
 with a constrained agent interface. People can open legacy `.xls` files in a
 desktop application; agents can inspect, explain, stage, verify, and propose
-workbook changes without receiving silent write authority. The first release is
+workbook changes without receiving silent write authority. The current release is
 built around a complete agent loop: start from the live selection, inspect the
 workbook, cite sealed observations, explain and group a verified proposal,
 revise it from human feedback, then hand it back for local approval.
 
-## v0.0.1 scope
+## v0.0.2 scope
 
 - Open `.xls`, `.xlsx`, `.xlsm`, and `.ods` in LibreOffice Calc.
 - Inspect workbook structure, values, formulas, named ranges, deduplicated cell
@@ -35,10 +35,15 @@ revise it from human feedback, then hand it back for local approval.
 - Expose read and planning operations to agents over MCP; never expose commit.
 
 OmaSheets does not claim perfect Microsoft Excel compatibility. In particular,
-macro-enabled `.xlsm` workbooks are read-only in v0.0.1 and legacy conversion
+macro-enabled `.xlsm` workbooks are read-only in v0.0.2 and legacy conversion
 always requires manual review.
 
 The product and safety contracts are in [`docs/`](docs/).
+The in-place native-core decision and its measured milestone gates are in
+[`ADR-0003`](docs/ADR-0003-EVENT-SOURCED-NATIVE-CORE.md) and the
+[`OmaSheets roadmap`](docs/ROADMAP.md). The v0.0.2 release remains the
+compatibility and agent-safety baseline; it does not claim that the native
+event store, formula engine, or virtualised grid already exists.
 
 ## Install on Omarchy
 
@@ -67,7 +72,7 @@ user's configured default agent. The agent starts from the path-free
 `omasheets://session` resource, which carries the live selection and workflow
 contract. Agents without OmaSheets MCP discovery can use the equivalent bounded
 `omasheets agent-session` JSON command bridge; neither surface exposes
-publication. Flagship v0.0.1 workflows
+publication. Flagship v0.0.2 workflows
 are formula explanation, bounded data cleanup, variance analysis, cross-sheet
 reconciliation, checked summaries, formatting-only cleanup, workbook-wide
 audit, and audit-backed management summaries with pivots and charts.
@@ -119,7 +124,7 @@ workbook copy from the overlay.
 
 ## Status
 
-Early development. v0.0.1 has an automated Arch install/native/agent/uninstall
+Early development. v0.0.2 has an automated Arch install/native/agent/uninstall
 gate and has received maintainer hands-on testing. The repository does not yet
 record evidence for every item in the complete Omarchy/Wayland release runbook,
 and no perfect Excel compatibility claim is made.

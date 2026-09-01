@@ -1,4 +1,4 @@
-# v0.0.1 architecture
+# v0.0.2 architecture
 
 OmaSheets deliberately separates spreadsheet calculation, agent planning, and
 filesystem publication.
@@ -9,6 +9,9 @@ engine. The accepted rationale and native-shell evolution path are in
 [`ADR-0001-ENGINE-STRATEGY.md`](ADR-0001-ENGINE-STRATEGY.md).
 The proposed resident-kernel and compatibility-sidecar performance direction is
 in [`ADR-0002-AGENT-NATIVE-PERFORMANCE.md`](ADR-0002-AGENT-NATIVE-PERFORMANCE.md).
+The accepted decision to converge the event-sourced native core into OmaSheets
+in this repository is in
+[`ADR-0003-EVENT-SOURCED-NATIVE-CORE.md`](ADR-0003-EVENT-SOURCED-NATIVE-CORE.md).
 
 ## Components
 

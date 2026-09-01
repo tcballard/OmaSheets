@@ -1,4 +1,4 @@
-# Agent protocol v0.0.1
+# Agent protocol v0.0.2
 
 OmaSheets speaks JSON-RPC 2.0 over standard input/output using the Model Context
 Protocol. The server advertises a fixed protocol version and strict tool schemas.

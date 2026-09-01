@@ -1,4 +1,4 @@
-# Agentic workbook workflows in v0.0.1
+# Agentic workbook workflows in v0.0.2
 
 OmaSheets treats an agent run as a reviewable workbook workflow, not a chat box
 with ambient write access.
@@ -54,7 +54,7 @@ manual-review warning because Calc and Excel may render pivot details
 differently.
 
 The deterministic workflow catalog in `tests/fixtures/agent_workflows.json`
-proves that each flagship job is expressible through the public v0.0.1 tools.
+proves that each flagship job is expressible through the public v0.0.2 tools.
 The Arch acceptance job additionally drives the installed MCP server through
 inspection, an evidence-cited structural/formula/sort proposal, revision and
 the non-publishing local-review handoff.

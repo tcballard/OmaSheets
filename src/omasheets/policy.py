@@ -69,7 +69,7 @@ def require_stageable(path: Path, *, actor: Actor) -> WorkbookFormat:
     if actor is Actor.AGENT and not POLICIES[fmt].agent_stage:
         raise PolicyError(f"agents cannot stage changes to .{fmt.value} workbooks")
     if not POLICIES[fmt].publish:
-        raise PolicyError(f".{fmt.value} workbooks are read-only in v0.0.1")
+        raise PolicyError(f".{fmt.value} workbooks are read-only")
     return fmt
 
 

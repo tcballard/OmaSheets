@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.tcballard.omasheets",
   "name": "OmaSheets",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "author": "Tom Ballard",
   "license": "MIT",
   "description": "Native agentic spreadsheets with evidence-backed human review",

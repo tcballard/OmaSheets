@@ -1,4 +1,4 @@
-# v0.0.1 acceptance runbook
+# v0.0.2 acceptance runbook
 
 Run this on an Omarchy `quattro` workstation. Automated Arch CI covers policy,
 transactions, the pinned plugin validator, wheel packaging, user-local install,

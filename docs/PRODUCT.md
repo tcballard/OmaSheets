@@ -1,4 +1,4 @@
-# OmaSheets v0.0.1 product contract
+# OmaSheets v0.0.2 product contract
 
 ## Mission
 
@@ -19,7 +19,7 @@ unrestricted file mutation.
 | --- | --- | --- | --- | --- |
 | `.xls` | Yes | Yes | No | Convert to a new `.xlsx` only |
 | `.xlsx` | Yes | Yes | Yes | Copy by default; replace only with explicit local approval |
-| `.xlsm` | Yes | Yes | No | Never in v0.0.1 |
+| `.xlsm` | Yes | Yes | No | Never in v0.0.2 |
 | `.ods` | Yes | Yes | Yes | Copy by default; replace only with explicit local approval |
 
 Legacy `.xls` and macro-enabled `.xlsm` inputs are never overwritten. Conversion
@@ -37,7 +37,7 @@ does not establish Excel equivalence and always returns a manual-review result.
 
 ## Non-goals
 
-- Forking or rebranding the complete LibreOffice desktop in v0.0.1.
+- Forking or rebranding the complete LibreOffice desktop in v0.0.2.
 - Reimplementing a spreadsheet calculation engine before the native product
   shell and engine-adapter boundary have been proven.
 - Claiming pixel-perfect or formula-perfect Microsoft Excel compatibility.
