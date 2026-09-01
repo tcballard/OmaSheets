@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/omasheets-corpus"]
+members = ["crates/omasheets-calc", "crates/omasheets-corpus"]
 exclude = ["spikes/fastcore"]
 resolver = "3"
 
