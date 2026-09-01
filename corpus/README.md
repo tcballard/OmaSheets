@@ -45,6 +45,12 @@ open/load/evaluation timing plus observed and loaded formula counts. Stored
 value parity is explicitly reported as `not_implemented`; an open/evaluate
 success must not be presented as the roadmap's recalculation-parity gate.
 
+The separate `omasheets-xlsx-score` lane now loads supported formulas into the
+owned engine and compares its calculated results with cached source values. CI
+exercises that path on the deterministic 250-formula fixture. This establishes
+the comparison contract; it is not the real-corpus parity gate until frozen
+Enron/EUSES manifests are scored through the same lane.
+
 ## Corpus policy
 
 - Record the upstream corpus name, retrieval date, license or access terms, and
