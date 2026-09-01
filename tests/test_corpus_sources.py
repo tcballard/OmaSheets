@@ -10,9 +10,9 @@ SOURCES = ROOT / "corpus" / "sources"
 
 class CorpusSourceTests(unittest.TestCase):
     def registers(self):
-        return sorted(
-            path for path in SOURCES.glob("*.json") if not path.name.endswith(".score-summary.json")
-        )
+        # Registers are `<name>.json`; derived files carry a dotted suffix such
+        # as `<name>.score-summary.json` and are checked separately.
+        return sorted(path for path in SOURCES.glob("*.json") if "." not in path.stem)
 
     def test_score_summaries_are_aggregate_only(self):
         summaries = sorted(SOURCES.glob("*.score-summary.json"))

@@ -12,6 +12,9 @@ pub mod serial_date;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt;
 
+/// Defined names may refer to other names; deeper chains are rejected.
+const MAX_NAME_DEPTH: usize = 8;
+
 const MAX_RANGE_CELLS: usize = 1_000_000;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -40,14 +43,50 @@ pub enum Value {
 pub enum CalcError {
     /// Excel `#DIV/0!`.
     DivisionByZero,
-    /// Excel `#REF!` and `#N/A`.
+    /// Excel `#REF!`.
     InvalidReference,
+    /// Excel `#N/A`: a lookup found nothing, or `NA()`.
+    NotAvailable,
     /// Excel `#VALUE!`.
     InvalidValue,
     /// Excel `#NUM!`: a numeric argument outside the function's domain.
     InvalidNumber,
+    /// Excel `#NAME?`, only ever imported from a source workbook or written
+    /// as a literal; unknown names fail to compile instead.
+    InvalidName,
+    /// Excel `#NULL!`, only ever imported or written as a literal.
+    NullIntersection,
     /// Wrong argument count or shape for the function.
     InvalidArguments,
+}
+
+impl CalcError {
+    /// Excel's spelling of the error.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::DivisionByZero => "#DIV/0!",
+            Self::InvalidReference => "#REF!",
+            Self::NotAvailable => "#N/A",
+            Self::InvalidValue => "#VALUE!",
+            Self::InvalidNumber => "#NUM!",
+            Self::InvalidName => "#NAME?",
+            Self::NullIntersection => "#NULL!",
+            Self::InvalidArguments => "#ARGS!",
+        }
+    }
+
+    fn parse_literal(text: &str) -> Option<Self> {
+        Some(match text {
+            "#DIV/0!" => Self::DivisionByZero,
+            "#REF!" => Self::InvalidReference,
+            "#N/A" => Self::NotAvailable,
+            "#VALUE!" => Self::InvalidValue,
+            "#NUM!" => Self::InvalidNumber,
+            "#NAME?" => Self::InvalidName,
+            "#NULL!" => Self::NullIntersection,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -57,6 +96,12 @@ pub enum FormulaError {
     UnsupportedFunction(String),
     InvalidReference(String),
     UnknownSheet(String),
+    /// A reference into another workbook (`[1]Sheet!A1`); never evaluated.
+    ExternalReference(String),
+    /// A bare identifier that is neither a cell reference nor a defined name.
+    UnknownName(String),
+    /// A defined name whose definition the engine cannot compile.
+    UnsupportedName(String),
     RangeTooLarge,
     Cycle(Vec<CellId>),
 }
@@ -71,6 +116,11 @@ impl fmt::Display for FormulaError {
             Self::UnsupportedFunction(name) => write!(formatter, "unsupported function {name}"),
             Self::InvalidReference(reference) => write!(formatter, "invalid reference {reference}"),
             Self::UnknownSheet(sheet) => write!(formatter, "unknown sheet {sheet}"),
+            Self::ExternalReference(reference) => {
+                write!(formatter, "external workbook reference {reference}")
+            }
+            Self::UnknownName(name) => write!(formatter, "unknown name {name}"),
+            Self::UnsupportedName(name) => write!(formatter, "unsupported defined name {name}"),
             Self::RangeTooLarge => write!(formatter, "formula range exceeds the M0 safety bound"),
             Self::Cycle(path) => write!(formatter, "formula introduces a cycle: {path:?}"),
         }
@@ -84,6 +134,10 @@ enum Expr<R = CellId> {
     Number(f64),
     Boolean(bool),
     Text(String),
+    /// An error literal such as `#REF!`.
+    Error(CalcError),
+    /// An omitted argument, as in `IF(x,,y)`; evaluates to blank.
+    Empty,
     Reference(R),
     UnaryMinus(Box<Expr<R>>),
     Percent(Box<Expr<R>>),
@@ -179,6 +233,19 @@ enum Function {
     T,
     SumProduct,
     Median,
+    Choose,
+    SubTotal,
+    StDev,
+    StDevP,
+    Var,
+    VarP,
+    Na,
+    IsNa,
+    HLookup,
+    Find,
+    Rept,
+    Row,
+    Column,
 }
 
 #[derive(Clone, Debug)]
@@ -208,7 +275,12 @@ pub struct Workbook {
     dirty_marks: Vec<u64>,
     pending: Vec<usize>,
     sheet_names: HashMap<String, u32>,
+    defined_names: HashMap<String, String>,
     generation: u64,
+    /// The cell whose formula is being evaluated, for implicit intersection
+    /// and `ROW()`/`COLUMN()`. Evaluation is sequential, so a plain cell is
+    /// enough.
+    evaluating: std::cell::Cell<CellId>,
 }
 
 impl Default for Workbook {
@@ -219,7 +291,9 @@ impl Default for Workbook {
             dirty_marks: Vec::new(),
             pending: Vec::new(),
             sheet_names: HashMap::new(),
+            defined_names: HashMap::new(),
             generation: 1,
+            evaluating: std::cell::Cell::new(CellId::new(0, 0, 0)),
         }
     }
 }
@@ -227,6 +301,20 @@ impl Default for Workbook {
 impl Workbook {
     pub fn define_sheet(&mut self, index: u32, name: impl Into<String>) {
         self.sheet_names.insert(name.into().to_lowercase(), index);
+    }
+
+    /// Registers a workbook-level defined name. The definition is compiled
+    /// lazily, where the name is used, with the same parser as formulas; a
+    /// definition that does not compile makes every use an explicit
+    /// `UnsupportedName` failure. The first definition of a name wins.
+    pub fn define_name(&mut self, name: impl Into<String>, definition: impl Into<String>) {
+        self.defined_names
+            .entry(name.into().to_lowercase())
+            .or_insert_with(|| definition.into());
+    }
+
+    pub fn set_error(&mut self, cell: CellId, error: CalcError) -> RecalcReport {
+        self.commit(cell, Input::Literal(Value::Error(error)), Vec::new())
     }
 
     pub fn value(&self, cell: CellId) -> Value {
@@ -257,7 +345,8 @@ impl Workbook {
         cell: CellId,
         formula: &str,
     ) -> Result<RecalcReport, FormulaError> {
-        let parsed = Parser::new(formula, cell.sheet, &self.sheet_names).parse()?;
+        let parsed =
+            Parser::new(formula, cell.sheet, &self.sheet_names, &self.defined_names).parse()?;
         let mut dependencies = BTreeSet::new();
         collect_dependencies(&parsed, &mut dependencies);
         if let Some(path) = self.prospective_cycle(cell, &dependencies) {
@@ -387,7 +476,14 @@ impl Workbook {
         while let Some(cell_index) = ready.pop_front() {
             let value = match &self.cells[cell_index].input {
                 Input::Literal(value) => value.clone(),
-                Input::Formula(expression) => self.evaluate(expression),
+                Input::Formula(expression) => {
+                    self.evaluating.set(self.cells[cell_index].id);
+                    match self.evaluate(expression) {
+                        // A formula whose result is an empty reference shows 0.
+                        Value::Blank => Value::Number(0.0),
+                        value => value,
+                    }
+                }
             };
             self.cells[cell_index].value = value;
             evaluated.push(self.cells[cell_index].id);
@@ -414,6 +510,8 @@ impl Workbook {
             Expr::Number(value) => Value::Number(*value),
             Expr::Boolean(value) => Value::Boolean(*value),
             Expr::Text(value) => Value::Text(value.clone()),
+            Expr::Error(error) => Value::Error(error.clone()),
+            Expr::Empty => Value::Blank,
             Expr::Reference(index) => self.cells[*index].value.clone(),
             Expr::UnaryMinus(inner) => match self.evaluate(inner) {
                 Value::Number(value) => Value::Number(-value),
@@ -431,21 +529,67 @@ impl Workbook {
                 let right = self.evaluate(right);
                 apply_binary(*operator, left, right)
             }
-            Expr::Range { .. } => Value::Error(CalcError::InvalidArguments),
+            Expr::Range {
+                items,
+                rows,
+                columns,
+            } => self.implicit_intersection(items, *rows, *columns),
             Expr::Function(function, arguments) => self.evaluate_function(*function, arguments),
+        }
+    }
+
+    /// A range used where one value is expected picks the cell in the
+    /// evaluating formula's row (vertical range), column (horizontal range)
+    /// or both, as Excel's implicit intersection does; otherwise `#VALUE!`.
+    fn implicit_intersection(&self, items: &[Expr<usize>], rows: usize, columns: usize) -> Value {
+        if rows == 1 && columns == 1 {
+            return self.evaluate(&items[0]);
+        }
+        let origin = self.evaluating.get();
+        let position = |item: &Expr<usize>| match item {
+            Expr::Reference(index) => Some(self.cells[*index].id),
+            _ => None,
+        };
+        let chosen = items.iter().find(|item| {
+            position(item).is_some_and(|id| {
+                (columns == 1 || id.column == origin.column) && (rows == 1 || id.row == origin.row)
+            })
+        });
+        match chosen {
+            Some(item) => self.evaluate(item),
+            None => Value::Error(CalcError::InvalidValue),
         }
     }
 
     fn evaluate_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
         if function == Function::If {
-            if arguments.len() != 3 {
+            if !matches!(arguments.len(), 2 | 3) {
                 return Value::Error(CalcError::InvalidArguments);
             }
             return match truthy(self.evaluate(&arguments[0])) {
                 Ok(true) => self.evaluate(&arguments[1]),
-                Ok(false) => self.evaluate(&arguments[2]),
+                Ok(false) if arguments.len() == 3 => self.evaluate(&arguments[2]),
+                Ok(false) => Value::Boolean(false),
                 Err(error) => Value::Error(error),
             };
+        }
+        if function == Function::Choose {
+            if arguments.len() < 2 {
+                return Value::Error(CalcError::InvalidArguments);
+            }
+            return match number(self.evaluate(&arguments[0])) {
+                Ok(index) if index >= 1.0 && (index.trunc() as usize) < arguments.len() => {
+                    self.evaluate(&arguments[index.trunc() as usize])
+                }
+                Ok(_) => Value::Error(CalcError::InvalidValue),
+                Err(error) => Value::Error(error),
+            };
+        }
+        if function == Function::SubTotal {
+            return self.evaluate_subtotal(arguments);
+        }
+        if matches!(function, Function::Row | Function::Column) {
+            return self.evaluate_position_function(function, arguments);
         }
         if function == Function::IfError {
             if arguments.len() != 2 {
@@ -471,7 +615,11 @@ impl Workbook {
         }
         if matches!(
             function,
-            Function::Index | Function::Match | Function::VLookup | Function::XLookup
+            Function::Index
+                | Function::Match
+                | Function::VLookup
+                | Function::HLookup
+                | Function::XLookup
         ) {
             return self.evaluate_lookup_function(function, arguments);
         }
@@ -494,10 +642,18 @@ impl Workbook {
                 | Function::IsText
                 | Function::IsLogical
                 | Function::IsError
+                | Function::IsNa
                 | Function::N
                 | Function::T
         ) {
             return self.evaluate_inspection_function(function, arguments);
+        }
+        if function == Function::Na {
+            return if arguments.is_empty() {
+                Value::Error(CalcError::NotAvailable)
+            } else {
+                Value::Error(CalcError::InvalidArguments)
+            };
         }
         if function == Function::SumProduct {
             return self.evaluate_sumproduct(arguments);
@@ -526,6 +682,7 @@ impl Workbook {
             Function::Average if !numbers.is_empty() => {
                 Value::Number(numbers.iter().sum::<f64>() / numbers.len() as f64)
             }
+            Function::Average => Value::Error(CalcError::DivisionByZero),
             Function::Min => Value::Number(numbers.into_iter().reduce(f64::min).unwrap_or(0.0)),
             Function::Max => Value::Number(numbers.into_iter().reduce(f64::max).unwrap_or(0.0)),
             Function::Count => Value::Number(numbers.len() as f64),
@@ -537,6 +694,12 @@ impl Workbook {
             ),
             Function::Product => Value::Number(numbers.into_iter().product()),
             Function::Median if !numbers.is_empty() => median(numbers),
+            Function::StDev => deviation(&numbers, true, true),
+            Function::StDevP => deviation(&numbers, false, true),
+            Function::Var => deviation(&numbers, true, false),
+            Function::VarP => deviation(&numbers, false, false),
+            Function::Find => find_text(&values),
+            Function::Rept => repeat_text(&values),
             Function::Abs => unary_number(&values, f64::abs),
             Function::Int => unary_number(&values, f64::floor),
             Function::Sqrt => {
@@ -601,8 +764,7 @@ impl Workbook {
                 Ok(value) => Value::Boolean(!value),
                 Err(error) => Value::Error(error),
             },
-            Function::Average
-            | Function::Not
+            Function::Not
             | Function::If
             | Function::IfError
             | Function::Pi
@@ -631,8 +793,104 @@ impl Workbook {
             | Function::N
             | Function::T
             | Function::SumProduct
-            | Function::Median => Value::Error(CalcError::InvalidArguments),
+            | Function::Median
+            | Function::Choose
+            | Function::SubTotal
+            | Function::Na
+            | Function::IsNa
+            | Function::HLookup
+            | Function::Row
+            | Function::Column => Value::Error(CalcError::InvalidArguments),
         }
+    }
+
+    /// `SUBTOTAL(code, ref, ...)`: codes 1-11 and 101-111 select the
+    /// aggregate; cells that themselves hold a `SUBTOTAL` formula are skipped
+    /// as in Excel. Hidden-row semantics (101-111) are not modelled: the
+    /// engine has no row visibility, so both ranges behave like 1-11.
+    fn evaluate_subtotal(&self, arguments: &[Expr<usize>]) -> Value {
+        if arguments.len() < 2 {
+            return Value::Error(CalcError::InvalidArguments);
+        }
+        let code = match number(self.evaluate(&arguments[0])) {
+            Ok(code) => code.trunc() as i64,
+            Err(error) => return Value::Error(error),
+        };
+        let code = if (101..=111).contains(&code) {
+            code - 100
+        } else {
+            code
+        };
+        let function = match code {
+            1 => Function::Average,
+            2 => Function::Count,
+            3 => Function::CountA,
+            4 => Function::Max,
+            5 => Function::Min,
+            6 => Function::Product,
+            7 => Function::StDev,
+            8 => Function::StDevP,
+            9 => Function::Sum,
+            10 => Function::Var,
+            11 => Function::VarP,
+            _ => return Value::Error(CalcError::InvalidValue),
+        };
+        let mut values = Vec::new();
+        for argument in &arguments[1..] {
+            self.flatten_values_skipping_subtotals(argument, &mut values);
+        }
+        let literals: Vec<Expr<usize>> = values
+            .into_iter()
+            .map(|value| match value {
+                Value::Number(number) => Expr::Number(number),
+                Value::Boolean(flag) => Expr::Boolean(flag),
+                Value::Text(text) => Expr::Text(text),
+                Value::Error(error) => Expr::Error(error),
+                Value::Blank => Expr::Empty,
+            })
+            .collect();
+        self.evaluate_function(function, &literals)
+    }
+
+    fn flatten_values_skipping_subtotals(&self, expression: &Expr<usize>, output: &mut Vec<Value>) {
+        match expression {
+            Expr::Range { items, .. } => {
+                for item in items {
+                    self.flatten_values_skipping_subtotals(item, output);
+                }
+            }
+            Expr::Reference(index) => {
+                if let Input::Formula(Expr::Function(Function::SubTotal, _)) =
+                    &self.cells[*index].input
+                {
+                    return;
+                }
+                output.push(self.cells[*index].value.clone());
+            }
+            Expr::Empty => {}
+            other => output.push(self.evaluate(other)),
+        }
+    }
+
+    /// `ROW()` and `COLUMN()` report the evaluating cell; with a reference
+    /// they report its first cell. One-based, as in Excel.
+    fn evaluate_position_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+        let id = match arguments {
+            [] => self.evaluating.get(),
+            [Expr::Reference(index)] => self.cells[*index].id,
+            [Expr::Range { items, .. }] => match items.first() {
+                Some(Expr::Reference(index)) => self.cells[*index].id,
+                _ => return Value::Error(CalcError::InvalidArguments),
+            },
+            _ => return Value::Error(CalcError::InvalidArguments),
+        };
+        Value::Number(
+            f64::from(if function == Function::Row {
+                id.row
+            } else {
+                id.column
+            }) + 1.0,
+        )
     }
 
     /// Type inspection takes exactly one scalar argument and never propagates
@@ -649,6 +907,9 @@ impl Workbook {
             Function::IsText => Value::Boolean(matches!(value, Value::Text(_))),
             Function::IsLogical => Value::Boolean(matches!(value, Value::Boolean(_))),
             Function::IsError => Value::Boolean(matches!(value, Value::Error(_))),
+            Function::IsNa => {
+                Value::Boolean(matches!(value, Value::Error(CalcError::NotAvailable)))
+            }
             Function::N => match value {
                 Value::Number(number) => Value::Number(number),
                 Value::Boolean(true) => Value::Number(1.0),
@@ -755,12 +1016,14 @@ impl Workbook {
     }
 
     fn flatten_values(&self, expression: &Expr<usize>, output: &mut Vec<Value>) {
-        if let Expr::Range { items, .. } = expression {
-            for item in items {
-                self.flatten_values(item, output);
+        match expression {
+            Expr::Range { items, .. } => {
+                for item in items {
+                    self.flatten_values(item, output);
+                }
             }
-        } else {
-            output.push(self.evaluate(expression));
+            Expr::Empty => {}
+            other => output.push(self.evaluate(other)),
         }
     }
 
@@ -876,13 +1139,14 @@ impl Workbook {
                 self.evaluate(&items[(row - 1) * *columns + column - 1])
             }
             Function::Match if matches!(arguments.len(), 2 | 3) => {
-                if arguments.len() == 3 {
+                let mode = if arguments.len() == 3 {
                     match number(self.evaluate(&arguments[2])) {
-                        Ok(0.0) => {}
-                        Ok(_) => return Value::Error(CalcError::InvalidArguments),
+                        Ok(value) => match_mode_for(value),
                         Err(error) => return Value::Error(error),
                     }
-                }
+                } else {
+                    MatchMode::Ascending
+                };
                 let lookup = self.evaluate(&arguments[0]);
                 if matches!(lookup, Value::Error(_)) {
                     return lookup;
@@ -893,21 +1157,29 @@ impl Workbook {
                 if *rows != 1 && *columns != 1 {
                     return Value::Error(CalcError::InvalidArguments);
                 }
-                for (index, item) in items.iter().enumerate() {
-                    let candidate = self.evaluate(item);
-                    if matches!(candidate, Value::Error(_)) {
-                        return candidate;
-                    }
-                    if lookup_equal(&lookup, &candidate) {
-                        return Value::Number((index + 1) as f64);
-                    }
+                let candidates: Vec<Value> = items.iter().map(|item| self.evaluate(item)).collect();
+                match match_position(&lookup, &candidates, mode) {
+                    Ok(position) => Value::Number((position + 1) as f64),
+                    Err(error) => Value::Error(error),
                 }
-                Value::Error(CalcError::InvalidReference)
             }
-            Function::VLookup if arguments.len() == 4 => {
-                if !matches!(self.evaluate(&arguments[3]), Value::Boolean(false)) {
-                    return Value::Error(CalcError::InvalidArguments);
-                }
+            Function::VLookup | Function::HLookup if matches!(arguments.len(), 3 | 4) => {
+                let mode = match arguments.get(3) {
+                    None | Some(Expr::Empty) => MatchMode::Ascending,
+                    Some(argument) => match self.evaluate(argument) {
+                        Value::Boolean(false) => MatchMode::Exact,
+                        Value::Boolean(true) | Value::Blank => MatchMode::Ascending,
+                        Value::Number(value) => {
+                            if value == 0.0 {
+                                MatchMode::Exact
+                            } else {
+                                MatchMode::Ascending
+                            }
+                        }
+                        Value::Error(error) => return Value::Error(error),
+                        Value::Text(_) => return Value::Error(CalcError::InvalidValue),
+                    },
+                };
                 let lookup = self.evaluate(&arguments[0]);
                 if matches!(lookup, Value::Error(_)) {
                     return lookup;
@@ -915,22 +1187,31 @@ impl Workbook {
                 let Some((items, rows, columns)) = range_parts(&arguments[1]) else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
-                let Ok(column) = positive_index(self.evaluate(&arguments[2])) else {
-                    return Value::Error(CalcError::InvalidArguments);
+                let Ok(offset) = positive_index(self.evaluate(&arguments[2])) else {
+                    return Value::Error(CalcError::InvalidValue);
                 };
-                if column > *columns {
+                let vertical = function == Function::VLookup;
+                let (lanes, lane_length) = if vertical {
+                    (*rows, *columns)
+                } else {
+                    (*columns, *rows)
+                };
+                if offset > lane_length {
                     return Value::Error(CalcError::InvalidReference);
                 }
-                for row in 0..*rows {
-                    let candidate = self.evaluate(&items[row * *columns]);
-                    if matches!(candidate, Value::Error(_)) {
-                        return candidate;
+                let at = |lane: usize, position: usize| {
+                    if vertical {
+                        &items[lane * *columns + position]
+                    } else {
+                        &items[position * *columns + lane]
                     }
-                    if lookup_equal(&lookup, &candidate) {
-                        return self.evaluate(&items[row * *columns + column - 1]);
-                    }
+                };
+                let candidates: Vec<Value> =
+                    (0..lanes).map(|lane| self.evaluate(at(lane, 0))).collect();
+                match match_position(&lookup, &candidates, mode) {
+                    Ok(lane) => self.evaluate(at(lane, offset - 1)),
+                    Err(error) => Value::Error(error),
                 }
-                Value::Error(CalcError::InvalidReference)
             }
             Function::XLookup if matches!(arguments.len(), 3 | 4) => {
                 let lookup = self.evaluate(&arguments[0]);
@@ -963,11 +1244,125 @@ impl Workbook {
                 if arguments.len() == 4 {
                     return self.evaluate(&arguments[3]);
                 }
-                Value::Error(CalcError::InvalidReference)
+                Value::Error(CalcError::NotAvailable)
             }
             _ => Value::Error(CalcError::InvalidArguments),
         }
     }
+}
+
+fn match_mode_for(value: f64) -> MatchMode {
+    if value == 0.0 {
+        MatchMode::Exact
+    } else if value > 0.0 {
+        MatchMode::Ascending
+    } else {
+        MatchMode::Descending
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MatchMode {
+    Exact,
+    /// Largest value less than or equal to the lookup; the candidates are
+    /// assumed to be sorted ascending, as Excel documents.
+    Ascending,
+    /// Smallest value greater than or equal to the lookup; candidates are
+    /// assumed to be sorted descending.
+    Descending,
+}
+
+/// Position of `lookup` among `candidates`. Exact mode scans in order and
+/// compares text case-insensitively. Approximate modes binary-search the
+/// non-blank candidates by Excel's typed order (numbers before text before
+/// booleans) and return `#N/A` when nothing qualifies, which is the documented
+/// contract for sorted inputs; unsorted inputs are undefined in Excel too.
+fn match_position(
+    lookup: &Value,
+    candidates: &[Value],
+    mode: MatchMode,
+) -> Result<usize, CalcError> {
+    if let Value::Error(error) = lookup {
+        return Err(error.clone());
+    }
+    if mode == MatchMode::Exact {
+        for (index, candidate) in candidates.iter().enumerate() {
+            if let Value::Error(error) = candidate {
+                return Err(error.clone());
+            }
+            if lookup_equal(lookup, candidate) {
+                return Ok(index);
+            }
+        }
+        return Err(CalcError::NotAvailable);
+    }
+    let populated: Vec<(usize, &Value)> = candidates
+        .iter()
+        .enumerate()
+        .filter(|(_, candidate)| !matches!(candidate, Value::Blank))
+        .collect();
+    if populated.is_empty() {
+        return Err(CalcError::NotAvailable);
+    }
+    let same_type =
+        |candidate: &Value| std::mem::discriminant(candidate) == std::mem::discriminant(lookup);
+    // Binary search for the boundary, then require a same-typed neighbour.
+    let (mut low, mut high) = (0_usize, populated.len());
+    while low < high {
+        let middle = (low + high) / 2;
+        let candidate = populated[middle].1;
+        let ordering = typed_compare(candidate, lookup)?;
+        let goes_right = match mode {
+            MatchMode::Ascending => ordering != std::cmp::Ordering::Greater,
+            MatchMode::Descending => ordering != std::cmp::Ordering::Less,
+            MatchMode::Exact => unreachable!("handled above"),
+        };
+        if goes_right {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+    let chosen = low.checked_sub(1).map(|index| populated[index]);
+    match chosen {
+        Some((position, candidate)) if same_type(candidate) => Ok(position),
+        _ => Err(CalcError::NotAvailable),
+    }
+}
+
+/// Excel's comparison order for `<`, `>` and approximate lookups: numbers
+/// sort before text, text before booleans; text compares case-insensitively;
+/// blanks take the other side's type.
+fn typed_compare(left: &Value, right: &Value) -> Result<std::cmp::Ordering, CalcError> {
+    fn rank(value: &Value) -> u8 {
+        match value {
+            Value::Number(_) | Value::Blank => 0,
+            Value::Text(_) => 1,
+            Value::Boolean(_) => 2,
+            Value::Error(_) => 3,
+        }
+    }
+    if let Value::Error(error) = left {
+        return Err(error.clone());
+    }
+    if let Value::Error(error) = right {
+        return Err(error.clone());
+    }
+    let (left, right) = match (left, right) {
+        (Value::Blank, Value::Text(_)) => (Value::Text(String::new()), right.clone()),
+        (Value::Text(_), Value::Blank) => (left.clone(), Value::Text(String::new())),
+        (Value::Blank, Value::Boolean(_)) => (Value::Boolean(false), right.clone()),
+        (Value::Boolean(_), Value::Blank) => (left.clone(), Value::Boolean(false)),
+        (Value::Blank, _) => (Value::Number(0.0), right.clone()),
+        (_, Value::Blank) => (left.clone(), Value::Number(0.0)),
+        _ => (left.clone(), right.clone()),
+    };
+    Ok(match (&left, &right) {
+        (Value::Number(left), Value::Number(right)) => left.total_cmp(right),
+        (Value::Text(left), Value::Text(right)) => left.to_lowercase().cmp(&right.to_lowercase()),
+        (Value::Boolean(left), Value::Boolean(right)) => left.cmp(right),
+        _ => rank(&left).cmp(&rank(&right)),
+    })
 }
 
 fn range_parts<R>(expression: &Expr<R>) -> Option<(&[Expr<R>], &usize, &usize)> {
@@ -1050,16 +1445,38 @@ fn apply_binary(operator: BinaryOp, left: Value, right: Value) -> Value {
             (Err(error), _) | (_, Err(error)) => Value::Error(error),
         };
     }
-    if matches!(operator, BinaryOp::Equal | BinaryOp::NotEqual) {
-        let numerically_equal = match (number(left.clone()), number(right.clone())) {
-            (Ok(left), Ok(right)) => left == right,
-            _ => false,
+    if matches!(
+        operator,
+        BinaryOp::Equal
+            | BinaryOp::NotEqual
+            | BinaryOp::Less
+            | BinaryOp::LessOrEqual
+            | BinaryOp::Greater
+            | BinaryOp::GreaterOrEqual
+    ) {
+        use std::cmp::Ordering;
+        // Equality never crosses types (a number is never equal to text),
+        // except that a blank takes the other side's type.
+        let comparable = matches!(
+            (&left, &right),
+            (Value::Number(_), Value::Number(_))
+                | (Value::Text(_), Value::Text(_))
+                | (Value::Boolean(_), Value::Boolean(_))
+                | (Value::Blank, _)
+                | (_, Value::Blank)
+        );
+        let ordering = match typed_compare(&left, &right) {
+            Ok(ordering) => ordering,
+            Err(error) => return Value::Error(error),
         };
-        let equal = left == right || numerically_equal;
-        return Value::Boolean(if operator == BinaryOp::Equal {
-            equal
-        } else {
-            !equal
+        return Value::Boolean(match operator {
+            BinaryOp::Equal => comparable && ordering == Ordering::Equal,
+            BinaryOp::NotEqual => !(comparable && ordering == Ordering::Equal),
+            BinaryOp::Less => ordering == Ordering::Less,
+            BinaryOp::LessOrEqual => ordering != Ordering::Greater,
+            BinaryOp::Greater => ordering == Ordering::Greater,
+            BinaryOp::GreaterOrEqual => ordering != Ordering::Less,
+            _ => unreachable!("matched above"),
         });
     }
     let (left, right) = match (number(left), number(right)) {
@@ -1080,14 +1497,69 @@ fn apply_binary(operator: BinaryOp, left: Value, right: Value) -> Value {
                 Value::Number(result)
             }
         }
-        BinaryOp::Equal | BinaryOp::NotEqual | BinaryOp::Concat => {
-            unreachable!("handled above")
-        }
-        BinaryOp::Less => Value::Boolean(left < right),
-        BinaryOp::LessOrEqual => Value::Boolean(left <= right),
-        BinaryOp::Greater => Value::Boolean(left > right),
-        BinaryOp::GreaterOrEqual => Value::Boolean(left >= right),
+        BinaryOp::Equal
+        | BinaryOp::NotEqual
+        | BinaryOp::Concat
+        | BinaryOp::Less
+        | BinaryOp::LessOrEqual
+        | BinaryOp::Greater
+        | BinaryOp::GreaterOrEqual => unreachable!("handled above"),
     }
+}
+
+/// Sample (`n - 1`) or population (`n`) standard deviation or variance.
+fn deviation(numbers: &[f64], sample: bool, root: bool) -> Value {
+    let count = numbers.len();
+    if count < if sample { 2 } else { 1 } {
+        return Value::Error(CalcError::DivisionByZero);
+    }
+    let mean = numbers.iter().sum::<f64>() / count as f64;
+    let sum_of_squares: f64 = numbers.iter().map(|value| (value - mean).powi(2)).sum();
+    let variance = sum_of_squares / if sample { count - 1 } else { count } as f64;
+    Value::Number(if root { variance.sqrt() } else { variance })
+}
+
+/// `FIND(needle, haystack, [start])`: case-sensitive, one-based, `#VALUE!`
+/// when absent.
+fn find_text(values: &[Value]) -> Value {
+    if !matches!(values.len(), 2 | 3) {
+        return Value::Error(CalcError::InvalidArguments);
+    }
+    let (Ok(needle), Ok(haystack)) = (text_value(&values[0]), text_value(&values[1])) else {
+        return Value::Error(CalcError::InvalidValue);
+    };
+    let start = if values.len() == 3 {
+        match text_count(&values[2]) {
+            Ok(0) => return Value::Error(CalcError::InvalidValue),
+            Ok(start) => start,
+            Err(error) => return Value::Error(error),
+        }
+    } else {
+        1
+    };
+    let characters: Vec<char> = haystack.chars().collect();
+    if start > characters.len() + 1 {
+        return Value::Error(CalcError::InvalidValue);
+    }
+    let needle: Vec<char> = needle.chars().collect();
+    (start - 1..=characters.len().saturating_sub(needle.len()))
+        .find(|&index| characters[index..].starts_with(&needle))
+        .map(|index| Value::Number((index + 1) as f64))
+        .unwrap_or(Value::Error(CalcError::InvalidValue))
+}
+
+/// `REPT(text, count)`, bounded so a hostile count cannot exhaust memory.
+fn repeat_text(values: &[Value]) -> Value {
+    if values.len() != 2 {
+        return Value::Error(CalcError::InvalidArguments);
+    }
+    let (Ok(text), Ok(count)) = (text_value(&values[0]), text_count(&values[1])) else {
+        return Value::Error(CalcError::InvalidValue);
+    };
+    if text.chars().count().saturating_mul(count) > 32_767 {
+        return Value::Error(CalcError::InvalidValue);
+    }
+    Value::Text(text.repeat(count))
 }
 
 fn median(mut numbers: Vec<f64>) -> Value {
@@ -1402,6 +1874,8 @@ fn compile_expression(expression: Expr<CellId>, indices: &HashMap<CellId, usize>
         Expr::Number(value) => Expr::Number(value),
         Expr::Boolean(value) => Expr::Boolean(value),
         Expr::Text(value) => Expr::Text(value),
+        Expr::Error(error) => Expr::Error(error),
+        Expr::Empty => Expr::Empty,
         Expr::Reference(cell) => Expr::Reference(indices[&cell]),
         Expr::UnaryMinus(inner) => Expr::UnaryMinus(Box::new(compile_expression(*inner, indices))),
         Expr::Percent(inner) => Expr::Percent(Box::new(compile_expression(*inner, indices))),
@@ -1450,7 +1924,7 @@ fn collect_dependencies(expression: &Expr, output: &mut BTreeSet<CellId>) {
                 collect_dependencies(argument, output);
             }
         }
-        Expr::Number(_) | Expr::Boolean(_) | Expr::Text(_) => {}
+        Expr::Number(_) | Expr::Boolean(_) | Expr::Text(_) | Expr::Error(_) | Expr::Empty => {}
     }
 }
 
@@ -1459,16 +1933,25 @@ struct Parser<'source, 'sheets> {
     offset: usize,
     sheet: u32,
     sheet_names: &'sheets HashMap<String, u32>,
+    defined_names: &'sheets HashMap<String, String>,
+    name_depth: usize,
 }
 
 impl<'source, 'sheets> Parser<'source, 'sheets> {
-    fn new(source: &'source str, sheet: u32, sheet_names: &'sheets HashMap<String, u32>) -> Self {
+    fn new(
+        source: &'source str,
+        sheet: u32,
+        sheet_names: &'sheets HashMap<String, u32>,
+        defined_names: &'sheets HashMap<String, String>,
+    ) -> Self {
         let source = source.strip_prefix('=').unwrap_or(source);
         Self {
             source,
             offset: 0,
             sheet,
             sheet_names,
+            defined_names,
+            name_depth: 0,
         }
     }
 
@@ -1611,12 +2094,29 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
             }
             Some(b'"') => self.parse_string(),
             Some(b'\'') => self.parse_quoted_sheet_reference(),
+            Some(b'#') => self.parse_error_literal(),
+            Some(b'[') => Err(FormulaError::ExternalReference(self.bounded_remainder())),
             Some(byte) if byte.is_ascii_digit() || byte == b'.' => self.parse_number(),
-            Some(byte) if byte.is_ascii_alphabetic() || byte == b'$' => {
+            Some(byte) if byte.is_ascii_alphabetic() || byte == b'$' || byte == b'_' => {
                 self.parse_reference_or_function()
             }
             _ => Err(FormulaError::UnexpectedToken(self.offset)),
         }
+    }
+
+    fn bounded_remainder(&self) -> String {
+        self.remaining().chars().take(64).collect()
+    }
+
+    fn parse_error_literal(&mut self) -> Result<Expr, FormulaError> {
+        let start = self.offset;
+        while matches!(self.peek(), Some(byte) if byte.is_ascii_alphanumeric() || matches!(byte, b'#' | b'/' | b'!' | b'?'))
+        {
+            self.offset += 1;
+        }
+        CalcError::parse_literal(&self.source[start..self.offset])
+            .map(Expr::Error)
+            .ok_or(FormulaError::UnexpectedToken(start))
     }
 
     fn parse_number(&mut self) -> Result<Expr, FormulaError> {
@@ -1670,7 +2170,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
 
     fn parse_reference_or_function(&mut self) -> Result<Expr, FormulaError> {
         let start = self.offset;
-        while matches!(self.peek(), Some(byte) if byte.is_ascii_alphanumeric() || byte == b'$' || byte == b'_')
+        while matches!(self.peek(), Some(byte) if byte.is_ascii_alphanumeric() || matches!(byte, b'$' | b'_' | b'.'))
         {
             self.offset += 1;
         }
@@ -1690,8 +2190,27 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
         if token.eq_ignore_ascii_case("FALSE") {
             return Ok(Expr::Boolean(false));
         }
-        let first = parse_a1(token, self.sheet)?;
-        self.parse_range_tail(first, self.sheet)
+        match parse_a1(token, self.sheet) {
+            Ok(first) => self.parse_range_tail(first, self.sheet),
+            Err(_) => self.parse_defined_name(token),
+        }
+    }
+
+    /// Expands a defined name by compiling its definition in place, with the
+    /// same sheet table and a bounded depth for names that use names.
+    fn parse_defined_name(&mut self, token: &str) -> Result<Expr, FormulaError> {
+        let name = token.trim_start_matches('$');
+        let Some(definition) = self.defined_names.get(&name.to_lowercase()) else {
+            return Err(FormulaError::UnknownName(name.into()));
+        };
+        if self.name_depth >= MAX_NAME_DEPTH {
+            return Err(FormulaError::UnsupportedName(name.into()));
+        }
+        let mut inner = Parser::new(definition, self.sheet, self.sheet_names, self.defined_names);
+        inner.name_depth = self.name_depth + 1;
+        inner
+            .parse()
+            .map_err(|_| FormulaError::UnsupportedName(name.into()))
     }
 
     fn parse_quoted_sheet_reference(&mut self) -> Result<Expr, FormulaError> {
@@ -1715,6 +2234,11 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
         }
         self.skip_space();
         self.expect(b'!')?;
+        if sheet_name.starts_with('[') {
+            return Err(FormulaError::ExternalReference(
+                sheet_name.chars().take(64).collect(),
+            ));
+        }
         let sheet = self.resolve_sheet(&sheet_name)?;
         self.parse_qualified_reference(sheet)
     }
@@ -1755,13 +2279,19 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
         let function = parse_function_name(name)?;
         self.expect(b'(')?;
         let mut arguments = Vec::new();
+        self.skip_space();
+        if self.peek() == Some(b')') {
+            self.offset += 1;
+            return Ok(Expr::Function(function, arguments));
+        }
         loop {
             self.skip_space();
-            if self.peek() == Some(b')') {
-                self.offset += 1;
-                break;
-            }
-            arguments.push(self.parse_comparison()?);
+            // An omitted argument, as in `IF(x,,y)` or `SUM(,A1)`.
+            let argument = match self.peek() {
+                Some(b',') | Some(b')') => Expr::Empty,
+                _ => self.parse_comparison()?,
+            };
+            arguments.push(argument);
             self.skip_space();
             match self.peek() {
                 Some(b',') => self.offset += 1,
@@ -1866,6 +2396,19 @@ fn parse_function_name(name: &str) -> Result<Function, FormulaError> {
         "T" => Ok(Function::T),
         "SUMPRODUCT" => Ok(Function::SumProduct),
         "MEDIAN" => Ok(Function::Median),
+        "CHOOSE" => Ok(Function::Choose),
+        "SUBTOTAL" => Ok(Function::SubTotal),
+        "STDEV" | "STDEV.S" => Ok(Function::StDev),
+        "STDEVP" | "STDEV.P" => Ok(Function::StDevP),
+        "VAR" | "VAR.S" => Ok(Function::Var),
+        "VARP" | "VAR.P" => Ok(Function::VarP),
+        "NA" => Ok(Function::Na),
+        "ISNA" => Ok(Function::IsNa),
+        "HLOOKUP" => Ok(Function::HLookup),
+        "FIND" => Ok(Function::Find),
+        "REPT" => Ok(Function::Rept),
+        "ROW" => Ok(Function::Row),
+        "COLUMN" => Ok(Function::Column),
         _ => Err(FormulaError::UnsupportedFunction(name.to_ascii_uppercase())),
     }
 }
@@ -2228,9 +2771,13 @@ mod tests {
         workbook
             .set_formula(cell(1, 2), "=VLOOKUP(\"Beta\",A1:B3,2,TRUE)")
             .unwrap();
+        assert_eq!(workbook.value(cell(1, 2)), Value::Number(20.0));
+        workbook
+            .set_formula(cell(1, 3), "=VLOOKUP(\"Zeta\",A1:B3,2,FALSE)")
+            .unwrap();
         assert_eq!(
-            workbook.value(cell(1, 2)),
-            Value::Error(CalcError::InvalidArguments)
+            workbook.value(cell(1, 3)),
+            Value::Error(CalcError::NotAvailable)
         );
     }
 
@@ -2291,11 +2838,7 @@ mod tests {
             ),
             (19, "=WEEKDAY(A1,4)", Value::Error(CalcError::InvalidNumber)),
             (20, "=EDATE(A1)", Value::Error(CalcError::InvalidArguments)),
-            (
-                21,
-                "=YEAR(A1:A2)",
-                Value::Error(CalcError::InvalidArguments),
-            ),
+            (21, "=YEAR(A1:A2)", Value::Number(2024.0)),
             (22, "=IFERROR(YEAR(A3),YEAR(A1))", Value::Number(2024.0)),
         ] {
             workbook.set_formula(cell(0, column), formula).unwrap();
@@ -2418,6 +2961,286 @@ mod tests {
             workbook.value(cell(1, 2)),
             Value::Error(CalcError::DivisionByZero)
         );
+    }
+
+    #[test]
+    fn omitted_arguments_error_literals_and_blank_results_follow_excel() {
+        let mut workbook = Workbook::default();
+        for (column, formula, expected) in [
+            (0, "=SUM(,1,2)", Value::Number(3.0)),
+            (1, "=IF(TRUE,,5)", Value::Number(0.0)),
+            (2, "=IF(FALSE,1)", Value::Boolean(false)),
+            (3, "=1+IF(TRUE,,5)", Value::Number(1.0)),
+            (4, "=#REF!+1", Value::Error(CalcError::InvalidReference)),
+            (5, "=ISNA(#N/A)", Value::Boolean(true)),
+            (6, "=NA()", Value::Error(CalcError::NotAvailable)),
+            (7, "=ISERROR(#DIV/0!)", Value::Boolean(true)),
+            (8, "=Z99", Value::Number(0.0)),
+            (9, "=\"\"", Value::Text(String::new())),
+            (10, "=SUM()", Value::Number(0.0)),
+            (11, "=IF(TRUE,1,)", Value::Number(1.0)),
+            (12, "=IF(FALSE,1,)", Value::Number(0.0)),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
+        }
+        assert_eq!(
+            workbook.set_formula(cell(1, 0), "=#BOGUS!"),
+            Err(FormulaError::UnexpectedToken(0))
+        );
+    }
+
+    #[test]
+    fn external_references_and_defined_names_compile_explicitly() {
+        let mut workbook = Workbook::default();
+        workbook.define_sheet(0, "Data");
+        workbook.set_number(cell(0, 0), 10.0);
+        workbook.set_number(cell(1, 0), 20.0);
+        workbook.define_name("Rates", "Data!$A$1:$A$2");
+        workbook.define_name("rate_total", "SUM(Rates)*2");
+        workbook.define_name("Broken", "[2]External!A1");
+        workbook.define_name("Loop", "Loop+1");
+
+        workbook.set_formula(cell(0, 1), "=SUM(Rates)").unwrap();
+        workbook.set_formula(cell(0, 2), "=RATE_TOTAL+1").unwrap();
+        assert_eq!(workbook.value(cell(0, 1)), Value::Number(30.0));
+        assert_eq!(workbook.value(cell(0, 2)), Value::Number(61.0));
+        let report = workbook.set_number(cell(0, 0), 15.0);
+        assert!(report.evaluated.contains(&cell(0, 1)));
+        assert_eq!(workbook.value(cell(0, 2)), Value::Number(71.0));
+
+        assert_eq!(
+            workbook.set_formula(cell(0, 3), "=Missing+1"),
+            Err(FormulaError::UnknownName("Missing".into()))
+        );
+        assert_eq!(
+            workbook.set_formula(cell(0, 3), "=Broken"),
+            Err(FormulaError::UnsupportedName("Broken".into()))
+        );
+        assert_eq!(
+            workbook.set_formula(cell(0, 3), "=Loop"),
+            Err(FormulaError::UnsupportedName("Loop".into()))
+        );
+        assert!(matches!(
+            workbook.set_formula(cell(0, 3), "='[1]Data Sheet'!B11"),
+            Err(FormulaError::ExternalReference(_))
+        ));
+        assert!(matches!(
+            workbook.set_formula(cell(0, 3), "=[3]daily!$Y$140"),
+            Err(FormulaError::ExternalReference(_))
+        ));
+        assert!(matches!(
+            workbook.set_formula(cell(0, 3), "=VLOOKUP(1,[5]Q!$A$1:$C$5,3)"),
+            Err(FormulaError::ExternalReference(_))
+        ));
+    }
+
+    #[test]
+    fn ranges_in_scalar_position_intersect_with_the_formula_cell() {
+        let mut workbook = Workbook::default();
+        for row in 0..5 {
+            workbook.set_number(cell(row, 0), f64::from(row + 1) * 10.0);
+            workbook.set_number(cell(0, row + 2), f64::from(row + 1));
+        }
+        workbook.set_formula(cell(2, 1), "=A1:A5").unwrap();
+        assert_eq!(workbook.value(cell(2, 1)), Value::Number(30.0));
+        workbook.set_formula(cell(2, 1), "=A1:A5*2").unwrap();
+        assert_eq!(workbook.value(cell(2, 1)), Value::Number(60.0));
+        workbook.set_formula(cell(1, 4), "=C1:G1").unwrap();
+        assert_eq!(workbook.value(cell(1, 4)), Value::Number(3.0));
+        workbook.set_formula(cell(7, 1), "=A1:A5").unwrap();
+        assert_eq!(
+            workbook.value(cell(7, 1)),
+            Value::Error(CalcError::InvalidValue)
+        );
+        // A two-dimensional range intersects on both axes; a formula outside
+        // the range's columns gets #VALUE!, and one inside would be circular.
+        workbook.set_formula(cell(1, 8), "=A1:G5").unwrap();
+        assert_eq!(
+            workbook.value(cell(1, 8)),
+            Value::Error(CalcError::InvalidValue)
+        );
+        assert!(matches!(
+            workbook.set_formula(cell(1, 3), "=A1:G5"),
+            Err(FormulaError::Cycle(_))
+        ));
+        workbook.set_formula(cell(4, 1), "=ROW()").unwrap();
+        workbook.set_formula(cell(4, 2), "=COLUMN()").unwrap();
+        workbook
+            .set_formula(cell(4, 3), "=ROW(B7)+COLUMN(A1:A3)")
+            .unwrap();
+        assert_eq!(workbook.value(cell(4, 1)), Value::Number(5.0));
+        assert_eq!(workbook.value(cell(4, 2)), Value::Number(3.0));
+        assert_eq!(workbook.value(cell(4, 3)), Value::Number(8.0));
+    }
+
+    #[test]
+    fn comparisons_use_excel_type_order_and_case_folding() {
+        let mut workbook = Workbook::default();
+        workbook.set_text(cell(0, 0), "Alpha");
+        for (column, formula, expected) in [
+            (1, "=B9=\"\"", Value::Boolean(true)),
+            (2, "=B9=0", Value::Boolean(true)),
+            (3, "=B9=FALSE", Value::Boolean(true)),
+            (4, "=\"a\"=\"A\"", Value::Boolean(true)),
+            (5, "=1=\"1\"", Value::Boolean(false)),
+            (6, "=\"b\">\"a\"", Value::Boolean(true)),
+            (7, "=1<\"a\"", Value::Boolean(true)),
+            (8, "=TRUE>\"z\"", Value::Boolean(true)),
+            (9, "=A1<>\"alpha\"", Value::Boolean(false)),
+            (10, "=IF(B9=\"\",\"\",1)", Value::Text(String::new())),
+            (11, "=2>=2", Value::Boolean(true)),
+            (12, "=#N/A=1", Value::Error(CalcError::NotAvailable)),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
+        }
+    }
+
+    #[test]
+    fn choose_subtotal_and_dispersion_functions_follow_excel() {
+        let mut workbook = Workbook::default();
+        for (row, value) in [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]
+            .into_iter()
+            .enumerate()
+        {
+            workbook.set_number(cell(row as u32, 0), value);
+        }
+        workbook
+            .set_formula(cell(8, 0), "=SUBTOTAL(9,A1:A8)")
+            .unwrap();
+        workbook
+            .set_formula(cell(9, 0), "=SUBTOTAL(109,A1:A9)")
+            .unwrap();
+        assert_eq!(workbook.value(cell(8, 0)), Value::Number(40.0));
+        assert_eq!(workbook.value(cell(9, 0)), Value::Number(40.0));
+        for (column, formula, expected) in [
+            (1, "=CHOOSE(2,\"a\",\"b\",\"c\")", Value::Text("b".into())),
+            (2, "=CHOOSE(1.9,5,1/0)", Value::Number(5.0)),
+            (3, "=CHOOSE(0,1,2)", Value::Error(CalcError::InvalidValue)),
+            (4, "=CHOOSE(3,1,2)", Value::Error(CalcError::InvalidValue)),
+            (5, "=SUBTOTAL(1,A1:A8)", Value::Number(5.0)),
+            (6, "=SUBTOTAL(2,A1:A10)", Value::Number(8.0)),
+            (7, "=SUBTOTAL(4,A1:A10)", Value::Number(9.0)),
+            (
+                8,
+                "=SUBTOTAL(12,A1:A8)",
+                Value::Error(CalcError::InvalidValue),
+            ),
+            (9, "=SUBTOTAL(9,A11:A12)", Value::Number(0.0)),
+            (
+                10,
+                "=SUBTOTAL(1,A11:A12)",
+                Value::Error(CalcError::DivisionByZero),
+            ),
+            (11, "=ROUND(STDEV(A1:A8),5)", Value::Number(2.13809)),
+            (12, "=STDEVP(A1:A8)", Value::Number(2.0)),
+            (13, "=ROUND(VAR.S(A1:A8),6)", Value::Number(4.571429)),
+            (14, "=VAR.P(A1:A8)", Value::Number(4.0)),
+            (15, "=STDEV(A1)", Value::Error(CalcError::DivisionByZero)),
+            (16, "=ROUND(SUBTOTAL(7,A1:A9),5)", Value::Number(2.13809)),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
+        }
+    }
+
+    #[test]
+    fn approximate_lookups_binary_search_sorted_keys() {
+        let mut workbook = Workbook::default();
+        for (row, (key, label)) in [(10.0, "ten"), (20.0, "twenty"), (30.0, "thirty")]
+            .into_iter()
+            .enumerate()
+        {
+            workbook.set_number(cell(row as u32, 0), key);
+            workbook.set_text(cell(row as u32, 1), label);
+            workbook.set_number(cell(5, row as u32), key);
+            workbook.set_text(cell(6, row as u32), label);
+        }
+        for (column, formula, expected) in [
+            (2, "=VLOOKUP(25,A1:B3,2)", Value::Text("twenty".into())),
+            (3, "=VLOOKUP(30,A1:B3,2,TRUE)", Value::Text("thirty".into())),
+            (
+                4,
+                "=VLOOKUP(5,A1:B3,2)",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            (5, "=VLOOKUP(20,A1:B3,2,0)", Value::Text("twenty".into())),
+            (
+                6,
+                "=VLOOKUP(25,A1:B3,2,0)",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            (
+                7,
+                "=VLOOKUP(\"x\",A1:B3,2)",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            (
+                8,
+                "=VLOOKUP(25,A1:B3,3)",
+                Value::Error(CalcError::InvalidReference),
+            ),
+            (9, "=VLOOKUP(25,A1:B5,2)", Value::Text("twenty".into())),
+            (10, "=HLOOKUP(25,A6:C7,2)", Value::Text("twenty".into())),
+            (
+                11,
+                "=HLOOKUP(20,A6:C7,2,FALSE)",
+                Value::Text("twenty".into()),
+            ),
+            (12, "=MATCH(25,A1:A3)", Value::Number(2.0)),
+            (13, "=MATCH(25,A1:A3,1)", Value::Number(2.0)),
+            (
+                14,
+                "=MATCH(25,A1:A3,0)",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            (15, "=MATCH(35,A1:A3,1)", Value::Number(3.0)),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
+        }
+        for (row, key) in [30.0, 20.0, 10.0].into_iter().enumerate() {
+            workbook.set_number(cell(row as u32 + 10, 0), key);
+        }
+        workbook
+            .set_formula(cell(1, 2), "=MATCH(25,A11:A13,-1)")
+            .unwrap();
+        assert_eq!(workbook.value(cell(1, 2)), Value::Number(1.0));
+        workbook
+            .set_formula(cell(1, 3), "=MATCH(5,A11:A13,-1)")
+            .unwrap();
+        assert_eq!(workbook.value(cell(1, 3)), Value::Number(3.0));
+    }
+
+    #[test]
+    fn find_and_rept_follow_excel_text_rules() {
+        let mut workbook = Workbook::default();
+        for (column, formula, expected) in [
+            (0, "=FIND(\"x\",\"axb\")", Value::Number(2.0)),
+            (
+                1,
+                "=FIND(\"X\",\"axb\")",
+                Value::Error(CalcError::InvalidValue),
+            ),
+            (2, "=FIND(\"b\",\"abab\",3)", Value::Number(4.0)),
+            (3, "=FIND(\"\",\"abc\")", Value::Number(1.0)),
+            (
+                4,
+                "=FIND(\"a\",\"abc\",0)",
+                Value::Error(CalcError::InvalidValue),
+            ),
+            (5, "=REPT(\"ab\",3)", Value::Text("ababab".into())),
+            (6, "=REPT(\"ab\",0)", Value::Text(String::new())),
+            (
+                7,
+                "=REPT(\"ab\",1e9)",
+                Value::Error(CalcError::InvalidValue),
+            ),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
+        }
     }
 
     #[test]
