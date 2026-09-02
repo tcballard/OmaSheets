@@ -127,6 +127,16 @@ pub struct ImportedWorkbook {
 }
 
 impl ImportedWorkbook {
+    /// The compared formula cells whose recalculated value differs from the
+    /// stored one, with both values, for tooling that investigates
+    /// mismatches; the score report itself stays aggregate.
+    pub fn mismatched_cells(&self) -> impl Iterator<Item = (CellId, &Value, Value)> {
+        self.stored_formula_values
+            .iter()
+            .map(|(cell, stored)| (*cell, stored, self.workbook.value(*cell)))
+            .filter(|(_, stored, calculated)| !values_match(stored, calculated))
+    }
+
     pub fn parity(&self) -> ParitySummary {
         let stored_values_matched = self
             .stored_formula_values
