@@ -83,6 +83,8 @@ jobs:
             > "$evidence/owned-score.json"
           target/release/omasheets-corpus index \
             "$evidence/corpus" "$evidence/manifest.jsonl"
+          target/release/omasheets-corpus verify \
+            "$evidence/manifest.jsonl" "$evidence/corpus" > "$evidence/verify.json"
           python scripts/performance.py run \
             --name m0-corpus-formualizer-smoke \
             --timeout 45 \
@@ -104,15 +106,34 @@ jobs:
           assert owned["stored_values_matched"] == 250
           assert owned["stored_values_mismatched"] == 0
           assert owned["unsupported_formulas"] == 0
+          assert owned["unsupported_functions"] == {}
+          assert owned["unsupported_reasons"] == {}
           score = json.loads((root / "score.json").read_text())
           summary = score["summary"]
-          assert score["stored_value_comparison"] == "not_implemented"
+          assert score["schema"] == 2
+          assert score["stored_value_comparison"] == "owned-m0"
+          assert score["owned_engine"] == "omasheets-owned-m0"
           assert summary["files"] == 1
           assert summary["succeeded"] == 1
           assert summary["failed"] == 0
           assert summary["formula_cells_observed"] == 250
           assert summary["formula_cells_loaded"] == 250
           assert summary["formula_parse_rate"] == 1.0
+          assert summary["peak_rss_bytes_max"] > 0
+          lane = score["owned_summary"]
+          assert lane["files"] == 1 and lane["opened"] == 1 and lane["failed"] == 0
+          assert lane["formula_cells_observed"] == 250
+          assert lane["formula_cells_compared"] == 250
+          assert lane["stored_values_matched"] == 250
+          assert lane["stored_values_mismatched"] == 0
+          assert lane["formula_parse_rate"] == 1.0
+          assert lane["comparison_coverage"] == 1.0
+          assert lane["stored_value_match_rate"] == 1.0
+          assert lane["unsupported_functions"] == {}
+          assert lane["peak_rss_bytes_max"] > 0
+          entry = score["entries"][0]
+          assert entry["status"] == "ok" and entry["owned_status"] == "ok"
+          assert entry["owned"]["report"]["source_sha256"] == entry["sha256"]
           performance = json.loads((root / "performance.json").read_text())
           assert performance["exit_code"] == 0
           assert performance["timed_out"] is False
@@ -193,6 +214,7 @@ jobs:
             ${{ runner.temp }}/omasheets-m0/fixture.json
             ${{ runner.temp }}/omasheets-m0/calc-benchmark.json
             ${{ runner.temp }}/omasheets-m0/manifest.jsonl
+            ${{ runner.temp }}/omasheets-m0/verify.json
             ${{ runner.temp }}/omasheets-m0/owned-score.json
             ${{ runner.temp }}/omasheets-m0/score.json
             ${{ runner.temp }}/omasheets-m0/performance.json

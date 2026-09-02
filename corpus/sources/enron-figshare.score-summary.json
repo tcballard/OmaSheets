@@ -1,0 +1,225 @@
+{
+  "schema": 1,
+  "source": "enron-figshare",
+  "manifest": "enron-figshare.jsonl",
+  "manifest_sha256": "2f5ea94c02ae3779206d6ca1b1da9e77002450bc070fa968ca566cfd526ff80d",
+  "scored": "2026-09-01",
+  "command": "omasheets-corpus score corpus/sources/enron-figshare.jsonl <root> <out> --timeout-seconds 30",
+  "engine_commit": "08f38d1eeedf22d38dcc58eb928d083580c206ab",
+  "runner": "linux x86_64 container, 4 vCPU",
+  "wall_seconds": 242.8,
+  "process_tree_peak_rss_bytes": 1543901184,
+  "candidate_engine": "formualizer-calamine-0.8.4",
+  "candidate_summary": {
+    "files": 1000,
+    "succeeded": 834,
+    "failed": 166,
+    "timed_out": 0,
+    "value_cells_observed": 3843371,
+    "formula_cells_observed": 419854,
+    "formula_cells_loaded": 419854,
+    "formula_parse_rate": 1.0,
+    "peak_rss_bytes_max": 160415744
+  },
+  "owned_engine": "omasheets-owned-m0",
+  "owned_summary": {
+    "files": 1000,
+    "opened": 971,
+    "failed": 29,
+    "timed_out": 2,
+    "formula_cells_observed": 730879,
+    "formula_cells_loaded": 600171,
+    "formula_cells_compared": 600171,
+    "stored_values_matched": 542159,
+    "stored_values_mismatched": 58012,
+    "unsupported_formulas": 130708,
+    "formula_parse_rate": 0.821163284209835,
+    "comparison_coverage": 0.821163284209835,
+    "stored_value_match_rate": 0.9033408811821964,
+    "unsupported_reasons": {
+      "cycle": 56,
+      "invalid_reference": 24123,
+      "syntax": 52523,
+      "unknown_sheet": 9747,
+      "unsupported_function": 44259
+    },
+    "peak_rss_bytes_max": 193032192
+  },
+  "owned_unsupported_functions": {
+    "CHOOSE": {
+      "formula_cells": 28995,
+      "workbooks": 6
+    },
+    "SUBTOTAL": {
+      "formula_cells": 9965,
+      "workbooks": 24
+    },
+    "RAND": {
+      "formula_cells": 936,
+      "workbooks": 1
+    },
+    "NA": {
+      "formula_cells": 861,
+      "workbooks": 5
+    },
+    "OFFSET": {
+      "formula_cells": 701,
+      "workbooks": 2
+    },
+    "HLOOKUP": {
+      "formula_cells": 381,
+      "workbooks": 7
+    },
+    "YEARFRAC": {
+      "formula_cells": 359,
+      "workbooks": 1
+    },
+    "NETWORKDAYS": {
+      "formula_cells": 304,
+      "workbooks": 1
+    },
+    "FIND": {
+      "formula_cells": 266,
+      "workbooks": 1
+    },
+    "NOW": {
+      "formula_cells": 237,
+      "workbooks": 97
+    },
+    "DAYS360": {
+      "formula_cells": 216,
+      "workbooks": 1
+    },
+    "LINEST": {
+      "formula_cells": 85,
+      "workbooks": 1
+    },
+    "WORKDAY": {
+      "formula_cells": 81,
+      "workbooks": 3
+    },
+    "REPT": {
+      "formula_cells": 81,
+      "workbooks": 1
+    },
+    "ISNA": {
+      "formula_cells": 78,
+      "workbooks": 4
+    },
+    "INDIRECT": {
+      "formula_cells": 69,
+      "workbooks": 1
+    },
+    "NORMDIST": {
+      "formula_cells": 63,
+      "workbooks": 1
+    },
+    "TODAY": {
+      "formula_cells": 52,
+      "workbooks": 28
+    },
+    "XNPV": {
+      "formula_cells": 52,
+      "workbooks": 4
+    },
+    "CELL": {
+      "formula_cells": 48,
+      "workbooks": 15
+    },
+    "LOOKUP": {
+      "formula_cells": 48,
+      "workbooks": 4
+    },
+    "TRANSPOSE": {
+      "formula_cells": 48,
+      "workbooks": 3
+    },
+    "PMT": {
+      "formula_cells": 47,
+      "workbooks": 4
+    },
+    "DAVERAGE": {
+      "formula_cells": 45,
+      "workbooks": 1
+    },
+    "DMAX": {
+      "formula_cells": 45,
+      "workbooks": 1
+    },
+    "DMIN": {
+      "formula_cells": 45,
+      "workbooks": 1
+    },
+    "DSTDEV": {
+      "formula_cells": 45,
+      "workbooks": 1
+    },
+    "AVERAGEA": {
+      "formula_cells": 36,
+      "workbooks": 3
+    },
+    "XIRR": {
+      "formula_cells": 14,
+      "workbooks": 5
+    },
+    "TEXT": {
+      "formula_cells": 11,
+      "workbooks": 6
+    },
+    "NPV": {
+      "formula_cells": 8,
+      "workbooks": 2
+    },
+    "STDEV": {
+      "formula_cells": 7,
+      "workbooks": 2
+    },
+    "PV": {
+      "formula_cells": 6,
+      "workbooks": 3
+    },
+    "CORREL": {
+      "formula_cells": 6,
+      "workbooks": 2
+    },
+    "IRR": {
+      "formula_cells": 6,
+      "workbooks": 1
+    },
+    "MMULT": {
+      "formula_cells": 4,
+      "workbooks": 1
+    },
+    "NORMSDIST": {
+      "formula_cells": 4,
+      "workbooks": 1
+    },
+    "COVAR": {
+      "formula_cells": 3,
+      "workbooks": 1
+    },
+    "CALCSKEW": {
+      "formula_cells": 1,
+      "workbooks": 1
+    }
+  },
+  "candidate_failure_kinds": {
+    "undefined_name_or_formula_parse": 98,
+    "chartsheet_instead_of_worksheet": 39,
+    "relationship_not_found": 24,
+    "memory_allocation_failed": 1,
+    "other": 4
+  },
+  "owned_failure_kinds": {
+    "relationship_not_found": 24,
+    "timed_out_30s": 2,
+    "date_system_1904_rejected": 2,
+    "cell_limit_2000000_exceeded": 1
+  },
+  "notes": [
+    "Aggregate only: no workbook paths, cell contents or per-file results are recorded here.",
+    "Both lanes fail on the same 24 workbooks calamine cannot open (missing relationship parts).",
+    "Mismatches are concentrated: 58,012 cells across 108 of 971 opened workbooks.",
+    "Compile failures by kind: syntax 52,523; unsupported function 44,259; invalid reference 24,123; unknown sheet 9,747; cycle 56."
+  ]
+}

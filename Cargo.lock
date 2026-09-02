@@ -938,6 +938,7 @@ version = "0.0.0"
 dependencies = [
  "formualizer-workbook",
  "libc",
+ "omasheets-xlsx",
  "serde",
  "serde_json",
  "sha2",
@@ -949,6 +950,8 @@ version = "0.0.0"
 dependencies = [
  "calamine",
  "omasheets-calc",
+ "serde",
+ "serde_json",
  "sha2",
 ]
 

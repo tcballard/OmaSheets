@@ -2,9 +2,10 @@
 use formualizer_workbook::{
     CalamineAdapter, LoadStrategy, SpreadsheetReader, Workbook, WorkbookConfig,
 };
+use omasheets_xlsx::{ImportLimits, ScoreReport as OwnedReport, import_xlsx};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -26,7 +27,7 @@ const MAX_TIMEOUT_SECONDS: u64 = 300;
 const MAX_PROBE_ADDRESS_SPACE_BYTES: libc::rlim_t = 2 * 1024 * 1024 * 1024;
 
 fn usage() -> &'static str {
-    "usage:\n  omasheets-corpus index ROOT OUTPUT.jsonl\n  omasheets-corpus score MANIFEST.jsonl ROOT OUTPUT.json [--timeout-seconds N] [--require-all]"
+    "usage:\n  omasheets-corpus index ROOT OUTPUT.jsonl\n  omasheets-corpus verify MANIFEST.jsonl ROOT\n  omasheets-corpus score MANIFEST.jsonl ROOT OUTPUT.json [--timeout-seconds N] [--require-all]"
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -47,6 +48,19 @@ struct ProbeReport {
     value_slots_loaded: Option<u64>,
     formula_cells_loaded: Option<u64>,
     timing_ms: ProbeTiming,
+    /// Peak resident set of the probe process, from `getrusage` on Unix.
+    #[serde(default)]
+    peak_rss_bytes: Option<u64>,
+}
+
+/// One workbook through the owned M0 engine, run in its own bounded child.
+#[derive(Debug, Serialize, Deserialize)]
+struct OwnedProbe {
+    schema: u8,
+    report: OwnedReport,
+    timing_ms: f64,
+    #[serde(default)]
+    peak_rss_bytes: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -72,6 +86,11 @@ struct ScoreEntry {
     probe: Option<ProbeReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    owned_status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owned: Option<OwnedProbe>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owned_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -84,15 +103,70 @@ struct ScoreSummary {
     formula_cells_observed: Option<u64>,
     formula_cells_loaded: Option<u64>,
     formula_parse_rate: Option<f64>,
+    peak_rss_bytes_max: Option<u64>,
+}
+
+/// Aggregate of the owned-engine lane. `opened` counts workbooks the owned
+/// importer accepted; parse, comparison and match rates are over formula
+/// cells, and every rate is `None` until at least one workbook opened.
+#[derive(Debug, Default, Serialize)]
+struct OwnedSummary {
+    files: usize,
+    opened: usize,
+    failed: usize,
+    timed_out: usize,
+    formula_cells_observed: u64,
+    formula_cells_loaded: u64,
+    formula_cells_compared: u64,
+    stored_values_matched: u64,
+    stored_values_mismatched: u64,
+    unsupported_formulas: u64,
+    formula_parse_rate: Option<f64>,
+    comparison_coverage: Option<f64>,
+    stored_value_match_rate: Option<f64>,
+    /// Unsupported function names across the corpus with formula-cell counts
+    /// and the number of workbooks naming each, bounded like the per-file map.
+    unsupported_functions: BTreeMap<String, FunctionMiss>,
+    unsupported_reasons: BTreeMap<String, u64>,
+    peak_rss_bytes_max: Option<u64>,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct FunctionMiss {
+    formula_cells: u64,
+    workbooks: u64,
 }
 
 #[derive(Debug, Serialize)]
 struct ScoreReport {
     schema: u8,
     engine: &'static str,
+    owned_engine: &'static str,
     stored_value_comparison: &'static str,
     summary: ScoreSummary,
+    owned_summary: OwnedSummary,
     entries: Vec<ScoreEntry>,
+}
+
+#[derive(Debug, Serialize)]
+struct VerifyEntry {
+    id: String,
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct VerifyReport {
+    schema: u8,
+    files: usize,
+    verified: usize,
+    failed: usize,
+    entries: Vec<VerifyEntry>,
+}
+
+fn ratio(numerator: u64, denominator: u64) -> Option<f64> {
+    (denominator > 0).then(|| numerator as f64 / denominator as f64)
 }
 
 struct Captured {
@@ -330,7 +404,39 @@ fn probe(path: &Path) -> Result<ProbeReport, String> {
             evaluate: evaluated_ms,
             total: started.elapsed().as_secs_f64() * 1000.0,
         },
+        peak_rss_bytes: peak_rss_bytes(),
     })
+}
+
+fn owned_probe(path: &Path) -> Result<OwnedProbe, String> {
+    let started = Instant::now();
+    let imported = import_xlsx(path, ImportLimits::default()).map_err(|error| error.to_string())?;
+    Ok(OwnedProbe {
+        schema: 1,
+        report: imported.report(),
+        timing_ms: started.elapsed().as_secs_f64() * 1000.0,
+        peak_rss_bytes: peak_rss_bytes(),
+    })
+}
+
+/// Peak resident set size of this process. Linux reports `ru_maxrss` in
+/// kibibytes and macOS in bytes.
+#[cfg(unix)]
+fn peak_rss_bytes() -> Option<u64> {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    let result = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+    if result != 0 {
+        return None;
+    }
+    let usage = unsafe { usage.assume_init() };
+    let maxrss = u64::try_from(usage.ru_maxrss).ok()?;
+    let scale = if cfg!(target_os = "macos") { 1 } else { 1024 };
+    Some(maxrss.saturating_mul(scale))
+}
+
+#[cfg(not(unix))]
+fn peak_rss_bytes() -> Option<u64> {
+    None
 }
 
 #[cfg(not(feature = "formualizer"))]
@@ -366,8 +472,8 @@ fn apply_probe_resource_limits() -> Result<(), String> {
     Ok(())
 }
 
-fn probe_command(path: &Path) -> bool {
-    let (payload, succeeded) = match apply_probe_resource_limits().and_then(|()| probe(path)) {
+fn emit_probe<T: Serialize>(result: Result<T, String>, path: &Path) -> bool {
+    let (payload, succeeded) = match result {
         Ok(report) => (serde_json::to_string(&report), true),
         Err(error) => (
             serde_json::to_string(&ProbeFailure {
@@ -385,6 +491,20 @@ fn probe_command(path: &Path) -> bool {
         }
     }
     succeeded
+}
+
+fn probe_command(path: &Path) -> bool {
+    emit_probe(
+        apply_probe_resource_limits().and_then(|()| probe(path)),
+        path,
+    )
+}
+
+fn owned_probe_command(path: &Path) -> bool {
+    emit_probe(
+        apply_probe_resource_limits().and_then(|()| owned_probe(path)),
+        path,
+    )
 }
 
 fn read_capped(mut input: impl Read, maximum: usize) -> Captured {
@@ -421,10 +541,10 @@ fn wait_with_timeout(child: &mut Child, timeout: Duration) -> io::Result<(ExitSt
     }
 }
 
-fn run_probe(path: &Path, timeout: Duration) -> Result<ChildResult, String> {
+fn run_probe(command: &str, path: &Path, timeout: Duration) -> Result<ChildResult, String> {
     let executable = env::current_exe().map_err(|error| error.to_string())?;
     let mut child = Command::new(executable)
-        .arg("probe")
+        .arg(command)
         .arg(path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -517,20 +637,22 @@ fn score_command(
     let mut value_cells = Some(0_u64);
     let mut formula_cells = Some(0_u64);
     let mut formulas_loaded = Some(0_u64);
+    let mut peak_rss = None;
+    let mut owned_summary = OwnedSummary::default();
 
     for entry in entries {
-        let result = resolve_entry(&root, &entry).and_then(|path| {
-            let result = run_probe(&path, timeout)?;
+        let sha256 = entry.sha256.to_ascii_lowercase();
+        let candidate = resolve_entry(&root, &entry);
+        let run_lane = |command: &str| -> Result<ChildResult, String> {
+            let path = candidate.clone()?;
+            let result = run_probe(command, &path, timeout)?;
             resolve_entry(&root, &entry)
                 .map_err(|_| "corpus input changed while it was being scored".to_string())?;
             Ok(result)
-        });
-        match result {
-            Ok(child)
-                if child.status.success()
-                    && !child.stdout.overflowed
-                    && !child.stderr.overflowed =>
-            {
+        };
+
+        let (status, probe_report, error) = match run_lane("probe") {
+            Ok(child) if child_completed(&child) => {
                 match serde_json::from_slice::<ProbeReport>(&child.stdout.bytes) {
                     Ok(probe) => {
                         succeeded += 1;
@@ -543,45 +665,77 @@ fn score_command(
                         formulas_loaded = formulas_loaded
                             .zip(probe.formula_cells_loaded)
                             .map(|(total, observed)| total + observed);
-                        reports.push(ScoreEntry {
-                            id: entry.id,
-                            sha256: entry.sha256.to_ascii_lowercase(),
-                            status: "ok",
-                            probe: Some(probe),
-                            error: None,
-                        });
+                        peak_rss = peak_rss.max(probe.peak_rss_bytes);
+                        ("ok", Some(probe), None)
                     }
-                    Err(_) => reports.push(ScoreEntry {
-                        id: entry.id,
-                        sha256: entry.sha256.to_ascii_lowercase(),
-                        status: "failed",
-                        probe: None,
-                        error: Some("probe returned invalid bounded JSON".into()),
-                    }),
+                    Err(_) => (
+                        "failed",
+                        None,
+                        Some("probe returned invalid bounded JSON".to_string()),
+                    ),
                 }
             }
             Ok(child) => {
                 timed_out += usize::from(child.timed_out);
-                reports.push(ScoreEntry {
-                    id: entry.id,
-                    sha256: entry.sha256.to_ascii_lowercase(),
-                    status: if child.timed_out {
+                (
+                    if child.timed_out {
                         "timed_out"
                     } else {
                         "failed"
                     },
-                    probe: None,
-                    error: Some(probe_error(&child)),
-                });
+                    None,
+                    Some(probe_error(&child)),
+                )
             }
-            Err(error) => reports.push(ScoreEntry {
-                id: entry.id,
-                sha256: entry.sha256.to_ascii_lowercase(),
-                status: "failed",
-                probe: None,
-                error: Some(error.chars().take(512).collect()),
-            }),
-        }
+            Err(error) => ("failed", None, Some(error.chars().take(512).collect())),
+        };
+
+        let (owned_status, owned, owned_error) = match run_lane("probe-owned") {
+            Ok(child) if child_completed(&child) => {
+                match serde_json::from_slice::<OwnedProbe>(&child.stdout.bytes) {
+                    Ok(owned) => {
+                        accumulate_owned(&mut owned_summary, &owned);
+                        ("ok", Some(owned), None)
+                    }
+                    Err(_) => {
+                        owned_summary.failed += 1;
+                        (
+                            "failed",
+                            None,
+                            Some("owned probe returned invalid bounded JSON".to_string()),
+                        )
+                    }
+                }
+            }
+            Ok(child) => {
+                owned_summary.failed += 1;
+                owned_summary.timed_out += usize::from(child.timed_out);
+                (
+                    if child.timed_out {
+                        "timed_out"
+                    } else {
+                        "failed"
+                    },
+                    None,
+                    Some(probe_error(&child)),
+                )
+            }
+            Err(error) => {
+                owned_summary.failed += 1;
+                ("failed", None, Some(error.chars().take(512).collect()))
+            }
+        };
+
+        reports.push(ScoreEntry {
+            id: entry.id,
+            sha256,
+            status,
+            probe: probe_report,
+            error,
+            owned_status,
+            owned,
+            owned_error,
+        });
     }
 
     let files = reports.len();
@@ -594,10 +748,14 @@ fn score_command(
     let formula_parse_rate = formula_cells
         .zip(formulas_loaded)
         .and_then(|(observed, loaded)| (observed > 0).then_some(loaded as f64 / observed as f64));
+    owned_summary.files = files;
+    finish_owned(&mut owned_summary);
+    let owned_failed = owned_summary.failed;
     let report = ScoreReport {
-        schema: 1,
+        schema: 2,
         engine: "formualizer-calamine-0.8.4",
-        stored_value_comparison: "not_implemented",
+        owned_engine: omasheets_xlsx::ENGINE_NAME,
+        stored_value_comparison: "owned-m0",
         summary: ScoreSummary {
             files,
             succeeded,
@@ -607,7 +765,9 @@ fn score_command(
             formula_cells_observed: formula_cells,
             formula_cells_loaded: formulas_loaded,
             formula_parse_rate,
+            peak_rss_bytes_max: peak_rss,
         },
+        owned_summary,
         entries: reports,
     };
     let mut destination = open_new(output)?;
@@ -616,7 +776,93 @@ fn score_command(
         .write_all(b"\n")
         .map_err(|error| error.to_string())?;
     destination.sync_all().map_err(|error| error.to_string())?;
-    Ok(!require_all || failed == 0)
+    Ok(!require_all || (failed == 0 && owned_failed == 0))
+}
+
+fn child_completed(child: &ChildResult) -> bool {
+    child.status.success() && !child.stdout.overflowed && !child.stderr.overflowed
+}
+
+fn accumulate_owned(summary: &mut OwnedSummary, owned: &OwnedProbe) {
+    let report = &owned.report;
+    summary.opened += 1;
+    summary.formula_cells_observed += report.formula_cells_observed as u64;
+    summary.formula_cells_loaded += report.formula_cells_loaded as u64;
+    summary.formula_cells_compared += report.formula_cells_compared as u64;
+    summary.stored_values_matched += report.stored_values_matched as u64;
+    summary.stored_values_mismatched += report.stored_values_mismatched as u64;
+    summary.unsupported_formulas += report.unsupported_formulas as u64;
+    for (name, cells) in &report.unsupported_functions {
+        if summary.unsupported_functions.len() >= omasheets_xlsx::MAX_REPORTED_FUNCTIONS
+            && !summary.unsupported_functions.contains_key(name)
+        {
+            continue;
+        }
+        let miss = summary
+            .unsupported_functions
+            .entry(name.clone())
+            .or_default();
+        miss.formula_cells += *cells as u64;
+        miss.workbooks += 1;
+    }
+    for (reason, cells) in &report.unsupported_reasons {
+        *summary
+            .unsupported_reasons
+            .entry(reason.clone())
+            .or_default() += *cells as u64;
+    }
+    summary.peak_rss_bytes_max = summary.peak_rss_bytes_max.max(owned.peak_rss_bytes);
+}
+
+fn finish_owned(summary: &mut OwnedSummary) {
+    if summary.opened == 0 {
+        return;
+    }
+    summary.formula_parse_rate =
+        ratio(summary.formula_cells_loaded, summary.formula_cells_observed);
+    summary.comparison_coverage = ratio(
+        summary.formula_cells_compared,
+        summary.formula_cells_observed,
+    );
+    summary.stored_value_match_rate = ratio(
+        summary.stored_values_matched,
+        summary.formula_cells_compared,
+    );
+}
+
+fn verify_command(manifest: &Path, root: &Path) -> Result<bool, String> {
+    let entries = read_manifest(manifest)?;
+    let root = root.canonicalize().map_err(|error| error.to_string())?;
+    if !root.is_dir() {
+        return Err("corpus root must be a directory".into());
+    }
+    let mut report = VerifyReport {
+        schema: 1,
+        files: entries.len(),
+        verified: 0,
+        failed: 0,
+        entries: Vec::with_capacity(entries.len()),
+    };
+    for entry in entries {
+        let (status, error) = match resolve_entry(&root, &entry) {
+            Ok(_) => {
+                report.verified += 1;
+                ("ok", None)
+            }
+            Err(error) => {
+                report.failed += 1;
+                ("failed", Some(error))
+            }
+        };
+        report.entries.push(VerifyEntry {
+            id: entry.id,
+            status,
+            error,
+        });
+    }
+    let payload = serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
+    println!("{payload}");
+    Ok(report.failed == 0)
 }
 
 fn parse_score_options(arguments: &[String]) -> Result<(u64, bool), String> {
@@ -656,6 +902,10 @@ fn run(arguments: Vec<String>) -> Result<bool, String> {
             Ok(true)
         }
         [command, path] if command == "probe" => Ok(probe_command(Path::new(path))),
+        [command, path] if command == "probe-owned" => Ok(owned_probe_command(Path::new(path))),
+        [command, manifest, root] if command == "verify" => {
+            verify_command(Path::new(manifest), Path::new(root))
+        }
         [command, manifest, root, output, options @ ..] if command == "score" => {
             let (seconds, require_all) = parse_score_options(options)?;
             score_command(
@@ -752,6 +1002,97 @@ mod tests {
         assert!(!sanitized.contains("/private/corpus"));
         assert!(sanitized.contains("<input>"));
         assert_eq!(sanitized.chars().count(), 512);
+    }
+
+    #[test]
+    fn verify_reports_digest_drift_per_entry_without_stopping() {
+        let root = test_directory("verify");
+        fs::write(root.join("good.xlsx"), b"frozen workbook").unwrap();
+        fs::write(root.join("drift.xlsx"), b"changed workbook").unwrap();
+        let good = sha256(&root.join("good.xlsx")).unwrap();
+        let manifest = root.join("manifest.jsonl");
+        fs::write(
+            &manifest,
+            format!(
+                "{{\"id\":\"good\",\"path\":\"good.xlsx\",\"sha256\":\"{good}\"}}\n\
+                 {{\"id\":\"drift\",\"path\":\"drift.xlsx\",\"sha256\":\"{}\"}}\n\
+                 {{\"id\":\"missing\",\"path\":\"missing.xlsx\",\"sha256\":\"{good}\"}}\n",
+                "0".repeat(64)
+            ),
+        )
+        .unwrap();
+
+        assert!(!verify_command(&manifest, &root).unwrap());
+        assert_eq!(
+            resolve_entry(
+                &root.canonicalize().unwrap(),
+                &ManifestEntry {
+                    id: "drift".into(),
+                    path: "drift.xlsx".into(),
+                    sha256: "0".repeat(64),
+                },
+            )
+            .unwrap_err(),
+            "corpus input does not match its manifest SHA-256"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn owned_lane_aggregates_misses_by_cells_and_workbooks() {
+        let mut summary = OwnedSummary::default();
+        let make = |functions: &[(&str, usize)], loaded: usize| OwnedProbe {
+            schema: 1,
+            report: OwnedReport {
+                schema: 2,
+                engine: omasheets_xlsx::ENGINE_NAME.into(),
+                date_system: "1900".into(),
+                source_sha256: "a".repeat(64),
+                sheets: 1,
+                formula_cells_observed: 10,
+                formula_cells_loaded: loaded,
+                formula_cells_compared: loaded,
+                stored_values_matched: loaded.saturating_sub(1),
+                stored_values_mismatched: usize::from(loaded > 0),
+                unsupported_formulas: 10 - loaded,
+                unsupported_functions: functions
+                    .iter()
+                    .map(|(name, cells)| (name.to_string(), *cells))
+                    .collect(),
+                unsupported_reasons: BTreeMap::from([(
+                    "unsupported_function".to_string(),
+                    10 - loaded,
+                )]),
+            },
+            timing_ms: 1.0,
+            peak_rss_bytes: Some(4096),
+        };
+        accumulate_owned(&mut summary, &make(&[("TODAY", 3), ("OFFSET", 1)], 6));
+        accumulate_owned(&mut summary, &make(&[("TODAY", 2)], 8));
+        summary.files = 3;
+        summary.failed = 1;
+        finish_owned(&mut summary);
+
+        assert_eq!(summary.opened, 2);
+        assert_eq!(summary.formula_cells_observed, 20);
+        assert_eq!(summary.formula_cells_loaded, 14);
+        assert_eq!(summary.unsupported_formulas, 6);
+        assert_eq!(summary.unsupported_functions["TODAY"].formula_cells, 5);
+        assert_eq!(summary.unsupported_functions["TODAY"].workbooks, 2);
+        assert_eq!(summary.unsupported_functions["OFFSET"].workbooks, 1);
+        assert_eq!(summary.unsupported_reasons["unsupported_function"], 6);
+        assert_eq!(summary.formula_parse_rate, Some(0.7));
+        assert_eq!(summary.comparison_coverage, Some(0.7));
+        assert_eq!(summary.stored_value_match_rate, Some(12.0 / 14.0));
+        assert_eq!(summary.peak_rss_bytes_max, Some(4096));
+    }
+
+    #[test]
+    fn peak_rss_is_reported_on_unix() {
+        let peak = peak_rss_bytes();
+        if cfg!(unix) {
+            assert!(peak.is_some_and(|bytes| bytes > 0));
+        }
     }
 
     #[test]
