@@ -3,84 +3,75 @@
   "source": "enron-figshare",
   "manifest": "enron-figshare.jsonl",
   "manifest_sha256": "2f5ea94c02ae3779206d6ca1b1da9e77002450bc070fa968ca566cfd526ff80d",
-  "baseline_engine_commit": "0eccafff50d0280dc8e7411b406b3d11ccd58489",
-  "engine_commit": "ed1cc1dd69a0a9b09061d1513656f3e9e5bc8441",
+  "baseline_engine_commit": "ed1cc1dd69a0a9b09061d1513656f3e9e5bc8441",
+  "engine_commit": "7fd2c3c338de7700357530791018b821445c882e",
   "scored": "2026-09-02",
   "owned_lane": {
     "opened": {
-      "before": 971,
+      "before": 996,
       "after": 996
     },
     "failed": {
-      "before": 29,
+      "before": 4,
       "after": 4
     },
     "timed_out": {
-      "before": 2,
+      "before": 0,
       "after": 0
     },
     "formula_cells_observed": {
-      "before": 730879,
+      "before": 924235,
       "after": 924235
     },
     "formula_cells_loaded": {
-      "before": 662234,
-      "after": 816260
+      "before": 816260,
+      "after": 817197
     },
     "formula_cells_compared": {
-      "before": 662234,
-      "after": 816260
+      "before": 816260,
+      "after": 817197
     },
     "stored_values_matched": {
-      "before": 648639,
-      "after": 796076
+      "before": 796076,
+      "after": 796872
     },
     "stored_values_mismatched": {
-      "before": 13595,
-      "after": 20184
+      "before": 20184,
+      "after": 20325
     },
     "unsupported_formulas": {
-      "before": 68645,
-      "after": 107975
+      "before": 107975,
+      "after": 107038
     },
     "formula_parse_rate": {
-      "before": 0.9060788447882618,
-      "after": 0.8831736517227762
+      "before": 0.8831736517227762,
+      "after": 0.8841874631451958
     },
     "comparison_coverage": {
-      "before": 0.9060788447882618,
-      "after": 0.8831736517227762
+      "before": 0.8831736517227762,
+      "after": 0.8841874631451958
     },
     "stored_value_match_rate": {
-      "before": 0.9794710026969319,
-      "after": 0.9752725847156544
+      "before": 0.9752725847156544,
+      "after": 0.9751283962129083
     },
     "peak_rss_bytes_max": {
-      "before": 1022779392,
-      "after": 115863552
+      "before": 115863552,
+      "after": 115830784
     }
   },
   "owned_lane_added": {
     "workbooks_with_skipped_sheets": {
-      "before": null,
+      "before": 23,
       "after": 23
     },
     "skipped_sheets": {
-      "before": null,
+      "before": 48,
       "after": 48
     }
   },
   "unsupported_reasons": {
     "before": {
-      "cycle": 1836,
-      "external_reference": 39987,
-      "invalid_reference": 4574,
-      "syntax": 278,
-      "unknown_name": 120,
-      "unsupported_function": 16085,
-      "unsupported_name": 5765
-    },
-    "after": {
       "cycle": 2314,
       "external_reference": 46967,
       "invalid_reference": 12051,
@@ -88,19 +79,38 @@
       "unknown_name": 122,
       "unsupported_function": 27594,
       "unsupported_name": 8136
+    },
+    "after": {
+      "cycle": 2314,
+      "external_reference": 47007,
+      "invalid_reference": 12051,
+      "syntax": 10791,
+      "unknown_name": 122,
+      "unsupported_function": 26617,
+      "unsupported_name": 8136
     }
   },
-  "resolved_functions": [],
-  "resolved_open_failures": {
-    "relationship_not_found": 24,
-    "timed_out_30s": 2
-  },
+  "resolved_functions": [
+    "AVERAGEA",
+    "CORREL",
+    "DAYS360",
+    "LOOKUP",
+    "NETWORKDAYS",
+    "NORMDIST",
+    "NPV",
+    "PMT",
+    "WORKDAY",
+    "XIRR",
+    "XNPV",
+    "YEARFRAC"
+  ],
+  "resolved_open_failures": {},
   "wall_seconds": {
-    "before": 269.8,
-    "after": 144.9
+    "before": 144.9,
+    "after": 142.2
   },
   "process_tree_peak_rss_bytes": {
-    "before": 2065264640,
-    "after": 1533501440
+    "before": 1533501440,
+    "after": 1543200768
   }
 }
