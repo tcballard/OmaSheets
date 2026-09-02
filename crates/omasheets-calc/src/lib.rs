@@ -114,6 +114,27 @@ enum Function {
     Or,
     Not,
     IfError,
+    Sign,
+    Ceiling,
+    Floor,
+    Trunc,
+    Exp,
+    Ln,
+    Log,
+    Log10,
+    Pi,
+    Len,
+    Left,
+    Right,
+    Mid,
+    Trim,
+    Upper,
+    Lower,
+    Concat,
+    Value,
+    Exact,
+    CountIf,
+    SumIf,
 }
 
 #[derive(Clone, Debug)]
@@ -383,6 +404,9 @@ impl Workbook {
                 value
             };
         }
+        if matches!(function, Function::CountIf | Function::SumIf) {
+            return self.evaluate_criteria_function(function, arguments);
+        }
 
         let mut values = Vec::new();
         for argument in arguments {
@@ -438,15 +462,56 @@ impl Workbook {
                 }
             }),
             Function::Power => binary_number(&values, |left, right| Some(left.powf(right))),
+            Function::Sign => unary_number(&values, |value| value.signum()),
+            Function::Ceiling => binary_number(&values, |value, significance| {
+                (significance != 0.0).then(|| (value / significance).ceil() * significance)
+            }),
+            Function::Floor => binary_number(&values, |value, significance| {
+                (significance != 0.0).then(|| (value / significance).floor() * significance)
+            }),
+            Function::Trunc => trunc_function(&values),
+            Function::Exp => unary_number(&values, f64::exp),
+            Function::Ln => unary_number(
+                &values,
+                |value| {
+                    if value > 0.0 { value.ln() } else { f64::NAN }
+                },
+            ),
+            Function::Log => log_function(&values),
+            Function::Log10 => {
+                unary_number(
+                    &values,
+                    |value| {
+                        if value > 0.0 { value.log10() } else { f64::NAN }
+                    },
+                )
+            }
+            Function::Pi if values.is_empty() => Value::Number(std::f64::consts::PI),
+            Function::Len => text_length(&values),
+            Function::Left => text_edge(&values, true),
+            Function::Right => text_edge(&values, false),
+            Function::Mid => text_mid(&values),
+            Function::Trim => text_unary(&values, |value| {
+                value.split_whitespace().collect::<Vec<_>>().join(" ")
+            }),
+            Function::Upper => text_unary(&values, |value| value.to_uppercase()),
+            Function::Lower => text_unary(&values, |value| value.to_lowercase()),
+            Function::Concat => concatenate(&values),
+            Function::Value => parse_text_number(&values),
+            Function::Exact => exact_text(&values),
             Function::And => logical_fold(&values, true, |left, right| left && right),
             Function::Or => logical_fold(&values, false, |left, right| left || right),
             Function::Not if values.len() == 1 => match truthy(values[0].clone()) {
                 Ok(value) => Value::Boolean(!value),
                 Err(error) => Value::Error(error),
             },
-            Function::Average | Function::Not | Function::If | Function::IfError => {
-                Value::Error(CalcError::InvalidArguments)
-            }
+            Function::Average
+            | Function::Not
+            | Function::If
+            | Function::IfError
+            | Function::Pi
+            | Function::CountIf
+            | Function::SumIf => Value::Error(CalcError::InvalidArguments),
         }
     }
 
@@ -457,6 +522,53 @@ impl Workbook {
             }
         } else {
             output.push(self.evaluate(expression));
+        }
+    }
+
+    fn evaluate_criteria_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+        let valid_arity = match function {
+            Function::CountIf => arguments.len() == 2,
+            Function::SumIf => matches!(arguments.len(), 2 | 3),
+            _ => false,
+        };
+        if !valid_arity {
+            return Value::Error(CalcError::InvalidArguments);
+        }
+        let mut criteria_range = Vec::new();
+        self.flatten_values(&arguments[0], &mut criteria_range);
+        let criterion = self.evaluate(&arguments[1]);
+        if let Value::Error(error) = &criterion {
+            return Value::Error(error.clone());
+        }
+        let mut sum_range = Vec::new();
+        if arguments.len() == 3 {
+            self.flatten_values(&arguments[2], &mut sum_range);
+        } else {
+            sum_range.clone_from(&criteria_range);
+        }
+        if criteria_range.len() != sum_range.len() {
+            return Value::Error(CalcError::InvalidArguments);
+        }
+        let mut count = 0_usize;
+        let mut sum = 0.0;
+        for (candidate, sum_value) in criteria_range.into_iter().zip(sum_range) {
+            match criterion_matches(candidate, criterion.clone()) {
+                Ok(true) => {
+                    count += 1;
+                    match sum_value {
+                        Value::Number(value) => sum += value,
+                        Value::Error(error) => return Value::Error(error),
+                        _ => {}
+                    }
+                }
+                Ok(false) => {}
+                Err(error) => return Value::Error(error),
+            }
+        }
+        match function {
+            Function::CountIf => Value::Number(count as f64),
+            Function::SumIf => Value::Number(sum),
+            _ => unreachable!("validated above"),
         }
     }
 }
@@ -591,6 +703,228 @@ fn logical_fold(values: &[Value], initial: bool, operation: impl Fn(bool, bool) 
         }
     }
     Value::Boolean(result)
+}
+
+fn trunc_function(values: &[Value]) -> Value {
+    if !matches!(values.len(), 1 | 2) {
+        return Value::Error(CalcError::InvalidArguments);
+    }
+    let Ok(value) = number(values[0].clone()) else {
+        return Value::Error(CalcError::InvalidValue);
+    };
+    let digits = if values.len() == 2 {
+        match number(values[1].clone()) {
+            Ok(value) if (-308.0..=308.0).contains(&value) => value.trunc() as i32,
+            _ => return Value::Error(CalcError::InvalidValue),
+        }
+    } else {
+        0
+    };
+    let factor = 10_f64.powi(digits);
+    Value::Number((value * factor).trunc() / factor)
+}
+
+fn log_function(values: &[Value]) -> Value {
+    if !matches!(values.len(), 1 | 2) {
+        return Value::Error(CalcError::InvalidArguments);
+    }
+    let (Ok(value), Ok(base)) = (
+        number(values[0].clone()),
+        if values.len() == 2 {
+            number(values[1].clone())
+        } else {
+            Ok(10.0)
+        },
+    ) else {
+        return Value::Error(CalcError::InvalidValue);
+    };
+    if value <= 0.0 || base <= 0.0 || base == 1.0 {
+        Value::Error(CalcError::InvalidValue)
+    } else {
+        Value::Number(value.log(base))
+    }
+}
+
+fn text_value(value: &Value) -> Result<String, CalcError> {
+    match value {
+        Value::Text(value) => Ok(value.clone()),
+        Value::Number(value) => Ok(value.to_string()),
+        Value::Boolean(true) => Ok("TRUE".into()),
+        Value::Boolean(false) => Ok("FALSE".into()),
+        Value::Blank => Ok(String::new()),
+        Value::Error(error) => Err(error.clone()),
+    }
+}
+
+fn text_unary(values: &[Value], operation: impl FnOnce(&str) -> String) -> Value {
+    if values.len() != 1 {
+        return Value::Error(CalcError::InvalidArguments);
+    }
+    match text_value(&values[0]) {
+        Ok(value) => Value::Text(operation(&value)),
+        Err(error) => Value::Error(error),
+    }
+}
+
+fn text_length(values: &[Value]) -> Value {
+    if values.len() != 1 {
+        return Value::Error(CalcError::InvalidArguments);
+    }
+    match text_value(&values[0]) {
+        Ok(value) => Value::Number(value.chars().count() as f64),
+        Err(error) => Value::Error(error),
+    }
+}
+
+fn text_count(value: &Value) -> Result<usize, CalcError> {
+    let value = number(value.clone())?;
+    if !value.is_finite() || value < 0.0 || value > usize::MAX as f64 {
+        Err(CalcError::InvalidValue)
+    } else {
+        Ok(value.trunc() as usize)
+    }
+}
+
+fn text_edge(values: &[Value], left: bool) -> Value {
+    if !matches!(values.len(), 1 | 2) {
+        return Value::Error(CalcError::InvalidArguments);
+    }
+    let Ok(value) = text_value(&values[0]) else {
+        return Value::Error(CalcError::InvalidValue);
+    };
+    let count = if values.len() == 2 {
+        match text_count(&values[1]) {
+            Ok(value) => value,
+            Err(error) => return Value::Error(error),
+        }
+    } else {
+        1
+    };
+    let characters: Vec<char> = value.chars().collect();
+    let output = if left {
+        characters.into_iter().take(count).collect()
+    } else {
+        characters
+            .into_iter()
+            .rev()
+            .take(count)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
+    };
+    Value::Text(output)
+}
+
+fn text_mid(values: &[Value]) -> Value {
+    if values.len() != 3 {
+        return Value::Error(CalcError::InvalidArguments);
+    }
+    let (Ok(value), Ok(start), Ok(count)) = (
+        text_value(&values[0]),
+        text_count(&values[1]),
+        text_count(&values[2]),
+    ) else {
+        return Value::Error(CalcError::InvalidValue);
+    };
+    if start == 0 {
+        return Value::Error(CalcError::InvalidValue);
+    }
+    Value::Text(value.chars().skip(start - 1).take(count).collect())
+}
+
+fn concatenate(values: &[Value]) -> Value {
+    let mut output = String::new();
+    for value in values {
+        match text_value(value) {
+            Ok(value) => output.push_str(&value),
+            Err(error) => return Value::Error(error),
+        }
+    }
+    Value::Text(output)
+}
+
+fn parse_text_number(values: &[Value]) -> Value {
+    if values.len() != 1 {
+        return Value::Error(CalcError::InvalidArguments);
+    }
+    match text_value(&values[0]).and_then(|value| {
+        value
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| CalcError::InvalidValue)
+    }) {
+        Ok(value) => Value::Number(value),
+        Err(error) => Value::Error(error),
+    }
+}
+
+fn exact_text(values: &[Value]) -> Value {
+    if values.len() != 2 {
+        return Value::Error(CalcError::InvalidArguments);
+    }
+    match (text_value(&values[0]), text_value(&values[1])) {
+        (Ok(left), Ok(right)) => Value::Boolean(left == right),
+        (Err(error), _) | (_, Err(error)) => Value::Error(error),
+    }
+}
+
+fn criterion_matches(candidate: Value, criterion: Value) -> Result<bool, CalcError> {
+    let (operator, expected) = match criterion {
+        Value::Text(text) => parse_criterion(&text),
+        value => (BinaryOp::Equal, value),
+    };
+    if let (Value::Text(left), Value::Text(right)) = (&candidate, &expected) {
+        let left = left.to_lowercase();
+        let right = right.to_lowercase();
+        return Ok(match operator {
+            BinaryOp::Equal => left == right,
+            BinaryOp::NotEqual => left != right,
+            BinaryOp::Less => left < right,
+            BinaryOp::LessOrEqual => left <= right,
+            BinaryOp::Greater => left > right,
+            BinaryOp::GreaterOrEqual => left >= right,
+            _ => return Err(CalcError::InvalidArguments),
+        });
+    }
+    match apply_binary(operator, candidate, expected) {
+        Value::Boolean(value) => Ok(value),
+        Value::Error(CalcError::InvalidValue) => Ok(false),
+        Value::Error(error) => Err(error),
+        _ => Err(CalcError::InvalidValue),
+    }
+}
+
+fn parse_criterion(criterion: &str) -> (BinaryOp, Value) {
+    let criterion = criterion.trim();
+    let (operator, operand) = if let Some(value) = criterion.strip_prefix("<=") {
+        (BinaryOp::LessOrEqual, value)
+    } else if let Some(value) = criterion.strip_prefix(">=") {
+        (BinaryOp::GreaterOrEqual, value)
+    } else if let Some(value) = criterion.strip_prefix("<>") {
+        (BinaryOp::NotEqual, value)
+    } else if let Some(value) = criterion.strip_prefix('=') {
+        (BinaryOp::Equal, value)
+    } else if let Some(value) = criterion.strip_prefix('<') {
+        (BinaryOp::Less, value)
+    } else if let Some(value) = criterion.strip_prefix('>') {
+        (BinaryOp::Greater, value)
+    } else {
+        (BinaryOp::Equal, criterion)
+    };
+    let operand = operand.trim();
+    let value = if operand.is_empty() {
+        Value::Blank
+    } else if operand.eq_ignore_ascii_case("TRUE") {
+        Value::Boolean(true)
+    } else if operand.eq_ignore_ascii_case("FALSE") {
+        Value::Boolean(false)
+    } else if let Ok(value) = operand.parse::<f64>() {
+        Value::Number(value)
+    } else {
+        Value::Text(operand.into())
+    };
+    (operator, value)
 }
 
 fn compile_expression(expression: Expr<CellId>, indices: &HashMap<CellId, usize>) -> Expr<usize> {
@@ -900,6 +1234,27 @@ fn parse_function_name(name: &str) -> Result<Function, FormulaError> {
         "OR" => Ok(Function::Or),
         "NOT" => Ok(Function::Not),
         "IFERROR" => Ok(Function::IfError),
+        "SIGN" => Ok(Function::Sign),
+        "CEILING" => Ok(Function::Ceiling),
+        "FLOOR" => Ok(Function::Floor),
+        "TRUNC" => Ok(Function::Trunc),
+        "EXP" => Ok(Function::Exp),
+        "LN" => Ok(Function::Ln),
+        "LOG" => Ok(Function::Log),
+        "LOG10" => Ok(Function::Log10),
+        "PI" => Ok(Function::Pi),
+        "LEN" => Ok(Function::Len),
+        "LEFT" => Ok(Function::Left),
+        "RIGHT" => Ok(Function::Right),
+        "MID" => Ok(Function::Mid),
+        "TRIM" => Ok(Function::Trim),
+        "UPPER" => Ok(Function::Upper),
+        "LOWER" => Ok(Function::Lower),
+        "CONCAT" | "CONCATENATE" => Ok(Function::Concat),
+        "VALUE" => Ok(Function::Value),
+        "EXACT" => Ok(Function::Exact),
+        "COUNTIF" => Ok(Function::CountIf),
+        "SUMIF" => Ok(Function::SumIf),
         _ => Err(FormulaError::UnsupportedFunction(name.to_ascii_uppercase())),
     }
 }
@@ -1134,6 +1489,73 @@ mod tests {
             workbook.value(cell(0, 1)),
             Value::Error(CalcError::InvalidArguments)
         );
+    }
+
+    #[test]
+    fn evaluates_the_extended_math_head() {
+        let mut workbook = Workbook::default();
+        for (column, formula, expected) in [
+            (0, "=SIGN(-2)", -1.0),
+            (1, "=CEILING(4.2,1)", 5.0),
+            (2, "=FLOOR(4.8,1)", 4.0),
+            (3, "=TRUNC(1.239,2)", 1.23),
+            (4, "=LN(EXP(1))", 1.0),
+            (5, "=LOG(100)", 2.0),
+            (6, "=LOG(8,2)", 3.0),
+            (7, "=LOG10(1000)", 3.0),
+            (8, "=PI()", std::f64::consts::PI),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            let Value::Number(value) = workbook.value(cell(0, column)) else {
+                panic!("expected a number for {formula}");
+            };
+            assert!((value - expected).abs() < 1e-9, "{formula}");
+        }
+    }
+
+    #[test]
+    fn evaluates_common_text_functions_with_unicode_characters() {
+        let mut workbook = Workbook::default();
+        for (column, formula, expected) in [
+            (0, "=LEN(\"Grüße\")", Value::Number(5.0)),
+            (1, "=LEFT(\"Agent\",2)", Value::Text("Ag".into())),
+            (2, "=RIGHT(\"Agent\",2)", Value::Text("nt".into())),
+            (3, "=MID(\"Agent\",2,3)", Value::Text("gen".into())),
+            (
+                4,
+                "=TRIM(\"  agent   safe  \")",
+                Value::Text("agent safe".into()),
+            ),
+            (5, "=UPPER(\"Agent\")", Value::Text("AGENT".into())),
+            (6, "=LOWER(\"Agent\")", Value::Text("agent".into())),
+            (
+                7,
+                "=CONCAT(\"agent\",\"-\",42)",
+                Value::Text("agent-42".into()),
+            ),
+            (8, "=VALUE(\" 42.5 \")", Value::Number(42.5)),
+            (9, "=EXACT(\"Agent\",\"agent\")", Value::Boolean(false)),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
+        }
+    }
+
+    #[test]
+    fn evaluates_countif_and_sumif_without_losing_range_alignment() {
+        let mut workbook = Workbook::default();
+        for row in 0..5 {
+            workbook.set_number(cell(row, 0), f64::from(row + 1));
+            workbook.set_number(cell(row, 1), f64::from((row + 1) * 10));
+        }
+        workbook
+            .set_formula(cell(0, 2), "=COUNTIF(A1:A5,\">2\")")
+            .unwrap();
+        workbook
+            .set_formula(cell(1, 2), "=SUMIF(A1:A5,\">=3\",B1:B5)")
+            .unwrap();
+        assert_eq!(workbook.value(cell(0, 2)), Value::Number(3.0));
+        assert_eq!(workbook.value(cell(1, 2)), Value::Number(120.0));
     }
 
     #[test]
