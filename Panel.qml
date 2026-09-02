@@ -37,6 +37,7 @@ Panel {
     if (statusProcess.running) return
     statusError = ""
     statusRunning = true
+    statusDeadline.restart()
     statusProcess.running = true
   }
 
@@ -105,6 +106,22 @@ Panel {
 
   onOpenedChanged: if (opened) refresh()
 
+  // The status helper enforces its own 5 s deadline and 16 KiB output limit
+  // and terminates the launcher's process group when either trips. This timer
+  // is the widget-side backstop if the helper itself never returns.
+  Timer {
+    id: statusDeadline
+    interval: 8000
+    repeat: false
+    onTriggered: {
+      if (statusProcess.running) {
+        statusProcess.running = false
+        root.statusRunning = false
+        root.statusError = "OmaSheets status unavailable"
+      }
+    }
+  }
+
   Process {
     id: statusProcess
     command: [root.pluginLauncher, "status"]
@@ -121,6 +138,7 @@ Panel {
       }
     }
     onExited: function(exitCode) {
+      statusDeadline.stop()
       root.statusRunning = false
       if (exitCode !== 0) root.statusError = "OmaSheets status unavailable"
     }

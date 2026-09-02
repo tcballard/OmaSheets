@@ -17,10 +17,10 @@ run)
   exec "$launcher" "$@"
   ;;
 status)
-  if [[ -x $launcher ]]; then
-    exec "$launcher" status --json
-  fi
-  printf '%s\n' '{"installed":false,"current":{"selected":false},"review":{"pending":false}}'
+  # The helper runs the launcher in its own process group with a hard
+  # deadline and a producer-side 16 KiB limit, so the widget never waits on
+  # or collects unbounded output.
+  exec /usr/bin/python "$plugin_root/scripts/panel_status.py" "$launcher"
   ;;
 *)
   printf '%s\n' 'usage: omasheets-plugin {install|doctor|uninstall|status|run ...}' >&2

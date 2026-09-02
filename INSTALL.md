@@ -19,16 +19,46 @@ user-local product bootstrap. The same action can be run in a terminal:
 ```
 
 The bootstrap checks runtime dependencies, downloads the native bundle from the
-matching `v0.0.2` GitHub release, verifies it against the exact installed
-checkout, and installs only OmaSheets-owned files. No compiler, CMake,
-`pkgconf`, or LibreOffice SDK is installed or required on the user's machine.
-The bootstrap never invokes a package manager or requests privilege. If runtime
-dependencies are missing, it stops and prints this explicit Omarchy command for
-the user to approve and run:
+matching `v0.0.2` GitHub release, verifies its maintainer signature against the
+key pinned in the checkout, verifies it against the exact installed checkout,
+and installs only OmaSheets-owned files. No compiler, CMake, `pkgconf`, or
+LibreOffice SDK is installed or required on the user's machine. The bootstrap
+never invokes a package manager or requests privilege. If runtime dependencies
+are missing, it stops and prints this explicit Omarchy command for the user to
+approve and run:
 
 ```bash
 omarchy pkg add gtk3 libreoffice-fresh bubblewrap
 ```
+
+This is a manual setup step by design: the standard `omarchy plugin add`
+installs only the bar widget, and the product itself, its Codex plugin and MCP
+server, and the system packages above are installed by the explicit **Install
+OmaSheets** action and the command it prints.
+
+## What is verified before anything runs
+
+Nothing from a release is executed until three independent checks agree:
+
+1. **Maintainer signature.** The bundle's detached `.minisig` must verify,
+   with the standard-library minisign implementation in
+   `src/omasheets/release_signing.py`, against the public key pinned at
+   `release/signing-key.pub` in the validated plugin checkout. The private key
+   is held offline by the maintainer and is never available to release
+   automation, so a compromised release credential cannot produce it. A
+   checkout without the pinned key downloads nothing.
+2. **Release checksum and bundle identity.** The `.sha256` asset, the bundle's
+   allow-listed file set, version, platform, architecture, tracked-source
+   digest, commit and per-file hashes must all match the installed checkout.
+3. **Executable provenance.** Each native executable must report the same
+   source commit and digest when run with `--provenance`, after the two
+   checks above.
+
+The release build itself is pinned and reproducible, and the published archive
+carries a GitHub build-provenance attestation that anyone can check with
+`gh attestation verify`. `docs/RELEASE.md` documents the pins, the
+reproducibility recipe, and the offline signing step; a release without its
+`.minisig` is not installable.
 
 Automatic bundle download additionally requires checkout `HEAD` to be exactly
 the matching `v<version>` tag. A source checkout ahead of the published release

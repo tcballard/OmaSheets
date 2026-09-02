@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
+import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -24,11 +27,54 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def source_date_epoch() -> int:
+    """Return the reproducible timestamp: SOURCE_DATE_EPOCH or the HEAD commit time."""
+    value = os.environ.get("SOURCE_DATE_EPOCH")
+    if value:
+        return int(value)
+    completed = subprocess.run(
+        ["git", "-C", str(ROOT), "log", "-1", "--format=%ct"], text=True, capture_output=True, check=True,
+    )
+    return int(completed.stdout.strip())
+
+
+def write_reproducible_archive(archive: Path, members: list[tuple[str, Path, int]], epoch: int) -> None:
+    """Write ``members`` as a gzip tar whose bytes depend only on their contents.
+
+    Member order, ownership, permissions and timestamps are fixed, and the gzip
+    header carries no name and a fixed mtime, so two builds of identical files
+    produce identical archives and one SHA-256 can be compared against a
+    rebuild before the bundle is signed.
+    """
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as bundle:
+        for arcname, source, mode in sorted(members):
+            data = source.read_bytes()
+            info = tarfile.TarInfo(arcname)
+            info.size = len(data)
+            info.mode = mode
+            info.mtime = epoch
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            bundle.addfile(info, io.BytesIO(data))
+    with archive.open("wb") as output, gzip.GzipFile(filename="", mode="wb", fileobj=output, mtime=0) as compressed:
+        compressed.write(buffer.getvalue())
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--build-dir", type=Path)
+    parser.add_argument(
+        "--build-inputs", type=Path,
+        help="JSON record from scripts/build_inputs.py to embed in the bundle manifest",
+    )
     arguments = parser.parse_args(argv)
+    build_inputs = None
+    if arguments.build_inputs is not None:
+        build_inputs = json.loads(arguments.build_inputs.read_text())
+        if not isinstance(build_inputs, dict) or build_inputs.get("schema") != 1:
+            parser.error("--build-inputs must be a schema 1 build record")
     if (platform_id(), normalized_architecture()) != ("linux", "x86_64"):
         parser.error(f"v{__version__} release bundles are supported only on linux/x86_64")
 
@@ -60,13 +106,17 @@ def main(argv: list[str] | None = None) -> int:
             "build_contract": "native/libreofficekit/CMakeLists.txt",
             "files": files,
         }
+        if build_inputs is not None:
+            manifest["build"] = build_inputs
         (stage / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
         name = asset_name(__version__)
         archive = arguments.output / name
-        with tarfile.open(archive, "w:gz", format=tarfile.PAX_FORMAT) as bundle:
-            bundle.add(stage / "manifest.json", arcname="manifest.json")
-            for executable in NATIVE_EXECUTABLES:
-                bundle.add(stage / "bin" / executable, arcname=f"bin/{executable}")
+        write_reproducible_archive(
+            archive,
+            [("manifest.json", stage / "manifest.json", 0o644)]
+            + [(f"bin/{executable}", stage / "bin" / executable, 0o755) for executable in NATIVE_EXECUTABLES],
+            source_date_epoch(),
+        )
         digest = sha256(archive)
         (arguments.output / f"{name}.sha256").write_text(f"{digest}  {name}\n")
         print(json.dumps({"archive": str(archive), "sha256": digest, "source": identity}, sort_keys=True))

@@ -67,9 +67,10 @@ The command installs and enables the Omarchy bar surface. Choose **Install
 OmaSheets** there to run the privilege-free, user-local bootstrap for the native
 window, Python service, Codex plugin, MCP server, desktop entry and MIME
 associations. The bootstrap downloads the native executables built by the
-matching GitHub release and verifies their checksum, version, architecture,
-source commit, tracked-source digest and individual file hashes before
-installation. Automatic download is available only when the installed checkout
+matching GitHub release and verifies their maintainer signature against the
+key pinned in the checkout, then their checksum, version, architecture,
+source commit, tracked-source digest and individual file hashes, before
+anything from the bundle runs. Automatic download is available only when the installed checkout
 is exactly the matching `v<version>` release tag; a newer development checkout
 fails before network access unless its operator supplies an explicitly built,
 source-matching bundle. Users do not need a compiler, CMake, `pkgconf`, or the
