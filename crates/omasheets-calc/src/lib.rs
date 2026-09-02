@@ -248,6 +248,87 @@ enum Function {
     Column,
 }
 
+/// A parsed formula whose cell references can be enumerated and rebound
+/// before it is installed, so callers that own stable object identities can
+/// bind A1 input syntax once and replay against engine cells later.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParsedFormula {
+    expression: Expr<CellId>,
+}
+
+impl ParsedFormula {
+    /// Parses `source` as entered in `sheet`, resolving sheet names through
+    /// `sheet_names` (lower-cased name to sheet index), without touching any
+    /// workbook.
+    pub fn parse(
+        source: &str,
+        sheet: u32,
+        sheet_names: &HashMap<String, u32>,
+    ) -> Result<Self, FormulaError> {
+        let lowered: HashMap<String, u32> = sheet_names
+            .iter()
+            .map(|(name, index)| (name.to_lowercase(), *index))
+            .collect();
+        // Stand-alone parsing has no workbook, so no defined names resolve;
+        // a name reference fails with `UnknownName`, as it would in a
+        // workbook without definitions.
+        let defined_names = HashMap::new();
+        Parser::new(source, sheet, &lowered, &defined_names)
+            .parse()
+            .map(|expression| Self { expression })
+    }
+
+    /// Every cell reference in deterministic traversal order, including each
+    /// cell of an expanded range. The same order is used by
+    /// [`ParsedFormula::map_references`].
+    pub fn references(&self) -> Vec<CellId> {
+        let mut output = Vec::new();
+        visit_references(&self.expression, &mut |cell| output.push(cell));
+        output
+    }
+
+    /// Rebinds every reference in the order [`ParsedFormula::references`]
+    /// reports them.
+    pub fn map_references(mut self, mut map: impl FnMut(CellId) -> CellId) -> Self {
+        rebind_references(&mut self.expression, &mut map);
+        self
+    }
+}
+
+fn visit_references(expression: &Expr<CellId>, visit: &mut impl FnMut(CellId)) {
+    match expression {
+        Expr::Reference(cell) => visit(*cell),
+        Expr::UnaryMinus(inner) | Expr::Percent(inner) => visit_references(inner, visit),
+        Expr::Binary(_, left, right) => {
+            visit_references(left, visit);
+            visit_references(right, visit);
+        }
+        Expr::Range { items, .. } | Expr::Function(_, items) => {
+            for item in items {
+                visit_references(item, visit);
+            }
+        }
+        Expr::Number(_) | Expr::Boolean(_) | Expr::Text(_) | Expr::Error(_) | Expr::Empty => {}
+    }
+}
+
+fn rebind_references(expression: &mut Expr<CellId>, map: &mut impl FnMut(CellId) -> CellId) {
+    match expression {
+        Expr::Reference(cell) => *cell = map(*cell),
+        Expr::UnaryMinus(inner) | Expr::Percent(inner) => rebind_references(inner, map),
+        Expr::Binary(_, left, right) => {
+            rebind_references(left, map);
+            rebind_references(right, map);
+        }
+        Expr::Range { items, .. } | Expr::Function(_, items) => {
+            for item in items {
+                rebind_references(item, map);
+            }
+        }
+        Expr::Number(_) | Expr::Boolean(_) | Expr::Text(_) | Expr::Error(_) | Expr::Empty => {}
+    }
+}
+
 #[derive(Clone, Debug)]
 enum Input {
     Literal(Value),
@@ -345,8 +426,19 @@ impl Workbook {
         cell: CellId,
         formula: &str,
     ) -> Result<RecalcReport, FormulaError> {
-        let parsed =
+        let expression =
             Parser::new(formula, cell.sheet, &self.sheet_names, &self.defined_names).parse()?;
+        self.set_parsed_formula(cell, ParsedFormula { expression })
+    }
+
+    /// Installs an already parsed (and possibly rebound) formula with the same
+    /// transactional cycle rejection as [`Workbook::set_formula`].
+    pub fn set_parsed_formula(
+        &mut self,
+        cell: CellId,
+        formula: ParsedFormula,
+    ) -> Result<RecalcReport, FormulaError> {
+        let parsed = formula.expression;
         let mut dependencies = BTreeSet::new();
         collect_dependencies(&parsed, &mut dependencies);
         if let Some(path) = self.prospective_cycle(cell, &dependencies) {
@@ -3286,6 +3378,59 @@ mod tests {
             "docs/FUNCTIONS.md must list exactly the parser registry"
         );
         assert!(documented.contains(&format!("{} function names", registry.len())));
+    }
+
+    #[test]
+    fn parsed_formulas_expose_and_rebind_references_in_a_stable_order() {
+        let names = HashMap::from([("Inputs".to_string(), 1_u32)]);
+        let parsed = ParsedFormula::parse("=SUM(A1:A2)+Inputs!B1*A1", 0, &names).unwrap();
+        assert_eq!(
+            parsed.references(),
+            vec![
+                CellId::new(0, 0, 0),
+                CellId::new(0, 1, 0),
+                CellId::new(1, 0, 1),
+                CellId::new(0, 0, 0),
+            ]
+        );
+
+        let rebound = parsed
+            .clone()
+            .map_references(|cell| CellId::new(cell.sheet, cell.row + 10, cell.column + 1));
+        assert_eq!(
+            rebound.references(),
+            vec![
+                CellId::new(0, 10, 1),
+                CellId::new(0, 11, 1),
+                CellId::new(1, 10, 2),
+                CellId::new(0, 10, 1),
+            ]
+        );
+
+        let mut workbook = Workbook::default();
+        workbook.define_sheet(1, "Inputs");
+        workbook.set_number(CellId::new(0, 10, 1), 2.0);
+        workbook.set_number(CellId::new(0, 11, 1), 3.0);
+        workbook.set_number(CellId::new(1, 10, 2), 4.0);
+        workbook
+            .set_parsed_formula(CellId::new(0, 0, 0), rebound)
+            .unwrap();
+        assert_eq!(workbook.value(CellId::new(0, 0, 0)), Value::Number(13.0));
+        assert_eq!(
+            workbook.set_parsed_formula(
+                CellId::new(0, 10, 1),
+                parsed.map_references(|_| CellId::new(0, 0, 0))
+            ),
+            Err(FormulaError::Cycle(vec![
+                CellId::new(0, 10, 1),
+                CellId::new(0, 0, 0),
+                CellId::new(0, 10, 1)
+            ]))
+        );
+        assert_eq!(
+            ParsedFormula::parse("=Missing!A1", 0, &names),
+            Err(FormulaError::UnknownSheet("Missing".into()))
+        );
     }
 
     #[test]

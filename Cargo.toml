@@ -1,7 +1,9 @@
 [workspace]
 members = [
   "crates/omasheets-calc",
+  "crates/omasheets-core",
   "crates/omasheets-corpus",
+  "crates/omasheets-store",
   "crates/omasheets-xlsx",
 ]
 exclude = ["spikes/fastcore"]
