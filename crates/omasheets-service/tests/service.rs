@@ -25,7 +25,7 @@ fn agent(id: &str) -> Actor {
 fn sheet_of(service: &mut Service, path: &Path, branch: Option<&str>) -> String {
     match service
         .handle(Request::Document {
-            path: path.clone(),
+            path: path.to_path_buf(),
             branch: branch.map(str::to_string),
         })
         .unwrap()
@@ -43,7 +43,7 @@ fn append(
     command: Command,
 ) -> Result<Response, ServiceError> {
     service.handle(Request::Append {
-        path: path.clone(),
+        path: path.to_path_buf(),
         branch: branch.map(str::to_string),
         actor,
         command,
