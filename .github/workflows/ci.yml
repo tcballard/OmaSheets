@@ -48,6 +48,67 @@ jobs:
           /tmp/omasheets-wheel/bin/omasheets --version
           /tmp/omasheets-wheel/bin/python -c 'import omasheets; assert omasheets.__version__ == "0.0.2"'
 
+  m0-corpus:
+    name: M0 native corpus scorer
+    runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the declared minimum Rust toolchain
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --no-self-update
+          rustup default 1.88.0
+      - name: Build and test the isolated corpus scorer
+        run: |
+          cargo test --workspace --locked --release
+          cargo build --locked --release -p omasheets-corpus
+      - name: Exercise one immutable Excel-syntax workbook
+        run: |
+          evidence="$RUNNER_TEMP/omasheets-m0"
+          mkdir -p "$evidence/corpus"
+          python scripts/generate_m0_xlsx.py \
+            "$evidence/corpus/formula-smoke.xlsx" --rows 250 \
+            > "$evidence/fixture.json"
+          target/release/omasheets-corpus index \
+            "$evidence/corpus" "$evidence/manifest.jsonl"
+          python scripts/performance.py run \
+            --name m0-corpus-formualizer-smoke \
+            --timeout 45 \
+            --output "$evidence/performance.json" \
+            -- target/release/omasheets-corpus score \
+              "$evidence/manifest.jsonl" "$evidence/corpus" \
+              "$evidence/score.json" --timeout-seconds 15 --require-all
+          EVIDENCE="$evidence" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["EVIDENCE"])
+          score = json.loads((root / "score.json").read_text())
+          summary = score["summary"]
+          assert score["stored_value_comparison"] == "not_implemented"
+          assert summary["files"] == 1
+          assert summary["succeeded"] == 1
+          assert summary["failed"] == 0
+          assert summary["formula_cells_observed"] == 250
+          assert summary["formula_cells_loaded"] == 250
+          assert summary["formula_parse_rate"] == 1.0
+          performance = json.loads((root / "performance.json").read_text())
+          assert performance["exit_code"] == 0
+          assert performance["timed_out"] is False
+          assert performance["memory"]["peak_rss_bytes"] > 0
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omasheets-m0-corpus-smoke-linux-x86_64
+          path: |
+            ${{ runner.temp }}/omasheets-m0/fixture.json
+            ${{ runner.temp }}/omasheets-m0/manifest.jsonl
+            ${{ runner.temp }}/omasheets-m0/score.json
+            ${{ runner.temp }}/omasheets-m0/performance.json
+          if-no-files-found: error
+
   omarchy-plugin:
     name: Omarchy plugin contract
     runs-on: ubuntu-latest
