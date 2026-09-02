@@ -2288,9 +2288,7 @@ fn typed_compare(left: &Value, right: &Value) -> Result<std::cmp::Ordering, Calc
         _ => (left.clone(), right.clone()),
     };
     Ok(match (&left, &right) {
-        (Value::Number(left), Value::Number(right)) => {
-            left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
-        }
+        (Value::Number(left), Value::Number(right)) => compare_numbers(*left, *right),
         (Value::Text(left), Value::Text(right)) => left.to_lowercase().cmp(&right.to_lowercase()),
         (Value::Boolean(left), Value::Boolean(right)) => left.cmp(right),
         _ => rank(&left).cmp(&rank(&right)),
@@ -2323,11 +2321,37 @@ fn positive_index(value: Value) -> Result<usize, CalcError> {
 fn lookup_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Text(left), Value::Text(right)) => left.eq_ignore_ascii_case(right),
+        (Value::Number(left), Value::Number(right)) => {
+            compare_numbers(*left, *right) == std::cmp::Ordering::Equal
+        }
         (Value::Blank, _) | (_, Value::Blank) | (Value::Error(_), _) | (_, Value::Error(_)) => {
             false
         }
         _ => left == right,
     }
+}
+
+/// Excel compares numbers at its 15 significant digits of precision, so
+/// `0.1+0.2=0.3` is TRUE and a threshold reached through a different
+/// rounding path (`30.666666666666664 < 0.6666666666666666+30`) is FALSE.
+/// Arithmetic keeps full precision; only comparisons snap.
+fn compare_numbers(left: f64, right: f64) -> std::cmp::Ordering {
+    significant_15(left)
+        .partial_cmp(&significant_15(right))
+        .unwrap_or(std::cmp::Ordering::Equal)
+}
+
+fn significant_15(value: f64) -> f64 {
+    if value == 0.0 || !value.is_finite() {
+        return value;
+    }
+    let magnitude = value.abs().log10().floor() as i32;
+    let scale = 10_f64.powi(14 - magnitude);
+    if !scale.is_finite() || scale == 0.0 {
+        return value;
+    }
+    let rounded = (value * scale).round() / scale;
+    if rounded.is_finite() { rounded } else { value }
 }
 
 /// A numeric result with negative zero folded into zero, which is how Excel
@@ -4134,6 +4158,33 @@ mod tests {
             let target = cell(6, column as u32);
             workbook.set_formula(target, formula).unwrap();
             assert_eq!(workbook.value(target), Value::Number(expected), "{formula}");
+        }
+    }
+
+    #[test]
+    fn comparisons_snap_to_fifteen_significant_digits() {
+        let mut workbook = Workbook::default();
+        workbook.set_formula(cell(0, 0), "=0.1+0.2").unwrap();
+        workbook.set_number(cell(1, 0), 30.666666666666664);
+        workbook.set_number(cell(2, 0), 0.6666666666666666);
+        workbook.set_number(cell(3, 0), 30.0);
+        let cases = [
+            ("=A1=0.3", Value::Boolean(true)),
+            ("=A1-0.3=0", Value::Boolean(false)),
+            ("=A2<A3+A4", Value::Boolean(false)),
+            ("=A2>=A3+A4", Value::Boolean(true)),
+            ("=A2=A3+A4", Value::Boolean(true)),
+            // The 15th significant digit still counts; the 16th does not.
+            ("=1<1.00000000000002", Value::Boolean(true)),
+            ("=1<1.000000000000002", Value::Boolean(false)),
+            ("=MATCH(0.3,A1:A1,0)", Value::Number(1.0)),
+            ("=COUNTIF(A1:A1,0.3)", Value::Number(1.0)),
+            ("=COUNTIF(A1:A1,\">0.3\")", Value::Number(0.0)),
+        ];
+        for (column, (formula, expected)) in cases.into_iter().enumerate() {
+            let target = cell(6, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            assert_eq!(workbook.value(target), expected, "{formula}");
         }
     }
 
