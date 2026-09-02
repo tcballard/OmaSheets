@@ -386,6 +386,119 @@ pub enum Operation {
         proposal: ProposalId,
         reason: String,
     },
+    /// The first event on a new branch: `branch` in the envelope names the
+    /// new branch and `parent` (equal to `from`) is the fork point.
+    CreateBranch {
+        branch: BranchId,
+        name: String,
+        from: EventId,
+    },
+    /// Records that `source` (at `source_head`) was replayed onto this branch
+    /// as the events `replayed`, after the policy gate passed.
+    RecordMerge {
+        source: BranchId,
+        source_head: EventId,
+        replayed: Vec<EventId>,
+    },
+    /// A deterministic check: it passes when `cell` evaluates to `TRUE`.
+    AddCheck {
+        check: CheckId,
+        name: String,
+        cell: CellRef,
+        severity: Severity,
+        message: String,
+    },
+    RemoveCheck {
+        check: CheckId,
+    },
+    WatchOutput {
+        watch: WatchId,
+        name: String,
+        cell: CellRef,
+    },
+    UnwatchOutput {
+        watch: WatchId,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    Warning,
+    Error,
+}
+
+/// An object an operation reads or writes, for operation-level conflict
+/// detection between branches.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Touch {
+    Document,
+    Sheet { sheet: SheetId },
+    Row { sheet: SheetId, row: RowId },
+    Column { sheet: SheetId, column: ColumnId },
+    Cell { cell: CellRef },
+    Table { table: TableId },
+    Proposal { proposal: ProposalId },
+    Check { check: CheckId },
+    Watch { watch: WatchId },
+    Tick,
+}
+
+impl Operation {
+    /// The objects this operation changes. Two operations conflict when
+    /// their touch sets intersect.
+    pub fn touches(&self) -> Vec<Touch> {
+        match self {
+            Operation::CreateDocument { .. } | Operation::CreateBranch { .. } => {
+                vec![Touch::Document]
+            }
+            Operation::RecordMerge { .. } => Vec::new(),
+            Operation::AddSheet { sheet, .. }
+            | Operation::RenameSheet { sheet, .. }
+            | Operation::DeleteSheet { sheet } => vec![Touch::Sheet { sheet: *sheet }],
+            Operation::AddColumns { sheet, columns, .. }
+            | Operation::DeleteColumns { sheet, columns } => columns
+                .iter()
+                .map(|column| Touch::Column {
+                    sheet: *sheet,
+                    column: *column,
+                })
+                .collect(),
+            Operation::AddRows { sheet, rows, .. } | Operation::DeleteRows { sheet, rows } => rows
+                .iter()
+                .map(|row| Touch::Row {
+                    sheet: *sheet,
+                    row: *row,
+                })
+                .collect(),
+            Operation::AddTable { table, .. } | Operation::RenameTable { table, .. } => {
+                vec![Touch::Table { table: *table }]
+            }
+            Operation::SetColumnType { sheet, column, .. } => vec![Touch::Column {
+                sheet: *sheet,
+                column: *column,
+            }],
+            Operation::SetValue { cell, .. }
+            | Operation::SetFormula { cell, .. }
+            | Operation::ClearCell { cell } => vec![Touch::Cell { cell: *cell }],
+            Operation::Import { .. } => vec![Touch::Document],
+            Operation::Tick { .. } => vec![Touch::Tick],
+            Operation::Propose { proposal, .. }
+            | Operation::AcceptProposal { proposal }
+            | Operation::RejectProposal { proposal, .. } => {
+                vec![Touch::Proposal {
+                    proposal: *proposal,
+                }]
+            }
+            Operation::AddCheck { check, .. } | Operation::RemoveCheck { check } => {
+                vec![Touch::Check { check: *check }]
+            }
+            Operation::WatchOutput { watch, .. } | Operation::UnwatchOutput { watch } => {
+                vec![Touch::Watch { watch: *watch }]
+            }
+        }
+    }
 }
 
 /// The versioned envelope. `id` is the SHA-256 of the canonical bytes of
@@ -515,6 +628,11 @@ pub enum ApplyError {
     ProposalNotPending(ProposalId),
     TickNotMonotonic,
     InvalidDigest,
+    UnknownBranch(BranchId),
+    UnknownCheck(CheckId),
+    UnknownWatch(WatchId),
+    ForkPointMismatch,
+    UnknownEvent(EventId),
 }
 
 impl fmt::Display for ApplyError {
@@ -615,6 +733,24 @@ pub enum Command {
         proposal: ProposalId,
         reason: String,
     },
+    AddCheck {
+        name: String,
+        sheet: SheetId,
+        a1: String,
+        severity: Severity,
+        message: String,
+    },
+    RemoveCheck {
+        check: CheckId,
+    },
+    WatchOutput {
+        name: String,
+        sheet: SheetId,
+        a1: String,
+    },
+    UnwatchOutput {
+        watch: WatchId,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -687,6 +823,71 @@ pub struct ProposalRecord {
     pub reason: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BranchRecord {
+    pub name: String,
+    pub parent: Option<BranchId>,
+    pub base: Option<EventId>,
+    pub created: Provenance,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CheckRecord {
+    pub name: String,
+    pub cell: CellRef,
+    pub severity: Severity,
+    pub message: String,
+    pub added: Provenance,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WatchRecord {
+    pub name: String,
+    pub cell: CellRef,
+    pub added: Provenance,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MergeRecord {
+    pub source: BranchId,
+    pub source_head: EventId,
+    pub replayed: Vec<EventId>,
+    pub recorded: Provenance,
+}
+
+/// Outcome of one check against the current state.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CheckResult {
+    pub check: CheckId,
+    pub name: String,
+    pub severity: Severity,
+    pub passed: bool,
+    pub value: CellValue,
+    pub message: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LineageKind {
+    Entered,
+    Imported,
+    Computed,
+    Agent,
+    ModelAssisted,
+    System,
+}
+
+/// Where a value came from: the event and actor that set it, and, for a
+/// formula, the cells it reads.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Lineage {
+    pub kind: LineageKind,
+    pub event: EventId,
+    pub actor: Actor,
+    pub timestamp: i64,
+    pub inputs: Vec<CellRef>,
+}
+
 /// The replayed state of one branch of one document.
 pub struct Document {
     id: DocumentId,
@@ -702,6 +903,10 @@ pub struct Document {
     imports: BTreeMap<ImportId, ImportRecord>,
     proposals: BTreeMap<ProposalId, ProposalRecord>,
     last_tick: Option<(u64, i64)>,
+    branches: BTreeMap<BranchId, BranchRecord>,
+    checks: BTreeMap<CheckId, CheckRecord>,
+    watches: BTreeMap<WatchId, WatchRecord>,
+    merges: Vec<MergeRecord>,
     dependents: BTreeMap<CellRef, BTreeSet<CellRef>>,
     calc: Workbook,
 }
@@ -720,6 +925,10 @@ pub struct Snapshot {
     pub imports: BTreeMap<ImportId, ImportRecord>,
     pub proposals: BTreeMap<ProposalId, ProposalRecord>,
     pub last_tick: Option<(u64, i64)>,
+    pub branches: BTreeMap<BranchId, BranchRecord>,
+    pub checks: BTreeMap<CheckId, CheckRecord>,
+    pub watches: BTreeMap<WatchId, WatchRecord>,
+    pub merges: Vec<MergeRecord>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -792,9 +1001,177 @@ impl Document {
             imports: BTreeMap::new(),
             proposals: BTreeMap::new(),
             last_tick: None,
+            branches: BTreeMap::new(),
+            checks: BTreeMap::new(),
+            watches: BTreeMap::new(),
+            merges: Vec::new(),
             dependents: BTreeMap::new(),
             calc: Workbook::default(),
         }
+    }
+
+    /// Rebuilds a document from a canonical snapshot. The caller must verify
+    /// the result's [`Document::digest`] against the digest recorded with the
+    /// snapshot; a mismatch means the snapshot is stale or corrupt and the
+    /// log must be replayed instead.
+    pub fn from_snapshot(snapshot: &Snapshot) -> Result<Self, ApplyError> {
+        if snapshot.schema != EVENT_SCHEMA {
+            return Err(ApplyError::UnsupportedSchema(snapshot.schema));
+        }
+        let mut document = Self::empty(snapshot.document);
+        document.name = snapshot.name.clone();
+        document.branch = snapshot.branch;
+        document.head = snapshot.head;
+        document.event_count = snapshot.event_count;
+        let mut formulas = Vec::new();
+        for sheet in &snapshot.sheets {
+            let ordinal = document.next_sheet_ordinal;
+            document.next_sheet_ordinal += 1;
+            document.sheet_ordinals.insert(sheet.id, ordinal);
+            document.sheet_order.push(sheet.id);
+            document.calc.define_sheet(ordinal, sheet.name.clone());
+            let row_ordinals: BTreeMap<RowId, u32> = sheet
+                .rows
+                .iter()
+                .enumerate()
+                .map(|(index, row)| (*row, index as u32))
+                .collect();
+            let column_ordinals: BTreeMap<ColumnId, u32> = sheet
+                .columns
+                .iter()
+                .enumerate()
+                .map(|(index, column)| (*column, index as u32))
+                .collect();
+            if row_ordinals.len() != sheet.rows.len()
+                || column_ordinals.len() != sheet.columns.len()
+            {
+                return Err(ApplyError::InvalidDigest);
+            }
+            document.sheets.insert(
+                sheet.id,
+                Sheet {
+                    name: sheet.name.clone(),
+                    rows: sheet.rows.clone(),
+                    columns: sheet.columns.clone(),
+                    next_row_ordinal: sheet.rows.len() as u32,
+                    next_column_ordinal: sheet.columns.len() as u32,
+                    row_ordinals,
+                    column_ordinals,
+                    column_types: sheet.column_types.clone(),
+                    cells: BTreeMap::new(),
+                },
+            );
+            for cell in &sheet.cells {
+                let reference = CellRef {
+                    sheet: sheet.id,
+                    row: cell.row,
+                    column: cell.column,
+                };
+                let state = document.sheet(sheet.id)?;
+                document.check_cell_exists(state, &reference)?;
+                match &cell.state.input {
+                    CellInput::Value { value } => {
+                        let engine = document.engine_cell(reference).expect("checked");
+                        match value {
+                            Literal::Blank => document.calc.clear(engine),
+                            Literal::Number(number) => document.calc.set_number(engine, *number),
+                            Literal::Text(text) => document.calc.set_text(engine, text.clone()),
+                            Literal::Boolean(flag) => document.calc.set_boolean(engine, *flag),
+                        };
+                    }
+                    CellInput::Formula { .. } => formulas.push((reference, cell.state.clone())),
+                }
+                document
+                    .sheets
+                    .get_mut(&sheet.id)
+                    .expect("inserted")
+                    .cells
+                    .insert((cell.row, cell.column), cell.state.clone());
+            }
+        }
+        for (reference, state) in formulas {
+            let CellInput::Formula { formula } = &state.input else {
+                unreachable!("collected formulas only")
+            };
+            let bound = document.bind_formula(reference.sheet, formula)?;
+            let engine = document.engine_cell(reference).expect("checked");
+            document.calc.set_parsed_formula(engine, bound)?;
+            document.attach_dependencies(reference, formula);
+        }
+        document.tables = snapshot.tables.clone();
+        document.imports = snapshot.imports.clone();
+        document.proposals = snapshot.proposals.clone();
+        document.last_tick = snapshot.last_tick;
+        document.branches = snapshot.branches.clone();
+        document.checks = snapshot.checks.clone();
+        document.watches = snapshot.watches.clone();
+        document.merges = snapshot.merges.clone();
+        Ok(document)
+    }
+
+    pub fn branches(&self) -> &BTreeMap<BranchId, BranchRecord> {
+        &self.branches
+    }
+
+    pub fn checks(&self) -> &BTreeMap<CheckId, CheckRecord> {
+        &self.checks
+    }
+
+    pub fn watches(&self) -> &BTreeMap<WatchId, WatchRecord> {
+        &self.watches
+    }
+
+    pub fn merges(&self) -> &[MergeRecord] {
+        &self.merges
+    }
+
+    /// Evaluates every check against the current state. A check passes only
+    /// when its cell is exactly `TRUE`; errors and other values fail.
+    pub fn check_results(&self) -> Vec<CheckResult> {
+        self.checks
+            .iter()
+            .map(|(id, record)| {
+                let value = self.value(record.cell);
+                CheckResult {
+                    check: *id,
+                    name: record.name.clone(),
+                    severity: record.severity,
+                    passed: value == CellValue::Boolean(true),
+                    value,
+                    message: record.message.clone(),
+                }
+            })
+            .collect()
+    }
+
+    /// Where a cell's value came from, or `None` for a cell nothing has set.
+    pub fn lineage(&self, cell: CellRef) -> Option<Lineage> {
+        let state = self.cell(cell)?;
+        let (kind, inputs) = match &state.input {
+            CellInput::Formula { formula } => {
+                let mut inputs: Vec<CellRef> = formula.references.clone();
+                inputs.sort_unstable();
+                inputs.dedup();
+                (LineageKind::Computed, inputs)
+            }
+            CellInput::Value { .. } => (
+                match state.provenance.actor.kind {
+                    ActorKind::Human => LineageKind::Entered,
+                    ActorKind::Import => LineageKind::Imported,
+                    ActorKind::Agent => LineageKind::Agent,
+                    ActorKind::ModelAssisted => LineageKind::ModelAssisted,
+                    ActorKind::System => LineageKind::System,
+                },
+                Vec::new(),
+            ),
+        };
+        Some(Lineage {
+            kind,
+            event: state.provenance.event,
+            actor: state.provenance.actor.clone(),
+            timestamp: state.provenance.timestamp,
+            inputs,
+        })
     }
 
     /// Rebuilds a document from its log. The first event must create it.
@@ -939,6 +1316,10 @@ impl Document {
             imports: self.imports.clone(),
             proposals: self.proposals.clone(),
             last_tick: self.last_tick,
+            branches: self.branches.clone(),
+            checks: self.checks.clone(),
+            watches: self.watches.clone(),
+            merges: self.merges.clone(),
         }
     }
 
@@ -1073,7 +1454,44 @@ impl Document {
             Command::RejectProposal { proposal, reason } => {
                 Operation::RejectProposal { proposal, reason }
             }
+            Command::AddCheck {
+                name,
+                sheet,
+                a1,
+                severity,
+                message,
+            } => Operation::AddCheck {
+                check: CheckId::derive(&seed, 0),
+                name,
+                cell: self.resolve_a1(sheet, &a1)?,
+                severity,
+                message,
+            },
+            Command::RemoveCheck { check } => Operation::RemoveCheck { check },
+            Command::WatchOutput { name, sheet, a1 } => Operation::WatchOutput {
+                watch: WatchId::derive(&seed, 0),
+                name,
+                cell: self.resolve_a1(sheet, &a1)?,
+            },
+            Command::UnwatchOutput { watch } => Operation::UnwatchOutput { watch },
         })
+    }
+
+    /// Builds the first event of a new branch forked at the current head.
+    /// The branch identity derives from the head so replay mints it again.
+    pub fn fork(&self, name: impl Into<String>, actor: Actor, timestamp: i64) -> Event {
+        let branch = BranchId::derive(&self.seed(), 1);
+        Event::new(
+            self.head,
+            branch,
+            actor,
+            timestamp,
+            Operation::CreateBranch {
+                branch,
+                name: name.into(),
+                from: self.head.expect("a created document has a head"),
+            },
+        )
     }
 
     /// Parses A1 source against the current view and records every reference
@@ -1156,7 +1574,8 @@ impl Document {
                 observed: event.parent,
             });
         }
-        if event.branch != self.branch {
+        let forking = matches!(event.operation, Operation::CreateBranch { .. });
+        if event.branch != self.branch && !forking {
             return Err(ApplyError::BranchMismatch);
         }
         if event.actor.id.is_empty() || event.actor.id.chars().count() > MAX_ACTOR_ID_CHARS {
@@ -1194,6 +1613,109 @@ impl Document {
                 }
                 check_name(name)?;
                 self.name = name.clone();
+                self.branches.insert(
+                    self.branch,
+                    BranchRecord {
+                        name: "main".into(),
+                        parent: None,
+                        base: None,
+                        created: provenance,
+                    },
+                );
+            }
+            Operation::CreateBranch { branch, name, from } => {
+                check_name(name)?;
+                if self.head != Some(*from) {
+                    return Err(ApplyError::ForkPointMismatch);
+                }
+                if *branch == self.branch || self.branches.contains_key(branch) {
+                    return Err(ApplyError::DuplicateId(branch.0));
+                }
+                if self.branches.values().any(|record| record.name == *name) {
+                    return Err(ApplyError::DuplicateName(name.clone()));
+                }
+                self.branches.insert(
+                    *branch,
+                    BranchRecord {
+                        name: name.clone(),
+                        parent: Some(self.branch),
+                        base: Some(*from),
+                        created: provenance,
+                    },
+                );
+                self.branch = *branch;
+            }
+            Operation::RecordMerge {
+                source,
+                source_head,
+                replayed,
+            } => {
+                // The source branch's own CreateBranch event lives on the
+                // source chain, so the target state need not know the branch.
+                if replayed.len() > MAX_BATCH {
+                    return Err(ApplyError::BatchTooLarge);
+                }
+                self.merges.push(MergeRecord {
+                    source: *source,
+                    source_head: *source_head,
+                    replayed: replayed.clone(),
+                    recorded: provenance,
+                });
+            }
+            Operation::AddCheck {
+                check,
+                name,
+                cell,
+                severity,
+                message,
+            } => {
+                check_name(name)?;
+                if message.chars().count() > MAX_TEXT_CHARS {
+                    return Err(ApplyError::InvalidValue);
+                }
+                self.check_fresh(check.0)?;
+                let state = self.sheet(cell.sheet)?;
+                self.check_cell_exists(state, cell)?;
+                if self.checks.values().any(|record| record.name == *name) {
+                    return Err(ApplyError::DuplicateName(name.clone()));
+                }
+                self.checks.insert(
+                    *check,
+                    CheckRecord {
+                        name: name.clone(),
+                        cell: *cell,
+                        severity: *severity,
+                        message: message.clone(),
+                        added: provenance,
+                    },
+                );
+            }
+            Operation::RemoveCheck { check } => {
+                if self.checks.remove(check).is_none() {
+                    return Err(ApplyError::UnknownCheck(*check));
+                }
+            }
+            Operation::WatchOutput { watch, name, cell } => {
+                check_name(name)?;
+                self.check_fresh(watch.0)?;
+                let state = self.sheet(cell.sheet)?;
+                self.check_cell_exists(state, cell)?;
+                if self.watches.values().any(|record| record.name == *name) {
+                    return Err(ApplyError::DuplicateName(name.clone()));
+                }
+                self.watches.insert(
+                    *watch,
+                    WatchRecord {
+                        name: name.clone(),
+                        cell: *cell,
+                        added: provenance,
+                    },
+                );
+            }
+            Operation::UnwatchOutput { watch } => {
+                if self.watches.remove(watch).is_none() {
+                    return Err(ApplyError::UnknownWatch(*watch));
+                }
             }
             Operation::AddSheet { sheet, name } => {
                 check_name(name)?;
@@ -1626,11 +2148,13 @@ impl Document {
                 .chain(sheet.column_ordinals.keys().map(|column| column.0))
         });
         std::iter::once(self.id.0)
-            .chain(std::iter::once(self.branch.0))
+            .chain(self.branches.keys().map(|id| id.0))
             .chain(sheets)
             .chain(self.tables.keys().map(|id| id.0))
             .chain(self.imports.keys().map(|id| id.0))
             .chain(self.proposals.keys().map(|id| id.0))
+            .chain(self.checks.keys().map(|id| id.0))
+            .chain(self.watches.keys().map(|id| id.0))
     }
 
     fn check_fresh(&self, id: ObjectId) -> Result<(), ApplyError> {
@@ -2395,6 +2919,124 @@ mod tests {
         assert_eq!(
             Document::replay(&fixture.events).unwrap().digest(),
             fixture.document.digest()
+        );
+    }
+
+    #[test]
+    fn branches_checks_watches_and_snapshots_round_trip() {
+        let mut fixture = Fixture::new();
+        let sheet = fixture.sheet;
+        fixture.set("A1", 5.0);
+        fixture.formula("A2", "=A1*2");
+        fixture.formula("A3", "=A2>=10");
+        let check = fixture.run(
+            human(),
+            Command::AddCheck {
+                name: "doubled".into(),
+                sheet,
+                a1: "A3".into(),
+                severity: Severity::Error,
+                message: "A2 must be at least 10".into(),
+            },
+        );
+        let Operation::AddCheck { check, .. } = check.operation else {
+            unreachable!()
+        };
+        let watch = fixture.run(
+            human(),
+            Command::WatchOutput {
+                name: "total".into(),
+                sheet,
+                a1: "A2".into(),
+            },
+        );
+        let Operation::WatchOutput { watch, .. } = watch.operation else {
+            unreachable!()
+        };
+        assert!(fixture.document.check_results()[0].passed);
+        fixture.set("A1", 1.0);
+        let results = fixture.document.check_results();
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].passed);
+        assert_eq!(results[0].check, check);
+        assert_eq!(results[0].severity, Severity::Error);
+        let a2 = fixture.document.resolve_a1(sheet, "A2").unwrap();
+        let lineage = fixture.document.lineage(a2).unwrap();
+        assert_eq!(lineage.kind, LineageKind::Computed);
+        assert_eq!(
+            lineage.inputs,
+            vec![fixture.document.resolve_a1(sheet, "A1").unwrap()]
+        );
+        let a1 = fixture.document.resolve_a1(sheet, "A1").unwrap();
+        assert_eq!(
+            fixture.document.lineage(a1).unwrap().kind,
+            LineageKind::Entered
+        );
+        assert_eq!(fixture.document.watches()[&watch].cell, a2);
+
+        // Snapshot reconstruction reproduces the digest exactly.
+        let snapshot = fixture.document.snapshot();
+        let rebuilt = Document::from_snapshot(&snapshot).unwrap();
+        assert_eq!(rebuilt.digest(), fixture.document.digest());
+        assert_eq!(rebuilt.value(a2), CellValue::Number(2.0));
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let decoded: Snapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            Document::from_snapshot(&decoded).unwrap().digest(),
+            rebuilt.digest()
+        );
+        let mut tampered = snapshot.clone();
+        tampered.name = "Other".into();
+        assert_ne!(
+            Document::from_snapshot(&tampered).unwrap().digest(),
+            rebuilt.digest()
+        );
+
+        // Forking switches the document to the new branch; later events on
+        // the old branch are rejected, and the fork replays deterministically.
+        let fork = fixture.document.fork("agent-work", agent(), 9_000);
+        let main_branch = fixture.document.branch();
+        fixture.document.apply(&fork).unwrap();
+        fixture.events.push(fork.clone());
+        assert_ne!(fixture.document.branch(), main_branch);
+        assert_eq!(fixture.document.branches().len(), 2);
+        let stale = Event::new(
+            fixture.document.head(),
+            main_branch,
+            human(),
+            9_001,
+            Operation::Tick { tick: 1, at: 1 },
+        );
+        assert_eq!(
+            fixture.document.apply(&stale).unwrap_err(),
+            ApplyError::BranchMismatch
+        );
+        fixture.set("A1", 7.0);
+        let replayed = Document::replay(&fixture.events).unwrap();
+        assert_eq!(replayed.digest(), fixture.document.digest());
+        assert_eq!(replayed.branch(), fixture.document.branch());
+        let duplicate = Document::replay(&fixture.events[..fixture.events.len() - 2])
+            .unwrap()
+            .fork("agent-work", agent(), 9_000);
+        assert_eq!(duplicate.id, fork.id);
+        assert_eq!(
+            fixture.fail(
+                human(),
+                Command::RemoveCheck {
+                    check: CheckId(ObjectId::from_seed("nope")),
+                },
+            ),
+            ApplyError::UnknownCheck(CheckId(ObjectId::from_seed("nope")))
+        );
+        fixture.run(human(), Command::RemoveCheck { check });
+        assert!(fixture.document.check_results().is_empty());
+        assert_eq!(
+            Operation::SetValue {
+                cell: a1,
+                value: Literal::Blank
+            }
+            .touches(),
+            vec![Touch::Cell { cell: a1 }]
         );
     }
 
