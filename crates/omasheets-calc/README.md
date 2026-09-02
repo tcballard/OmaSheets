@@ -27,7 +27,12 @@ than silently producing a plausible number.
 
 `COUNTIF`/`SUMIF`-family criteria follow Excel: a comparison prefix (`>=`,
 `<>`, ...), case-insensitive text with its spacing kept (`"Ltd "` matches only
-`"Ltd "`), and the wildcards `?` and `*` with `~` as the escape. Locale-specific
+`"Ltd "`), and the wildcards `?` and `*` with `~` as the escape. Types never
+cross except that numeric text counts as a number; blank cells and errors in
+the criteria range satisfy only `<>` tests, `""` and `<>` test for blank, a
+criterion read from an empty cell is 0, and an error criterion counts the cells
+holding that error. Negative zero is folded into zero everywhere arithmetic
+produces it, so `-1*0` compares equal to `0` and prints as `0`. Locale-specific
 number parsing is not attempted.
 
 Cross-sheet ranges qualify the first endpoint (`Inputs!A1:A10`). External

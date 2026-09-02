@@ -1143,9 +1143,9 @@ impl Workbook {
             Expr::Empty => Value::Blank,
             Expr::Reference(index) => self.cells[*index].value.clone(),
             Expr::UnaryMinus(inner) => match self.evaluate(inner) {
-                Value::Number(value) => Value::Number(-value),
-                Value::Blank => Value::Number(-0.0),
-                Value::Boolean(value) => Value::Number(if value { -1.0 } else { -0.0 }),
+                Value::Number(value) => number_value(-value),
+                Value::Blank => Value::Number(0.0),
+                Value::Boolean(value) => Value::Number(if value { -1.0 } else { 0.0 }),
                 Value::Text(_) => Value::Error(CalcError::InvalidValue),
                 other => other,
             },
@@ -1346,9 +1346,9 @@ impl Workbook {
             .collect();
 
         match function {
-            Function::Sum => Value::Number(numbers.iter().sum()),
+            Function::Sum => number_value(numbers.iter().sum()),
             Function::Average if !numbers.is_empty() => {
-                Value::Number(numbers.iter().sum::<f64>() / numbers.len() as f64)
+                number_value(numbers.iter().sum::<f64>() / numbers.len() as f64)
             }
             Function::Average => Value::Error(CalcError::DivisionByZero),
             Function::Min => Value::Number(numbers.into_iter().reduce(f64::min).unwrap_or(0.0)),
@@ -1981,10 +1981,9 @@ impl Workbook {
         for pair in criteria_arguments.chunks_exact(2) {
             let mut range = Vec::new();
             self.flatten_values(&pair[0], &mut range);
+            // An error criterion counts the cells holding that error, as in
+            // Excel (`COUNTIF(range, NA())`).
             let criterion = self.evaluate(&pair[1]);
-            if matches!(criterion, Value::Error(_)) {
-                return criterion;
-            }
             criteria.push((range, criterion));
         }
         let Some(length) = criteria.first().map(|(range, _)| range.len()) else {
@@ -2291,7 +2290,9 @@ fn typed_compare(left: &Value, right: &Value) -> Result<std::cmp::Ordering, Calc
         _ => (left.clone(), right.clone()),
     };
     Ok(match (&left, &right) {
-        (Value::Number(left), Value::Number(right)) => left.total_cmp(right),
+        (Value::Number(left), Value::Number(right)) => {
+            left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
+        }
         (Value::Text(left), Value::Text(right)) => left.to_lowercase().cmp(&right.to_lowercase()),
         (Value::Boolean(left), Value::Boolean(right)) => left.cmp(right),
         _ => rank(&left).cmp(&rank(&right)),
@@ -2318,11 +2319,21 @@ fn positive_index(value: Value) -> Result<usize, CalcError> {
     }
 }
 
+/// Exact-match lookup equality: text ignores case, and a blank cell never
+/// matches anything, so a blank lookup value against a column with blank
+/// cells is `#N/A`, as in Excel.
 fn lookup_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Text(left), Value::Text(right)) => left.eq_ignore_ascii_case(right),
+        (Value::Blank, _) | (_, Value::Blank) => false,
         _ => left == right,
     }
+}
+
+/// A numeric result with negative zero folded into zero, which is how Excel
+/// stores, prints and compares it (`-1*0` is `0`, not `-0`).
+fn number_value(value: f64) -> Value {
+    Value::Number(if value == 0.0 { 0.0 } else { value })
 }
 
 /// Date arguments accept numbers and blanks only. Booleans and text are
@@ -2417,11 +2428,11 @@ fn apply_binary(operator: BinaryOp, left: Value, right: Value) -> Value {
         (Err(error), _) | (_, Err(error)) => return Value::Error(error),
     };
     match operator {
-        BinaryOp::Add => Value::Number(left + right),
-        BinaryOp::Subtract => Value::Number(left - right),
-        BinaryOp::Multiply => Value::Number(left * right),
+        BinaryOp::Add => number_value(left + right),
+        BinaryOp::Subtract => number_value(left - right),
+        BinaryOp::Multiply => number_value(left * right),
         BinaryOp::Divide if right == 0.0 => Value::Error(CalcError::DivisionByZero),
-        BinaryOp::Divide => Value::Number(left / right),
+        BinaryOp::Divide => number_value(left / right),
         BinaryOp::Power => {
             let result = left.powf(right);
             if (left == 0.0 && right == 0.0) || !result.is_finite() {
@@ -2987,30 +2998,96 @@ fn exact_text(values: &[Value]) -> Value {
     }
 }
 
+/// Excel's criteria matching. Blank cells and errors in the criteria range
+/// never satisfy an equality or ordering test and satisfy every `<>` test
+/// (with `""` and `<>` themselves testing for blank), a criterion taken from
+/// an empty cell is the number 0, an error criterion matches that error.
 fn criterion_matches(candidate: Value, criterion: Value) -> Result<bool, CalcError> {
     let (operator, expected) = match criterion {
         Value::Text(text) => parse_criterion(&text),
+        Value::Blank => (BinaryOp::Equal, Value::Number(0.0)),
         value => (BinaryOp::Equal, value),
     };
-    if let (Value::Text(left), Value::Text(right)) = (&candidate, &expected) {
-        let left = left.to_lowercase();
-        let right = right.to_lowercase();
+    if expected == Value::Blank {
+        let empty =
+            matches!(&candidate, Value::Blank | Value::Text(_) if text_is_empty(&candidate));
         return Ok(match operator {
-            BinaryOp::Equal => wildcard_matches(&right, &left),
-            BinaryOp::NotEqual => !wildcard_matches(&right, &left),
-            BinaryOp::Less => left < right,
-            BinaryOp::LessOrEqual => left <= right,
-            BinaryOp::Greater => left > right,
-            BinaryOp::GreaterOrEqual => left >= right,
-            _ => return Err(CalcError::InvalidArguments),
+            BinaryOp::Equal => empty,
+            BinaryOp::NotEqual => !empty,
+            _ => false,
         });
     }
+    match (&candidate, &expected) {
+        (Value::Blank, _) => {
+            return Ok(operator == BinaryOp::NotEqual);
+        }
+        (Value::Error(candidate), Value::Error(expected)) => {
+            return Ok(match operator {
+                BinaryOp::Equal => candidate == expected,
+                BinaryOp::NotEqual => candidate != expected,
+                _ => false,
+            });
+        }
+        (Value::Error(_), _) | (_, Value::Error(_)) => {
+            return Ok(operator == BinaryOp::NotEqual);
+        }
+        _ => {}
+    }
+    // Types never cross in a criterion, except that numeric text is a number
+    // against a numeric criterion (`"5"` counts for `">4"`); any other
+    // mismatch satisfies `<>` only.
+    let (candidate, expected) = match (candidate, expected) {
+        (Value::Text(left), Value::Text(right)) => {
+            let left = left.to_lowercase();
+            let right = right.to_lowercase();
+            return Ok(match operator {
+                BinaryOp::Equal => wildcard_matches(&right, &left),
+                BinaryOp::NotEqual => !wildcard_matches(&right, &left),
+                BinaryOp::Less => left < right,
+                BinaryOp::LessOrEqual => left <= right,
+                BinaryOp::Greater => left > right,
+                BinaryOp::GreaterOrEqual => left >= right,
+                _ => return Err(CalcError::InvalidArguments),
+            });
+        }
+        (Value::Text(text), Value::Number(number)) => match text.trim().parse::<f64>() {
+            Ok(parsed) => (Value::Number(parsed), Value::Number(number)),
+            Err(_) => return Ok(operator == BinaryOp::NotEqual),
+        },
+        (candidate, expected)
+            if std::mem::discriminant(&candidate) != std::mem::discriminant(&expected) =>
+        {
+            return Ok(operator == BinaryOp::NotEqual);
+        }
+        pair => pair,
+    };
     match apply_binary(operator, candidate, expected) {
         Value::Boolean(value) => Ok(value),
         Value::Error(CalcError::InvalidValue) => Ok(false),
         Value::Error(error) => Err(error),
         _ => Err(CalcError::InvalidValue),
     }
+}
+
+fn text_is_empty(value: &Value) -> bool {
+    match value {
+        Value::Blank => true,
+        Value::Text(text) => text.is_empty(),
+        _ => false,
+    }
+}
+
+fn parse_error_name(text: &str) -> Option<CalcError> {
+    Some(match text.to_ascii_uppercase().as_str() {
+        "#DIV/0!" => CalcError::DivisionByZero,
+        "#REF!" => CalcError::InvalidReference,
+        "#VALUE!" => CalcError::InvalidValue,
+        "#NUM!" => CalcError::InvalidNumber,
+        "#N/A" => CalcError::NotAvailable,
+        "#NAME?" => CalcError::InvalidName,
+        "#NULL!" => CalcError::NullIntersection,
+        _ => return None,
+    })
 }
 
 /// Excel's criteria wildcards: `?` is one character, `*` any run, `~`
@@ -3089,6 +3166,8 @@ fn parse_criterion(criterion: &str) -> (BinaryOp, Value) {
         Value::Boolean(false)
     } else if let Ok(value) = trimmed.parse::<f64>() {
         Value::Number(value)
+    } else if let Some(error) = parse_error_name(trimmed) {
+        Value::Error(error)
     } else {
         Value::Text(operand.into())
     };
@@ -4049,6 +4128,92 @@ mod tests {
             ("=COUNTIF(A1:A5,\"*\")", 4.0),
             ("=COUNTIF(A1:A5,\"<>*Services*\")", 4.0),
             ("=COUNTIF(A1:A5,\" 7 \")", 1.0),
+        ];
+        for (column, (formula, expected)) in cases.into_iter().enumerate() {
+            let target = cell(6, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            assert_eq!(workbook.value(target), Value::Number(expected), "{formula}");
+        }
+    }
+
+    #[test]
+    fn negative_zero_is_zero_and_blank_lookups_never_match_blank_cells() {
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(0, 0), -1.0);
+        workbook.set_number(cell(1, 0), 0.0);
+        workbook.set_text(cell(2, 0), "b");
+        workbook.set_number(cell(2, 1), 9.0);
+        let cases = [
+            ("=A1*A2", Value::Number(0.0)),
+            ("=(A1*A2)=0", Value::Boolean(true)),
+            ("=(A1*A2)<0", Value::Boolean(false)),
+            ("=SUM(A1*A2,A1*A2)=0", Value::Boolean(true)),
+            ("=-A2&\"\"", Value::Text("0".into())),
+            ("=-B1", Value::Number(0.0)),
+            ("=SUM(D1:D3)", Value::Number(0.0)),
+            ("=MATCH(B1,A1:A3,0)", Value::Error(CalcError::NotAvailable)),
+            ("=MATCH(D1,D1:D3,0)", Value::Error(CalcError::NotAvailable)),
+            (
+                "=VLOOKUP(D1,D1:E3,2,FALSE)",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            ("=VLOOKUP(\"B\",A1:B3,2,FALSE)", Value::Number(9.0)),
+        ];
+        for (column, (formula, expected)) in cases.into_iter().enumerate() {
+            let target = cell(6, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            let value = workbook.value(target);
+            assert_eq!(value, expected, "{formula}");
+            if let Value::Number(number) = value {
+                assert!(number.is_sign_positive(), "{formula} keeps a negative zero");
+            }
+        }
+    }
+
+    #[test]
+    fn criteria_treat_blanks_and_errors_as_excel_does() {
+        let mut workbook = Workbook::default();
+        // A1 blank, A2 = 0, A3 = "", A4 = #N/A, A5 = "x", A6 = 5.
+        workbook.set_number(cell(1, 0), 0.0);
+        workbook.set_text(cell(2, 0), "");
+        workbook.set_error(cell(3, 0), CalcError::NotAvailable);
+        workbook.set_text(cell(4, 0), "x");
+        workbook.set_number(cell(5, 0), 5.0);
+        for row in 0..6 {
+            workbook.set_number(cell(row, 1), f64::from(1 << row));
+        }
+        // D1 = 5, D2 = "5" (text), D3 = "five", D4 = TRUE.
+        workbook.set_number(cell(0, 3), 5.0);
+        workbook.set_text(cell(1, 3), "5");
+        workbook.set_text(cell(2, 3), "five");
+        workbook.set_boolean(cell(3, 3), true);
+        let cases = [
+            // Text and booleans never satisfy a numeric ordering, but
+            // numeric text is a number against a numeric criterion.
+            ("=COUNTIF(D1:D4,\"5\")", 2.0),
+            ("=COUNTIF(D1:D4,\">4\")", 2.0),
+            ("=COUNTIF(D1:D4,\"<>5\")", 2.0),
+            ("=COUNTIF(D1:D4,TRUE)", 1.0),
+            ("=COUNTIF(D1:D4,\">=a\")", 1.0),
+            // A criterion read from an empty cell is 0: only A2 matches.
+            ("=COUNTIF(A1:A6,C1)", 1.0),
+            ("=SUMIF(A1:A6,C1,B1:B6)", 2.0),
+            // "" matches blank cells and empty text, never the number 0.
+            ("=COUNTIF(A1:A6,\"\")", 2.0),
+            ("=COUNTIF(A1:A6,\"<>\")", 4.0),
+            // Blanks and errors satisfy <> against anything else and
+            // nothing but their own error otherwise.
+            ("=COUNTIF(A1:A6,\"<>x\")", 5.0),
+            ("=COUNTIF(A1:A6,\"<>0\")", 5.0),
+            ("=COUNTIF(A1:A6,\"<10\")", 2.0),
+            // "*" counts every text cell, empty text included; "?*" needs a
+            // character.
+            ("=COUNTIF(A1:A6,\"*\")", 2.0),
+            ("=COUNTIF(A1:A6,\"?*\")", 1.0),
+            ("=COUNTIF(A1:A6,\"#N/A\")", 1.0),
+            ("=COUNTIF(A1:A6,A4)", 1.0),
+            ("=SUMIF(A1:A6,\"<>#N/A\",B1:B6)", 55.0),
+            ("=SUMIF(A1:A6,\">=0\",B1:B6)", 34.0),
         ];
         for (column, (formula, expected)) in cases.into_iter().enumerate() {
             let target = cell(6, column as u32);
