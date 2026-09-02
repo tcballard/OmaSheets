@@ -64,6 +64,15 @@ workbook file, `define_sheet_name` here) is seen only by formulas on that
 sheet and shadows a workbook-level name of the same spelling there; every
 other sheet sees the workbook name.
 
+Inside an aggregate argument, an expression that combines ranges with
+operators or scalar functions is evaluated elementwise, as Excel evaluates a
+CSE or dynamic-array formula: `SUM(IF(B1:B5=0,0,C1:C5-B1:B5))`,
+`SUM(A1:A5*B1:B5)`, `SUMPRODUCT((A1:A5>2)*B1:B5)`, `MAX(ABS(A1:A5-3))`. A
+scalar or a single row/column broadcasts to the other operand's shape, cells
+past a shorter operand are `#N/A`, and the intermediate array is bounded by
+the same cell limit as a range. A range alone in scalar position still
+intersects implicitly, and a formula's own result is always one value.
+
 Run its focused checks with:
 
 ```bash
