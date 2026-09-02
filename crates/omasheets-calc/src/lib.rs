@@ -141,6 +141,10 @@ enum Function {
     Exact,
     CountIf,
     SumIf,
+    CountIfs,
+    SumIfs,
+    AverageIf,
+    AverageIfs,
     Index,
     Match,
     VLookup,
@@ -420,7 +424,15 @@ impl Workbook {
                 value
             };
         }
-        if matches!(function, Function::CountIf | Function::SumIf) {
+        if matches!(
+            function,
+            Function::CountIf
+                | Function::SumIf
+                | Function::CountIfs
+                | Function::SumIfs
+                | Function::AverageIf
+                | Function::AverageIfs
+        ) {
             return self.evaluate_criteria_function(function, arguments);
         }
         if matches!(
@@ -534,6 +546,10 @@ impl Workbook {
             | Function::Pi
             | Function::CountIf
             | Function::SumIf
+            | Function::CountIfs
+            | Function::SumIfs
+            | Function::AverageIf
+            | Function::AverageIfs
             | Function::Index
             | Function::Match
             | Function::VLookup
@@ -552,48 +568,83 @@ impl Workbook {
     }
 
     fn evaluate_criteria_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
-        let valid_arity = match function {
-            Function::CountIf => arguments.len() == 2,
-            Function::SumIf => matches!(arguments.len(), 2 | 3),
-            _ => false,
+        let (output_expression, criteria_arguments) = match function {
+            Function::CountIf if arguments.len() == 2 => (None, arguments),
+            Function::SumIf | Function::AverageIf if matches!(arguments.len(), 2 | 3) => {
+                let output = arguments.get(2).unwrap_or(&arguments[0]);
+                (Some(output), &arguments[..2])
+            }
+            Function::CountIfs if arguments.len() >= 2 && arguments.len().is_multiple_of(2) => {
+                (None, arguments)
+            }
+            Function::SumIfs | Function::AverageIfs
+                if arguments.len() >= 3 && arguments.len() % 2 == 1 =>
+            {
+                (Some(&arguments[0]), &arguments[1..])
+            }
+            _ => return Value::Error(CalcError::InvalidArguments),
         };
-        if !valid_arity {
+
+        let mut criteria = Vec::with_capacity(criteria_arguments.len() / 2);
+        for pair in criteria_arguments.chunks_exact(2) {
+            let mut range = Vec::new();
+            self.flatten_values(&pair[0], &mut range);
+            let criterion = self.evaluate(&pair[1]);
+            if matches!(criterion, Value::Error(_)) {
+                return criterion;
+            }
+            criteria.push((range, criterion));
+        }
+        let Some(length) = criteria.first().map(|(range, _)| range.len()) else {
+            return Value::Error(CalcError::InvalidArguments);
+        };
+        if criteria.iter().any(|(range, _)| range.len() != length) {
             return Value::Error(CalcError::InvalidArguments);
         }
-        let mut criteria_range = Vec::new();
-        self.flatten_values(&arguments[0], &mut criteria_range);
-        let criterion = self.evaluate(&arguments[1]);
-        if let Value::Error(error) = &criterion {
-            return Value::Error(error.clone());
-        }
-        let mut sum_range = Vec::new();
-        if arguments.len() == 3 {
-            self.flatten_values(&arguments[2], &mut sum_range);
-        } else {
-            sum_range.clone_from(&criteria_range);
-        }
-        if criteria_range.len() != sum_range.len() {
-            return Value::Error(CalcError::InvalidArguments);
+
+        let mut output_values = vec![Value::Blank; length];
+        if let Some(expression) = output_expression {
+            output_values.clear();
+            self.flatten_values(expression, &mut output_values);
+            if output_values.len() != length {
+                return Value::Error(CalcError::InvalidArguments);
+            }
         }
         let mut count = 0_usize;
+        let mut numeric_count = 0_usize;
         let mut sum = 0.0;
-        for (candidate, sum_value) in criteria_range.into_iter().zip(sum_range) {
-            match criterion_matches(candidate, criterion.clone()) {
-                Ok(true) => {
-                    count += 1;
-                    match sum_value {
-                        Value::Number(value) => sum += value,
-                        Value::Error(error) => return Value::Error(error),
-                        _ => {}
+        for (index, output_value) in output_values.into_iter().enumerate() {
+            let mut matched = true;
+            for (range, criterion) in &criteria {
+                match criterion_matches(range[index].clone(), criterion.clone()) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        matched = false;
+                        break;
                     }
+                    Err(error) => return Value::Error(error),
                 }
-                Ok(false) => {}
-                Err(error) => return Value::Error(error),
+            }
+            if !matched {
+                continue;
+            }
+            count += 1;
+            match output_value {
+                Value::Number(value) => {
+                    sum += value;
+                    numeric_count += 1;
+                }
+                Value::Error(error) => return Value::Error(error),
+                _ => {}
             }
         }
         match function {
-            Function::CountIf => Value::Number(count as f64),
-            Function::SumIf => Value::Number(sum),
+            Function::CountIf | Function::CountIfs => Value::Number(count as f64),
+            Function::SumIf | Function::SumIfs => Value::Number(sum),
+            Function::AverageIf | Function::AverageIfs if numeric_count > 0 => {
+                Value::Number(sum / numeric_count as f64)
+            }
+            Function::AverageIf | Function::AverageIfs => Value::Error(CalcError::DivisionByZero),
             _ => unreachable!("validated above"),
         }
     }
@@ -1494,6 +1545,10 @@ fn parse_function_name(name: &str) -> Result<Function, FormulaError> {
         "EXACT" => Ok(Function::Exact),
         "COUNTIF" => Ok(Function::CountIf),
         "SUMIF" => Ok(Function::SumIf),
+        "COUNTIFS" => Ok(Function::CountIfs),
+        "SUMIFS" => Ok(Function::SumIfs),
+        "AVERAGEIF" => Ok(Function::AverageIf),
+        "AVERAGEIFS" => Ok(Function::AverageIfs),
         "INDEX" => Ok(Function::Index),
         "MATCH" => Ok(Function::Match),
         "VLOOKUP" => Ok(Function::VLookup),
@@ -1803,6 +1858,34 @@ mod tests {
             .unwrap();
         assert_eq!(workbook.value(cell(0, 2)), Value::Number(3.0));
         assert_eq!(workbook.value(cell(1, 2)), Value::Number(120.0));
+    }
+
+    #[test]
+    fn evaluates_multi_criteria_and_average_aggregates() {
+        let mut workbook = Workbook::default();
+        for (row, group, active, value) in [
+            (0, "A", true, 10.0),
+            (1, "A", false, 20.0),
+            (2, "B", true, 30.0),
+            (3, "A", true, 40.0),
+        ] {
+            workbook.set_text(cell(row, 0), group);
+            workbook.set_boolean(cell(row, 1), active);
+            workbook.set_number(cell(row, 2), value);
+        }
+
+        for (column, formula, expected) in [
+            (3, "=COUNTIFS(A1:A4,\"A\",B1:B4,TRUE)", 2.0),
+            (4, "=SUMIFS(C1:C4,A1:A4,\"A\",B1:B4,TRUE)", 50.0),
+            (5, "=AVERAGEIF(A1:A4,\"A\",C1:C4)", 70.0 / 3.0),
+            (6, "=AVERAGEIFS(C1:C4,A1:A4,\"A\",B1:B4,TRUE)", 25.0),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            let Value::Number(value) = workbook.value(cell(0, column)) else {
+                panic!("expected number for {formula}");
+            };
+            assert!((value - expected).abs() < 1e-9, "{formula}");
+        }
     }
 
     #[test]
