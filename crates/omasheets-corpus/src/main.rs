@@ -128,6 +128,10 @@ struct OwnedSummary {
     /// and the number of workbooks naming each, bounded like the per-file map.
     unsupported_functions: BTreeMap<String, FunctionMiss>,
     unsupported_reasons: BTreeMap<String, u64>,
+    /// Workbooks the importer opened only after skipping sheet entries that
+    /// have no worksheet part, and how many such entries it skipped in all.
+    workbooks_with_skipped_sheets: u64,
+    skipped_sheets: u64,
     peak_rss_bytes_max: Option<u64>,
 }
 
@@ -811,6 +815,10 @@ fn accumulate_owned(summary: &mut OwnedSummary, owned: &OwnedProbe) {
             .entry(reason.clone())
             .or_default() += *cells as u64;
     }
+    if !report.skipped_sheets.is_empty() {
+        summary.workbooks_with_skipped_sheets += 1;
+        summary.skipped_sheets += report.skipped_sheets.len() as u64;
+    }
     summary.peak_rss_bytes_max = summary.peak_rss_bytes_max.max(owned.peak_rss_bytes);
 }
 
@@ -1063,6 +1071,11 @@ mod tests {
                     "unsupported_function".to_string(),
                     10 - loaded,
                 )]),
+                skipped_sheets: if loaded == 8 {
+                    vec!["Module1".to_string(), "Module2".to_string()]
+                } else {
+                    Vec::new()
+                },
             },
             timing_ms: 1.0,
             peak_rss_bytes: Some(4096),
@@ -1081,6 +1094,8 @@ mod tests {
         assert_eq!(summary.unsupported_functions["TODAY"].workbooks, 2);
         assert_eq!(summary.unsupported_functions["OFFSET"].workbooks, 1);
         assert_eq!(summary.unsupported_reasons["unsupported_function"], 6);
+        assert_eq!(summary.workbooks_with_skipped_sheets, 1);
+        assert_eq!(summary.skipped_sheets, 2);
         assert_eq!(summary.formula_parse_rate, Some(0.7));
         assert_eq!(summary.comparison_coverage, Some(0.7));
         assert_eq!(summary.stored_value_match_rate, Some(12.0 / 14.0));
