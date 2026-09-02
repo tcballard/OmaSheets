@@ -276,7 +276,13 @@ fn read_formulas<RS: Read + Seek>(
     name: &str,
 ) -> Result<Range<String>, ImportError> {
     let read_error = |error: calamine::XlsxError| ImportError::Read(error.to_string());
-    let mut reader = source.worksheet_cells_reader(name).map_err(read_error)?;
+    // Chart and dialog sheets have no cells; Calamine's own range readers
+    // return an empty range for them and so does this one.
+    let mut reader = match source.worksheet_cells_reader(name) {
+        Ok(reader) => reader,
+        Err(calamine::XlsxError::NotAWorksheet(_)) => return Ok(Range::default()),
+        Err(error) => return Err(read_error(error)),
+    };
     let mut anchors: HashMap<usize, ((u32, u32), String)> = HashMap::new();
     let mut cells = Vec::new();
     let mut pending = Vec::new();
@@ -837,6 +843,33 @@ mod tests {
         extra_cells: &str,
         extra_rows: &str,
     ) -> Vec<u8> {
+        package_with_chartsheet(dangling, defined_names, extra_cells, extra_rows, false)
+    }
+
+    /// As [`package`], optionally with a chartsheet named `Chart` after the
+    /// worksheet.
+    fn package_with_chartsheet(
+        dangling: &[(&str, &str)],
+        defined_names: &str,
+        extra_cells: &str,
+        extra_rows: &str,
+        chartsheet: bool,
+    ) -> Vec<u8> {
+        let chart_sheet_entry = if chartsheet {
+            r#"<sheet name="Chart" sheetId="2" r:id="rId2"/>"#
+        } else {
+            ""
+        };
+        let chart_relationship = if chartsheet {
+            r#"<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet" Target="chartsheets/sheet1.xml"/>"#
+        } else {
+            ""
+        };
+        let chart_override = if chartsheet {
+            r#"<Override PartName="/xl/chartsheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml"/>"#
+        } else {
+            ""
+        };
         let sheets: String = dangling
             .iter()
             .map(|(name, id)| {
@@ -846,7 +879,9 @@ mod tests {
         let parts = [
             (
                 "[Content_Types].xml",
-                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#.to_string(),
+                format!(
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>{chart_override}</Types>"#
+                ),
             ),
             (
                 "_rels/.rels",
@@ -855,12 +890,18 @@ mod tests {
             (
                 "xl/workbook.xml",
                 format!(
-                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/>{sheets}</sheets><definedNames>{defined_names}</definedNames></workbook>"#
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/>{chart_sheet_entry}{sheets}</sheets><definedNames>{defined_names}</definedNames></workbook>"#
                 ),
             ),
             (
                 "xl/_rels/workbook.xml.rels",
-                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#.to_string(),
+                format!(
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>{chart_relationship}</Relationships>"#
+                ),
+            ),
+            (
+                "xl/chartsheets/sheet1.xml",
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr/><sheetViews><sheetView workbookViewId="0"/></sheetViews></chartsheet>"#.to_string(),
             ),
             (
                 "xl/worksheets/sheet1.xml",
@@ -960,6 +1001,23 @@ mod tests {
         assert_eq!(imported.parity().formula_cells_loaded, 5);
         assert_eq!(imported.parity().stored_values_matched, 5);
         assert_eq!(imported.parity().stored_values_mismatched, 0);
+    }
+
+    #[test]
+    fn chartsheets_import_as_empty_sheets() {
+        let path = temporary_xlsx(&package_with_chartsheet(
+            &[],
+            r#"<definedName name="Total">Data!$A$3</definedName>"#,
+            "",
+            "",
+            true,
+        ));
+        let imported = import_xlsx(&path, ImportLimits::default()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(imported.sheets.len(), 2);
+        assert_eq!(imported.sheets[1].name, "Chart");
+        assert_eq!(imported.parity().formula_cells_loaded, 1);
+        assert_eq!(imported.parity().stored_values_matched, 1);
     }
 
     #[test]
