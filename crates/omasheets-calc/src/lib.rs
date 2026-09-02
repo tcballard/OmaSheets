@@ -9,7 +9,7 @@
 
 pub mod serial_date;
 
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt;
 
 /// Defined names may refer to other names; deeper chains are rejected.
@@ -439,15 +439,30 @@ fn rebind_references(expression: &mut Expr<CellId>, map: &mut impl FnMut(CellId)
 enum Input {
     Literal(Value),
     Formula(Expr<usize>),
-    /// A shared range node. Its `dependencies` are the member cells in
-    /// row-major order and its `dependents` the formulas that read it; it
-    /// carries no value of its own. `anchor` is set for rectangles so
-    /// implicit intersection can index arithmetically; the shape travels
-    /// with each [`Expr::RangeNode`] that reads the node.
+    /// A shared range node: its `dependents` are the formulas that read it
+    /// and it carries no value of its own. A rectangle keeps no per-member
+    /// edges at all; membership is decided by position through the sheet
+    /// index, so a range costs nothing per cell it covers. An explicit member
+    /// list (a rebound range that no longer forms a rectangle) keeps its
+    /// members as `dependencies` in row-major order.
     Range {
-        anchor: Option<CellId>,
+        shape: RangeShape,
     },
 }
+
+#[derive(Clone, Copy, Debug)]
+enum RangeShape {
+    Rectangle {
+        anchor: CellId,
+        rows: usize,
+        columns: usize,
+    },
+    Members,
+}
+
+/// Rows per bucket of the rectangle index: a changed cell only checks the
+/// rectangles that touch its band.
+const RANGE_BAND_ROWS: u32 = 256;
 
 #[derive(Clone, Debug)]
 struct Cell {
@@ -458,6 +473,21 @@ struct Cell {
     value: Value,
 }
 
+/// Sizes of the calculation graph, for memory diagnostics. Counts are exact;
+/// `expression_nodes` walks every compiled formula.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct GraphStatistics {
+    pub cells: usize,
+    pub formula_cells: usize,
+    pub range_nodes: usize,
+    pub dependency_edges: usize,
+    pub dependent_edges: usize,
+    pub dependency_capacity: usize,
+    pub dependent_capacity: usize,
+    pub largest_dependents: usize,
+    pub expression_nodes: usize,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RecalcReport {
     /// Changed cell plus downstream formula cells evaluated in this pass.
@@ -466,6 +496,12 @@ pub struct RecalcReport {
 
 pub struct Workbook {
     indices: HashMap<CellId, usize>,
+    /// Cells of each sheet keyed by position, so a rectangle can be scanned
+    /// for the cells that exist inside it without materialising blanks.
+    sheet_cells: HashMap<u32, BTreeMap<(u32, u32), usize>>,
+    /// Rectangle range nodes bucketed by sheet and row band, so a changed
+    /// cell finds the ranges that cover it without per-member edges.
+    range_bands: HashMap<(u32, u32), Vec<usize>>,
     cells: Vec<Cell>,
     dirty_marks: Vec<u64>,
     pending: Vec<usize>,
@@ -485,6 +521,8 @@ impl Default for Workbook {
     fn default() -> Self {
         Self {
             indices: HashMap::new(),
+            sheet_cells: HashMap::new(),
+            range_bands: HashMap::new(),
             cells: Vec::new(),
             dirty_marks: Vec::new(),
             pending: Vec::new(),
@@ -579,59 +617,216 @@ impl Workbook {
         Ok(self.commit(cell, Input::Formula(expression), dependencies))
     }
 
-    /// Returns the shared node for `key`, creating it and its member cells
-    /// on first use. A node is a graph vertex like a cell: members point at
-    /// it as a dependent, formulas that read the range depend on it.
+    /// Returns the shared node for `key`, creating it on first use. A node is
+    /// a graph vertex like a cell: formulas that read the range depend on it,
+    /// and a change inside the rectangle reaches it through the band index.
     fn ensure_range(&mut self, key: &RangeKey) -> usize {
         if let Some(node) = self.ranges.get(key) {
             return *node;
         }
-        let (member_ids, anchor): (Vec<CellId>, Option<CellId>) = match key {
+        let node = self.cells.len();
+        let cell = match key {
             RangeKey::Rectangle {
                 anchor,
                 rows,
                 columns,
-            } => (
-                rectangle_cells(*anchor, *rows, *columns).collect(),
-                Some(*anchor),
-            ),
-            RangeKey::Members { members, .. } => (members.clone(), None),
+            } => {
+                let last_row = anchor.row + (*rows as u32 - 1);
+                for band in anchor.row / RANGE_BAND_ROWS..=last_row / RANGE_BAND_ROWS {
+                    self.range_bands
+                        .entry((anchor.sheet, band))
+                        .or_default()
+                        .push(node);
+                }
+                Cell {
+                    id: *anchor,
+                    input: Input::Range {
+                        shape: RangeShape::Rectangle {
+                            anchor: *anchor,
+                            rows: *rows,
+                            columns: *columns,
+                        },
+                    },
+                    dependencies: Vec::new(),
+                    dependents: Vec::new(),
+                    value: Value::Blank,
+                }
+            }
+            RangeKey::Members { members, .. } => {
+                let indices: Vec<usize> = members
+                    .iter()
+                    .map(|member| self.ensure_cell(*member))
+                    .collect();
+                for member in &indices {
+                    self.cells[*member].dependents.push(node);
+                }
+                Cell {
+                    id: members[0],
+                    input: Input::Range {
+                        shape: RangeShape::Members,
+                    },
+                    dependencies: indices,
+                    dependents: Vec::new(),
+                    value: Value::Blank,
+                }
+            }
         };
-        let members: Vec<usize> = member_ids
-            .iter()
-            .map(|member| self.ensure_cell(*member))
-            .collect();
-        let node = self.cells.len();
-        for member in &members {
-            self.cells[*member].dependents.push(node);
-        }
-        self.cells.push(Cell {
-            id: member_ids[0],
-            input: Input::Range { anchor },
-            dependencies: members,
-            dependents: Vec::new(),
-            value: Value::Blank,
-        });
+        self.cells.push(cell);
         self.dirty_marks.push(0);
         self.pending.push(0);
         self.ranges.insert(key.clone(), node);
         node
     }
 
-    fn range_members(&self, node: usize) -> &[usize] {
-        &self.cells[node].dependencies
+    fn range_shape(&self, node: usize) -> RangeShape {
+        match self.cells[node].input {
+            Input::Range { shape } => shape,
+            _ => unreachable!("range nodes hold a range shape"),
+        }
+    }
+
+    fn rectangle_covers(&self, node: usize, cell: CellId) -> bool {
+        match self.range_shape(node) {
+            RangeShape::Rectangle {
+                anchor,
+                rows,
+                columns,
+            } => {
+                cell.sheet == anchor.sheet
+                    && cell.row >= anchor.row
+                    && cell.row < anchor.row + rows as u32
+                    && cell.column >= anchor.column
+                    && cell.column < anchor.column + columns as u32
+            }
+            RangeShape::Members => false,
+        }
+    }
+
+    /// Rectangle nodes covering `cell`, through the band index.
+    fn covering_nodes(&self, cell: CellId) -> impl Iterator<Item = usize> + '_ {
+        self.range_bands
+            .get(&(cell.sheet, cell.row / RANGE_BAND_ROWS))
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(move |node| self.rectangle_covers(*node, cell))
+    }
+
+    /// Graph successors of `index`: explicit dependents plus, for a cell,
+    /// every rectangle that covers it.
+    fn for_each_successor(&self, index: usize, mut visit: impl FnMut(usize)) {
+        for dependent in &self.cells[index].dependents {
+            visit(*dependent);
+        }
+        if !matches!(self.cells[index].input, Input::Range { .. }) {
+            for node in self.covering_nodes(self.cells[index].id) {
+                visit(node);
+            }
+        }
+    }
+
+    pub fn statistics(&self) -> GraphStatistics {
+        let mut statistics = GraphStatistics::default();
+        for cell in &self.cells {
+            match &cell.input {
+                Input::Range { .. } => statistics.range_nodes += 1,
+                Input::Formula(expression) => {
+                    statistics.cells += 1;
+                    statistics.formula_cells += 1;
+                    statistics.expression_nodes += count_nodes(expression);
+                }
+                Input::Literal(_) => statistics.cells += 1,
+            }
+            statistics.dependency_edges += cell.dependencies.len();
+            statistics.dependent_edges += cell.dependents.len();
+            statistics.dependency_capacity += cell.dependencies.capacity();
+            statistics.dependent_capacity += cell.dependents.capacity();
+            statistics.largest_dependents =
+                statistics.largest_dependents.max(cell.dependents.len());
+        }
+        statistics
+    }
+
+    fn range_len(&self, node: usize) -> usize {
+        match self.range_shape(node) {
+            RangeShape::Rectangle { rows, columns, .. } => rows * columns,
+            RangeShape::Members => self.cells[node].dependencies.len(),
+        }
+    }
+
+    /// The cell at a row-major position inside the range, if it exists.
+    fn range_cell(&self, node: usize, index: usize) -> Option<usize> {
+        match self.range_shape(node) {
+            RangeShape::Rectangle {
+                anchor, columns, ..
+            } => self
+                .indices
+                .get(&CellId::new(
+                    anchor.sheet,
+                    anchor.row + (index / columns) as u32,
+                    anchor.column + (index % columns) as u32,
+                ))
+                .copied(),
+            RangeShape::Members => Some(self.cells[node].dependencies[index]),
+        }
     }
 
     fn range_value(&self, node: usize, index: usize) -> Value {
-        self.cells[self.cells[node].dependencies[index]]
-            .value
-            .clone()
+        self.range_cell(node, index)
+            .map_or(Value::Blank, |cell| self.cells[cell].value.clone())
+    }
+
+    /// Every position of the range in row-major order with the cell that
+    /// exists there, found by scanning the sheet index rather than by
+    /// probing each position.
+    fn range_cells(&self, node: usize) -> Vec<Option<usize>> {
+        match self.range_shape(node) {
+            RangeShape::Rectangle {
+                anchor,
+                rows,
+                columns,
+            } => {
+                let mut output = vec![None; rows * columns];
+                let Some(sheet) = self.sheet_cells.get(&anchor.sheet) else {
+                    return output;
+                };
+                let last_row = anchor.row + (rows as u32 - 1);
+                let last_column = anchor.column + (columns as u32 - 1);
+                let mut place = |row: u32, column: u32, index: usize| {
+                    output[(row - anchor.row) as usize * columns
+                        + (column - anchor.column) as usize] = Some(index);
+                };
+                if columns <= 8 && rows <= 4096 {
+                    for row in anchor.row..=last_row {
+                        for ((_, column), index) in
+                            sheet.range((row, anchor.column)..=(row, last_column))
+                        {
+                            place(row, *column, *index);
+                        }
+                    }
+                } else {
+                    for ((row, column), index) in
+                        sheet.range((anchor.row, 0)..=(last_row, u32::MAX))
+                    {
+                        if *column >= anchor.column && *column <= last_column {
+                            place(*row, *column, *index);
+                        }
+                    }
+                }
+                output
+            }
+            RangeShape::Members => self.cells[node]
+                .dependencies
+                .iter()
+                .map(|member| Some(*member))
+                .collect(),
+        }
     }
 
     fn range_values(&self, node: usize) -> Vec<Value> {
-        self.range_members(node)
-            .iter()
-            .map(|member| self.cells[*member].value.clone())
+        self.range_cells(node)
+            .into_iter()
+            .map(|cell| cell.map_or(Value::Blank, |cell| self.cells[cell].value.clone()))
             .collect()
     }
 
@@ -641,6 +836,10 @@ impl Workbook {
         }
         let index = self.cells.len();
         self.indices.insert(cell, index);
+        self.sheet_cells
+            .entry(cell.sheet)
+            .or_default()
+            .insert((cell.row, cell.column), index);
         self.cells.push(Cell {
             id: cell,
             input: Input::Literal(Value::Blank),
@@ -680,7 +879,16 @@ impl Workbook {
         if dependencies.contains(&changed) {
             return Some(vec![changed, changed]);
         }
-        let changed_index = *self.indices.get(&changed)?;
+        let range_nodes: Vec<usize> = range_nodes.collect();
+        // A formula inside one of its own rectangles is a cycle even when
+        // the cell does not exist yet, since a rectangle has no member edges
+        // to walk.
+        if range_nodes
+            .iter()
+            .any(|node| self.rectangle_covers(*node, changed))
+        {
+            return Some(vec![changed, changed]);
+        }
         let targets: HashSet<usize> = dependencies
             .iter()
             .filter_map(|dependency| self.indices.get(dependency).copied())
@@ -689,34 +897,50 @@ impl Workbook {
         if targets.is_empty() {
             return None;
         }
+        // Roots: the changed cell when it exists, otherwise the rectangles
+        // that will cover it once it does. A new cell nothing covers cannot
+        // close a cycle, and skipping the walk keeps building cheap.
+        let roots: Vec<usize> = match self.indices.get(&changed) {
+            Some(index) => vec![*index],
+            None => self.covering_nodes(changed).collect(),
+        };
+        if roots.is_empty() {
+            return None;
+        }
         let mut parents = vec![usize::MAX; self.cells.len()];
-        parents[changed_index] = changed_index;
-        let mut queue = VecDeque::from([changed_index]);
+        let mut queue = VecDeque::new();
+        for root in roots {
+            parents[root] = root;
+            queue.push_back(root);
+        }
         while let Some(current) = queue.pop_front() {
             if targets.contains(&current) {
                 let mut path = vec![current];
                 let mut cursor = current;
-                while cursor != changed_index {
+                while parents[cursor] != cursor {
                     cursor = parents[cursor];
                     path.push(cursor);
                 }
                 path.reverse();
                 // Range nodes are not cells; the path names the member cell
                 // through which the cycle enters the range.
-                let mut path: Vec<CellId> = path
+                let mut cells: Vec<CellId> = path
                     .into_iter()
                     .filter(|index| !matches!(self.cells[*index].input, Input::Range { .. }))
                     .map(|index| self.cells[index].id)
                     .collect();
-                path.push(changed);
-                return Some(path);
-            }
-            for dependent in &self.cells[current].dependents {
-                if parents[*dependent] == usize::MAX {
-                    parents[*dependent] = current;
-                    queue.push_back(*dependent);
+                if cells.first() != Some(&changed) {
+                    cells.insert(0, changed);
                 }
+                cells.push(changed);
+                return Some(cells);
             }
+            self.for_each_successor(current, |successor| {
+                if parents[successor] == usize::MAX {
+                    parents[successor] = current;
+                    queue.push_back(successor);
+                }
+            });
         }
         None
     }
@@ -731,6 +955,9 @@ impl Workbook {
         self.dirty_marks[changed] = generation;
         let mut dirty = vec![changed];
         let mut cursor = 0;
+        // Rectangle nodes have no member edges: their pending count is the
+        // number of dirty cells they cover, accumulated while marking.
+        let mut rectangle_pending: HashMap<usize, usize> = HashMap::new();
         while let Some(index) = dirty.get(cursor).copied() {
             cursor += 1;
             for dependent in self.cells[index].dependents.iter().copied() {
@@ -739,14 +966,27 @@ impl Workbook {
                     dirty.push(dependent);
                 }
             }
+            if !matches!(self.cells[index].input, Input::Range { .. }) {
+                let covering: Vec<usize> = self.covering_nodes(self.cells[index].id).collect();
+                for node in covering {
+                    if self.dirty_marks[node] != generation {
+                        self.dirty_marks[node] = generation;
+                        dirty.push(node);
+                    }
+                    *rectangle_pending.entry(node).or_default() += 1;
+                }
+            }
         }
 
         for index in &dirty {
-            self.pending[*index] = self.cells[*index]
-                .dependencies
-                .iter()
-                .filter(|dependency| self.dirty_marks[**dependency] == generation)
-                .count();
+            self.pending[*index] = match rectangle_pending.get(index) {
+                Some(covered) => *covered,
+                None => self.cells[*index]
+                    .dependencies
+                    .iter()
+                    .filter(|dependency| self.dirty_marks[**dependency] == generation)
+                    .count(),
+            };
         }
         let mut ready: VecDeque<usize> = dirty
             .iter()
@@ -755,6 +995,7 @@ impl Workbook {
             .collect();
         let mut evaluated = Vec::with_capacity(dirty.len());
         let mut range_nodes_passed = 0;
+        let mut released = Vec::new();
 
         while let Some(cell_index) = ready.pop_front() {
             let value = match &self.cells[cell_index].input {
@@ -777,13 +1018,17 @@ impl Workbook {
                 }
                 None => range_nodes_passed += 1,
             }
-            for dependent in self.cells[cell_index].dependents.iter().copied() {
-                if self.dirty_marks[dependent] == generation {
-                    let remaining = &mut self.pending[dependent];
-                    *remaining -= 1;
-                    if *remaining == 0 {
-                        ready.push_back(dependent);
-                    }
+            released.clear();
+            self.for_each_successor(cell_index, |successor| {
+                if self.dirty_marks[successor] == generation {
+                    released.push(successor);
+                }
+            });
+            for successor in released.iter().copied() {
+                let remaining = &mut self.pending[successor];
+                *remaining -= 1;
+                if *remaining == 0 {
+                    ready.push_back(successor);
                 }
             }
         }
@@ -837,11 +1082,8 @@ impl Workbook {
             return self.range_value(node, 0);
         }
         let origin = self.evaluating.get();
-        let chosen = match self.cells[node].input {
-            Input::Range {
-                anchor: Some(anchor),
-                ..
-            } => {
+        let chosen = match self.range_shape(node) {
+            RangeShape::Rectangle { anchor, .. } => {
                 let row_offset = if rows == 1 {
                     Some(0)
                 } else {
@@ -864,7 +1106,7 @@ impl Workbook {
                     .zip(column_offset)
                     .map(|(row, column)| row * columns + column)
             }
-            _ => self.range_members(node).iter().position(|member| {
+            RangeShape::Members => self.cells[node].dependencies.iter().position(|member| {
                 let id = self.cells[*member].id;
                 (columns == 1 || id.column == origin.column) && (rows == 1 || id.row == origin.row)
             }),
@@ -1169,13 +1411,16 @@ impl Workbook {
     fn flatten_values_skipping_subtotals(&self, expression: &Expr<usize>, output: &mut Vec<Value>) {
         match expression {
             Expr::RangeNode { node, .. } => {
-                for member in self.range_members(*node) {
-                    if let Input::Formula(Expr::Function(Function::SubTotal, _)) =
-                        &self.cells[*member].input
-                    {
-                        continue;
+                for member in self.range_cells(*node) {
+                    match member {
+                        Some(member)
+                            if matches!(
+                                self.cells[member].input,
+                                Input::Formula(Expr::Function(Function::SubTotal, _))
+                            ) => {}
+                        Some(member) => output.push(self.cells[member].value.clone()),
+                        None => output.push(Value::Blank),
                     }
-                    output.push(self.cells[*member].value.clone());
                 }
             }
             Expr::Reference(index) => {
@@ -1197,7 +1442,7 @@ impl Workbook {
         let id = match arguments {
             [] => self.evaluating.get(),
             [Expr::Reference(index)] => self.cells[*index].id,
-            [Expr::RangeNode { node, .. }] => self.cells[self.range_members(*node)[0]].id,
+            [Expr::RangeNode { node, .. }] => self.cells[*node].id,
             _ => return Value::Error(CalcError::InvalidArguments),
         };
         Value::Number(
@@ -1333,11 +1578,7 @@ impl Workbook {
 
     fn flatten_values(&self, expression: &Expr<usize>, output: &mut Vec<Value>) {
         match expression {
-            Expr::RangeNode { node, .. } => {
-                for member in self.range_members(*node) {
-                    output.push(self.cells[*member].value.clone());
-                }
-            }
+            Expr::RangeNode { node, .. } => output.extend(self.range_values(*node)),
             Expr::Empty => {}
             other => output.push(self.evaluate(other)),
         }
@@ -1542,10 +1783,10 @@ impl Workbook {
                 else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
-                let length = self.range_members(lookup_node).len();
+                let length = self.range_len(lookup_node);
                 if (lookup_rows != 1 && lookup_columns != 1)
                     || (return_rows != 1 && return_columns != 1)
-                    || length != self.range_members(return_node).len()
+                    || length != self.range_len(return_node)
                 {
                     return Value::Error(CalcError::InvalidArguments);
                 }
@@ -2227,6 +2468,16 @@ fn compile_expression(
                 .map(|argument| compile_expression(argument, indices, range_nodes))
                 .collect(),
         ),
+    }
+}
+
+fn count_nodes<R>(expression: &Expr<R>) -> usize {
+    1 + match expression {
+        Expr::UnaryMinus(inner) | Expr::Percent(inner) => count_nodes(inner),
+        Expr::Binary(_, left, right) => count_nodes(left) + count_nodes(right),
+        Expr::Function(_, arguments) => arguments.iter().map(count_nodes).sum(),
+        Expr::Range { members, .. } => members.as_ref().map_or(0, Vec::len),
+        _ => 0,
     }
 }
 
@@ -3407,13 +3658,15 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(range_node_count(&workbook), 1);
-        // One member edge per cell for the node, plus the node's readers.
+        // Rectangles keep no per-member edges; the node's readers are the
+        // only edges the range costs.
         assert_eq!(
             workbook.cells[workbook.indices[&cell(500, 0)]]
                 .dependents
                 .len(),
-            1
+            0
         );
+        assert_eq!(workbook.statistics().dependent_edges, 400);
         let node = workbook.ranges.values().next().copied().unwrap();
         assert_eq!(workbook.cells[node].dependents.len(), 400);
         assert_eq!(workbook.value(cell(0, 200)), Value::Number(1000.0));

@@ -39,14 +39,16 @@ optional not-found result. Approximate, wildcard, reverse, and binary-search
 modes remain explicit invalid arguments until their compatibility semantics are
 implemented and tested.
 
-Ranges are shared graph nodes. `A1:A1000` in a formula compiles to one node
-whose dependencies are the thousand member cells; every formula over the same
-rectangle, including every formula that expands the same defined name, points
-at that node. A formula therefore costs its own expression plus one edge per
-range, and a member edit reaches all readers through the node. A rebinding
-that no longer forms a rectangle (a row inserted through a range bound to
-stable cells) keeps its original members as an explicit list with its own
-node.
+Ranges are shared graph nodes. `A1:A1000` in a formula compiles to one node;
+every formula over the same rectangle, including every formula that expands
+the same defined name, points at that node. A rectangle node keeps no
+per-member edges: membership is decided by position, a changed cell finds the
+rectangles covering it through a per-sheet row-band index, and evaluation
+scans the sheet's position index for the cells that exist inside the
+rectangle rather than materialising blanks. A formula therefore costs its own
+expression plus one edge per range, however large the range. A rebinding that
+no longer forms a rectangle (a row inserted through a range bound to stable
+cells) keeps its original members as an explicit list with its own node.
 
 Run its focused checks with:
 
