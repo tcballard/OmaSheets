@@ -100,6 +100,7 @@ jobs:
           assert performance["memory"]["peak_rss_bytes"] > 0
           PY
       - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
         with:
           name: omasheets-m0-corpus-smoke-linux-x86_64
           path: |
