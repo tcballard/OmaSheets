@@ -6,7 +6,8 @@ cycle rejection and dirty transitive-closure recalculation. It is deliberately
 not connected to the v0.0.2 LibreOffice compatibility product.
 
 The current syntax slice includes numeric, boolean and quoted-text literals;
-A1 references (including absolute markers); arithmetic and comparison
+A1 references (including absolute markers); unquoted (`Inputs!A1`) and quoted
+(`'Owner''s Data'!A1`) cross-sheet references; arithmetic and comparison
 operators; parentheses; and bounded rectangular ranges. Forty-one function
 names are implemented across the initial head:
 
@@ -26,6 +27,10 @@ than silently producing a plausible number.
 The first `COUNTIF`/`SUMIF` criteria slice supports comparison prefixes and
 case-insensitive literal text. Wildcards and locale-specific number parsing are
 not yet accepted.
+
+Cross-sheet ranges qualify the first endpoint (`Inputs!A1:A10`). External
+workbook references, 3D references, and a separately qualified second range
+endpoint are not yet accepted.
 
 Run its focused checks with:
 

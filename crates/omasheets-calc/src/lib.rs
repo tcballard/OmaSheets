@@ -45,6 +45,7 @@ pub enum FormulaError {
     UnexpectedToken(usize),
     UnsupportedFunction(String),
     InvalidReference(String),
+    UnknownSheet(String),
     RangeTooLarge,
     Cycle(Vec<CellId>),
 }
@@ -58,6 +59,7 @@ impl fmt::Display for FormulaError {
             }
             Self::UnsupportedFunction(name) => write!(formatter, "unsupported function {name}"),
             Self::InvalidReference(reference) => write!(formatter, "invalid reference {reference}"),
+            Self::UnknownSheet(sheet) => write!(formatter, "unknown sheet {sheet}"),
             Self::RangeTooLarge => write!(formatter, "formula range exceeds the M0 safety bound"),
             Self::Cycle(path) => write!(formatter, "formula introduces a cycle: {path:?}"),
         }
@@ -163,6 +165,7 @@ pub struct Workbook {
     cells: Vec<Cell>,
     dirty_marks: Vec<u64>,
     pending: Vec<usize>,
+    sheet_names: HashMap<String, u32>,
     generation: u64,
 }
 
@@ -173,12 +176,17 @@ impl Default for Workbook {
             cells: Vec::new(),
             dirty_marks: Vec::new(),
             pending: Vec::new(),
+            sheet_names: HashMap::new(),
             generation: 1,
         }
     }
 }
 
 impl Workbook {
+    pub fn define_sheet(&mut self, index: u32, name: impl Into<String>) {
+        self.sheet_names.insert(name.into().to_lowercase(), index);
+    }
+
     pub fn value(&self, cell: CellId) -> Value {
         self.indices
             .get(&cell)
@@ -207,7 +215,7 @@ impl Workbook {
         cell: CellId,
         formula: &str,
     ) -> Result<RecalcReport, FormulaError> {
-        let parsed = Parser::new(formula, cell.sheet).parse()?;
+        let parsed = Parser::new(formula, cell.sheet, &self.sheet_names).parse()?;
         let mut dependencies = BTreeSet::new();
         collect_dependencies(&parsed, &mut dependencies);
         if let Some(path) = self.prospective_cycle(cell, &dependencies) {
@@ -974,19 +982,21 @@ fn collect_dependencies(expression: &Expr, output: &mut BTreeSet<CellId>) {
     }
 }
 
-struct Parser<'a> {
-    source: &'a str,
+struct Parser<'source, 'sheets> {
+    source: &'source str,
     offset: usize,
     sheet: u32,
+    sheet_names: &'sheets HashMap<String, u32>,
 }
 
-impl<'a> Parser<'a> {
-    fn new(source: &'a str, sheet: u32) -> Self {
+impl<'source, 'sheets> Parser<'source, 'sheets> {
+    fn new(source: &'source str, sheet: u32, sheet_names: &'sheets HashMap<String, u32>) -> Self {
         let source = source.strip_prefix('=').unwrap_or(source);
         Self {
             source,
             offset: 0,
             sheet,
+            sheet_names,
         }
     }
 
@@ -1075,6 +1085,7 @@ impl<'a> Parser<'a> {
                 Ok(expression)
             }
             Some(b'"') => self.parse_string(),
+            Some(b'\'') => self.parse_quoted_sheet_reference(),
             Some(byte) if byte.is_ascii_digit() || byte == b'.' => self.parse_number(),
             Some(byte) if byte.is_ascii_alphabetic() || byte == b'$' => {
                 self.parse_reference_or_function()
@@ -1140,6 +1151,11 @@ impl<'a> Parser<'a> {
         }
         let token = &self.source[start..self.offset];
         self.skip_space();
+        if self.peek() == Some(b'!') {
+            let sheet = self.resolve_sheet(token)?;
+            self.offset += 1;
+            return self.parse_qualified_reference(sheet);
+        }
         if self.peek() == Some(b'(') {
             return self.parse_function(token);
         }
@@ -1150,6 +1166,45 @@ impl<'a> Parser<'a> {
             return Ok(Expr::Boolean(false));
         }
         let first = parse_a1(token, self.sheet)?;
+        self.parse_range_tail(first, self.sheet)
+    }
+
+    fn parse_quoted_sheet_reference(&mut self) -> Result<Expr, FormulaError> {
+        let start = self.offset;
+        self.offset += 1;
+        let mut sheet_name = String::new();
+        loop {
+            let Some(character) = self.source[self.offset..].chars().next() else {
+                return Err(FormulaError::UnexpectedToken(start));
+            };
+            self.offset += character.len_utf8();
+            if character == '\'' {
+                if self.peek() == Some(b'\'') {
+                    sheet_name.push('\'');
+                    self.offset += 1;
+                    continue;
+                }
+                break;
+            }
+            sheet_name.push(character);
+        }
+        self.skip_space();
+        self.expect(b'!')?;
+        let sheet = self.resolve_sheet(&sheet_name)?;
+        self.parse_qualified_reference(sheet)
+    }
+
+    fn parse_qualified_reference(&mut self, sheet: u32) -> Result<Expr, FormulaError> {
+        self.skip_space();
+        let start = self.offset;
+        while matches!(self.peek(), Some(byte) if byte.is_ascii_alphanumeric() || byte == b'$') {
+            self.offset += 1;
+        }
+        let first = parse_a1(&self.source[start..self.offset], sheet)?;
+        self.parse_range_tail(first, sheet)
+    }
+
+    fn parse_range_tail(&mut self, first: CellId, sheet: u32) -> Result<Expr, FormulaError> {
         self.skip_space();
         if self.peek() != Some(b':') {
             return Ok(Expr::Reference(first));
@@ -1160,8 +1215,15 @@ impl<'a> Parser<'a> {
         while matches!(self.peek(), Some(byte) if byte.is_ascii_alphanumeric() || byte == b'$') {
             self.offset += 1;
         }
-        let second = parse_a1(&self.source[second_start..self.offset], self.sheet)?;
+        let second = parse_a1(&self.source[second_start..self.offset], sheet)?;
         Ok(Expr::Range(expand_range(first, second)?))
+    }
+
+    fn resolve_sheet(&self, name: &str) -> Result<u32, FormulaError> {
+        self.sheet_names
+            .get(&name.to_lowercase())
+            .copied()
+            .ok_or_else(|| FormulaError::UnknownSheet(name.into()))
     }
 
     fn parse_function(&mut self, name: &str) -> Result<Expr, FormulaError> {
@@ -1556,6 +1618,30 @@ mod tests {
             .unwrap();
         assert_eq!(workbook.value(cell(0, 2)), Value::Number(3.0));
         assert_eq!(workbook.value(cell(1, 2)), Value::Number(120.0));
+    }
+
+    #[test]
+    fn resolves_quoted_and_unquoted_cross_sheet_references() {
+        let mut workbook = Workbook::default();
+        workbook.define_sheet(0, "Summary");
+        workbook.define_sheet(1, "Inputs");
+        workbook.define_sheet(2, "Owner's Data");
+        workbook.set_number(CellId::new(1, 0, 0), 2.0);
+        workbook.set_number(CellId::new(1, 1, 0), 3.0);
+        workbook.set_number(CellId::new(2, 0, 0), 5.0);
+        workbook
+            .set_formula(
+                CellId::new(0, 0, 0),
+                "=SUM(Inputs!A1:A2)+'Owner''s Data'!A1",
+            )
+            .unwrap();
+        assert_eq!(workbook.value(CellId::new(0, 0, 0)), Value::Number(10.0));
+
+        let error = workbook
+            .set_formula(CellId::new(0, 0, 0), "=Missing!A1")
+            .unwrap_err();
+        assert_eq!(error, FormulaError::UnknownSheet("Missing".into()));
+        assert_eq!(workbook.value(CellId::new(0, 0, 0)), Value::Number(10.0));
     }
 
     #[test]
