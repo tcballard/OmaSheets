@@ -40,6 +40,35 @@ verifies the identity exposed by each installed binary against the checkout and
 installation receipt; a detached checksum file alone is not treated as
 sufficient provenance.
 
+## Release trust roots
+
+The archive, its checksum and its self-reported provenance all arrive through
+the GitHub release channel, so a compromised release credential could replace
+them together. Two roots outside that channel therefore gate execution:
+
+- **Offline maintainer signature.** Every bundle must carry a minisign
+  `.minisig` that verifies against the public key pinned at
+  `release/signing-key.pub` in the validated plugin checkout. The private key
+  never enters release automation, the workflow holds no signing secret, and
+  the bootstrap verifies the signature with a standard-library Ed25519
+  implementation before the archive is opened. A checkout without the pinned
+  key fails closed and downloads nothing.
+- **Build attestation and pinned inputs.** The release workflow pins actions
+  by commit SHA, the image by digest and the package set by an Arch Linux
+  Archive snapshot, builds reproducibly, records those inputs in the bundle
+  manifest, and attests the archive through GitHub build provenance. The
+  maintainer verifies the attestation, or rebuilds and compares digests,
+  before signing. `docs/RELEASE.md` is the procedure.
+
+## Panel status helper
+
+The bar widget's status process is bounded on the producer side.
+`scripts/panel_status.py` runs the installed launcher in its own session with
+a 5 s deadline and a 16 KiB output limit enforced while reading; either limit
+sends `SIGTERM` and then `SIGKILL` to the whole process group, and only a
+complete JSON object is re-emitted. The widget keeps its own 16 KiB guard and
+an 8 s backstop timer, but never relies on them alone.
+
 ## Calc isolation
 
 Production jobs require Bubblewrap and run with:

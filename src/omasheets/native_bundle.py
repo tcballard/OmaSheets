@@ -15,9 +15,13 @@ import tempfile
 from typing import Any
 from urllib.request import Request, urlopen
 
+from .release_signing import PublicKey, SignatureError, load_public_key, verify_file
+
 REPOSITORY = "tcballard/OmaSheets"
 MAX_BUNDLE_BYTES = 64 * 1024 * 1024
+MAX_SIDECAR_BYTES = 8 * 1024
 NATIVE_EXECUTABLES = ("omasheets-window", "omasheets-lok-render")
+RELEASE_SIGNING_KEY = Path("release/signing-key.pub")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -81,7 +85,23 @@ def _sha_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _download(url: str, destination: Path) -> None:
+def load_release_public_key(source_root: Path) -> PublicKey:
+    """Load the release signing key pinned in the validated plugin checkout.
+
+    The key is part of the tracked source identity, so it is as trusted as the
+    bootstrap code itself and independent of the release channel. A checkout
+    without a pinned key cannot download anything: the bootstrap fails closed.
+    """
+    path = source_root / RELEASE_SIGNING_KEY
+    try:
+        return load_public_key(path)
+    except SignatureError as error:
+        raise RuntimeError(
+            f"automatic native bundle download requires the pinned release signing key: {error}"
+        ) from error
+
+
+def _download(url: str, destination: Path, *, limit: int = MAX_BUNDLE_BYTES) -> None:
     request = Request(url, headers={"User-Agent": "OmaSheets installer"})
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
     total = 0
@@ -89,8 +109,8 @@ def _download(url: str, destination: Path) -> None:
         with os.fdopen(descriptor, "wb") as output, urlopen(request, timeout=60) as response:
             while chunk := response.read(1024 * 1024):
                 total += len(chunk)
-                if total > MAX_BUNDLE_BYTES:
-                    raise RuntimeError("native bundle exceeds the 64 MiB download limit")
+                if total > limit:
+                    raise RuntimeError(f"{destination.name} exceeds the {limit} byte download limit")
                 output.write(chunk)
             output.flush()
             os.fsync(output.fileno())
@@ -99,8 +119,23 @@ def _download(url: str, destination: Path) -> None:
         Path(temporary_name).unlink(missing_ok=True)
 
 
-def download_native_bundle(version: str, destination: Path, *, source_root: Path) -> Path:
+def download_native_bundle(
+    version: str,
+    destination: Path,
+    *,
+    source_root: Path,
+    public_key: PublicKey | None = None,
+) -> Path:
+    """Download the release bundle and verify it before returning its path.
+
+    Verification order is deliberate: the release boundary and the pinned
+    signing key are checked before any network access; the detached minisign
+    signature is verified against the pinned key before the release checksum
+    is consulted; the archive is deleted on any failure. Nothing inside the
+    bundle is opened, let alone executed, until this function returns.
+    """
     require_exact_version_tag(source_root, version)
+    public_key = public_key or load_release_public_key(source_root)
     system = platform_id()
     architecture = normalized_architecture()
     if (system, architecture) != ("linux", "x86_64"):
@@ -109,10 +144,18 @@ def download_native_bundle(version: str, destination: Path, *, source_root: Path
     name = asset_name(version, system=system, architecture=architecture)
     base = f"https://github.com/{REPOSITORY}/releases/download/v{version}"
     archive = destination / name
+    signature = destination / f"{name}.minisig"
     checksum = destination / f"{name}.sha256"
     _download(f"{base}/{name}", archive)
     try:
-        _download(f"{base}/{name}.sha256", checksum)
+        _download(f"{base}/{name}.minisig", signature, limit=MAX_SIDECAR_BYTES)
+        try:
+            verify_file(
+                archive, signature.read_text(encoding="utf-8"), public_key, expected_name=name,
+            )
+        except (SignatureError, UnicodeDecodeError) as error:
+            raise RuntimeError(f"native bundle signature verification failed: {error}") from error
+        _download(f"{base}/{name}.sha256", checksum, limit=MAX_SIDECAR_BYTES)
         fields = checksum.read_text().strip().split()
         if len(fields) != 2 or fields[1].lstrip("*") != name or not _SHA256.fullmatch(fields[0]):
             raise RuntimeError("native bundle checksum file is malformed")
@@ -123,6 +166,7 @@ def download_native_bundle(version: str, destination: Path, *, source_root: Path
         archive.unlink(missing_ok=True)
         raise
     finally:
+        signature.unlink(missing_ok=True)
         checksum.unlink(missing_ok=True)
 
 

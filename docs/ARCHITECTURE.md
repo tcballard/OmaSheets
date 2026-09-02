@@ -24,7 +24,8 @@ The user explicitly starts that bootstrap from the widget or terminal.
 
 The bootstrap checks external runtime dependencies without installing them. It
 downloads the native release bundle for the product version and architecture,
-then verifies the detached release checksum and the bundle's exact source
+then verifies the maintainer's detached minisign signature against the key
+pinned in the checkout, the detached release checksum and the bundle's exact source
 identity and file hashes before installing the Python package, native binaries,
 stable launcher, Codex plugin/MCP configuration, desktop entry and MIME
 associations together. Application bytes live below `XDG_DATA_HOME`, the
