@@ -63,12 +63,12 @@ impl fmt::Display for FormulaError {
 impl std::error::Error for FormulaError {}
 
 #[derive(Clone, Debug, PartialEq)]
-enum Expr {
+enum Expr<R = CellId> {
     Number(f64),
-    Reference(CellId),
-    UnaryMinus(Box<Expr>),
-    Binary(BinaryOp, Box<Expr>, Box<Expr>),
-    Sum(Vec<Expr>),
+    Reference(R),
+    UnaryMinus(Box<Expr<R>>),
+    Binary(BinaryOp, Box<Expr<R>>, Box<Expr<R>>),
+    Sum(Vec<Expr<R>>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -82,13 +82,15 @@ enum BinaryOp {
 #[derive(Clone, Debug)]
 enum Input {
     Literal(Value),
-    Formula(Expr),
+    Formula(Expr<usize>),
 }
 
 #[derive(Clone, Debug)]
 struct Cell {
+    id: CellId,
     input: Input,
-    dependencies: BTreeSet<CellId>,
+    dependencies: Vec<usize>,
+    dependents: Vec<usize>,
     value: Value,
 }
 
@@ -98,26 +100,40 @@ pub struct RecalcReport {
     pub evaluated: Vec<CellId>,
 }
 
-#[derive(Default)]
 pub struct Workbook {
-    cells: HashMap<CellId, Cell>,
-    dependents: HashMap<CellId, BTreeSet<CellId>>,
+    indices: HashMap<CellId, usize>,
+    cells: Vec<Cell>,
+    dirty_marks: Vec<u64>,
+    pending: Vec<usize>,
+    generation: u64,
+}
+
+impl Default for Workbook {
+    fn default() -> Self {
+        Self {
+            indices: HashMap::new(),
+            cells: Vec::new(),
+            dirty_marks: Vec::new(),
+            pending: Vec::new(),
+            generation: 1,
+        }
+    }
 }
 
 impl Workbook {
     pub fn value(&self, cell: CellId) -> Value {
-        self.cells
+        self.indices
             .get(&cell)
-            .map(|entry| entry.value.clone())
+            .map(|index| self.cells[*index].value.clone())
             .unwrap_or(Value::Blank)
     }
 
     pub fn set_number(&mut self, cell: CellId, value: f64) -> RecalcReport {
-        self.commit(cell, Input::Literal(Value::Number(value)), BTreeSet::new())
+        self.commit(cell, Input::Literal(Value::Number(value)), Vec::new())
     }
 
     pub fn clear(&mut self, cell: CellId) -> RecalcReport {
-        self.commit(cell, Input::Literal(Value::Blank), BTreeSet::new())
+        self.commit(cell, Input::Literal(Value::Blank), Vec::new())
     }
 
     pub fn set_formula(
@@ -125,40 +141,54 @@ impl Workbook {
         cell: CellId,
         formula: &str,
     ) -> Result<RecalcReport, FormulaError> {
-        let expression = Parser::new(formula, cell.sheet).parse()?;
+        let parsed = Parser::new(formula, cell.sheet).parse()?;
         let mut dependencies = BTreeSet::new();
-        collect_dependencies(&expression, &mut dependencies);
+        collect_dependencies(&parsed, &mut dependencies);
         if let Some(path) = self.prospective_cycle(cell, &dependencies) {
             return Err(FormulaError::Cycle(path));
         }
+        let dependencies: Vec<usize> = dependencies
+            .into_iter()
+            .map(|dependency| self.ensure_cell(dependency))
+            .collect();
+        let expression = compile_expression(parsed, &self.indices);
         Ok(self.commit(cell, Input::Formula(expression), dependencies))
     }
 
-    fn commit(
-        &mut self,
-        cell: CellId,
-        input: Input,
-        dependencies: BTreeSet<CellId>,
-    ) -> RecalcReport {
-        if let Some(previous) = self.cells.get(&cell) {
-            for dependency in &previous.dependencies {
-                if let Some(users) = self.dependents.get_mut(dependency) {
-                    users.remove(&cell);
-                }
-            }
+    fn ensure_cell(&mut self, cell: CellId) -> usize {
+        if let Some(index) = self.indices.get(&cell) {
+            return *index;
+        }
+        let index = self.cells.len();
+        self.indices.insert(cell, index);
+        self.cells.push(Cell {
+            id: cell,
+            input: Input::Literal(Value::Blank),
+            dependencies: Vec::new(),
+            dependents: Vec::new(),
+            value: Value::Blank,
+        });
+        self.dirty_marks.push(0);
+        self.pending.push(0);
+        index
+    }
+
+    fn commit(&mut self, cell: CellId, input: Input, dependencies: Vec<usize>) -> RecalcReport {
+        let changed = self.ensure_cell(cell);
+        let previous = std::mem::take(&mut self.cells[changed].dependencies);
+        for dependency in previous {
+            self.cells[dependency]
+                .dependents
+                .retain(|dependent| *dependent != changed);
         }
         for dependency in &dependencies {
-            self.dependents.entry(*dependency).or_default().insert(cell);
+            self.cells[*dependency].dependents.push(changed);
         }
-        self.cells.insert(
-            cell,
-            Cell {
-                input,
-                dependencies,
-                value: Value::Blank,
-            },
-        );
-        self.recalculate_from(cell)
+        let entry = &mut self.cells[changed];
+        entry.input = input;
+        entry.dependencies = dependencies;
+        entry.value = Value::Blank;
+        self.recalculate_from(changed)
     }
 
     fn prospective_cycle(
@@ -166,97 +196,91 @@ impl Workbook {
         changed: CellId,
         dependencies: &BTreeSet<CellId>,
     ) -> Option<Vec<CellId>> {
-        for dependency in dependencies {
-            let mut path = Vec::new();
-            let mut visited = HashSet::new();
-            if self.find_dependent_path(changed, *dependency, &mut visited, &mut path) {
+        if dependencies.contains(&changed) {
+            return Some(vec![changed, changed]);
+        }
+        let changed_index = *self.indices.get(&changed)?;
+        let targets: HashSet<usize> = dependencies
+            .iter()
+            .filter_map(|dependency| self.indices.get(dependency).copied())
+            .collect();
+        if targets.is_empty() {
+            return None;
+        }
+        let mut parents = vec![usize::MAX; self.cells.len()];
+        parents[changed_index] = changed_index;
+        let mut queue = VecDeque::from([changed_index]);
+        while let Some(current) = queue.pop_front() {
+            if targets.contains(&current) {
+                let mut path = vec![current];
+                let mut cursor = current;
+                while cursor != changed_index {
+                    cursor = parents[cursor];
+                    path.push(cursor);
+                }
+                path.reverse();
+                let mut path: Vec<CellId> =
+                    path.into_iter().map(|index| self.cells[index].id).collect();
                 path.push(changed);
                 return Some(path);
+            }
+            for dependent in &self.cells[current].dependents {
+                if parents[*dependent] == usize::MAX {
+                    parents[*dependent] = current;
+                    queue.push_back(*dependent);
+                }
             }
         }
         None
     }
 
-    fn find_dependent_path(
-        &self,
-        current: CellId,
-        target: CellId,
-        visited: &mut HashSet<CellId>,
-        path: &mut Vec<CellId>,
-    ) -> bool {
-        path.push(current);
-        if current == target {
-            return true;
+    fn recalculate_from(&mut self, changed: usize) -> RecalcReport {
+        self.generation = self.generation.wrapping_add(1);
+        if self.generation == 0 {
+            self.dirty_marks.fill(0);
+            self.generation = 1;
         }
-        if !visited.insert(current) {
-            path.pop();
-            return false;
-        }
-        if let Some(dependents) = self.dependents.get(&current) {
-            for dependent in dependents {
-                if self.find_dependent_path(*dependent, target, visited, path) {
-                    return true;
-                }
-            }
-        }
-        path.pop();
-        false
-    }
-
-    fn recalculate_from(&mut self, changed: CellId) -> RecalcReport {
-        let mut dirty = BTreeSet::from([changed]);
-        let mut queue = VecDeque::from([changed]);
-        while let Some(cell) = queue.pop_front() {
-            if let Some(users) = self.dependents.get(&cell) {
-                for user in users {
-                    if dirty.insert(*user) {
-                        queue.push_back(*user);
-                    }
+        let generation = self.generation;
+        self.dirty_marks[changed] = generation;
+        let mut dirty = vec![changed];
+        let mut cursor = 0;
+        while let Some(index) = dirty.get(cursor).copied() {
+            cursor += 1;
+            for dependent in self.cells[index].dependents.iter().copied() {
+                if self.dirty_marks[dependent] != generation {
+                    self.dirty_marks[dependent] = generation;
+                    dirty.push(dependent);
                 }
             }
         }
 
-        let mut pending: HashMap<CellId, usize> = dirty
+        for index in &dirty {
+            self.pending[*index] = self.cells[*index]
+                .dependencies
+                .iter()
+                .filter(|dependency| self.dirty_marks[**dependency] == generation)
+                .count();
+        }
+        let mut ready: VecDeque<usize> = dirty
             .iter()
-            .map(|cell| {
-                let count = self
-                    .cells
-                    .get(cell)
-                    .map(|entry| {
-                        entry
-                            .dependencies
-                            .iter()
-                            .filter(|item| dirty.contains(item))
-                            .count()
-                    })
-                    .unwrap_or_default();
-                (*cell, count)
-            })
-            .collect();
-        let mut ready: BTreeSet<CellId> = pending
-            .iter()
-            .filter_map(|(cell, count)| (*count == 0).then_some(*cell))
+            .copied()
+            .filter(|index| self.pending[*index] == 0)
             .collect();
         let mut evaluated = Vec::with_capacity(dirty.len());
 
-        while let Some(cell) = ready.pop_first() {
-            let input = self.cells.get(&cell).map(|entry| entry.input.clone());
-            if let Some(input) = input {
-                let value = match input {
-                    Input::Literal(value) => value,
-                    Input::Formula(expression) => self.evaluate(&expression),
-                };
-                if let Some(entry) = self.cells.get_mut(&cell) {
-                    entry.value = value;
-                }
-            }
-            evaluated.push(cell);
-            if let Some(users) = self.dependents.get(&cell) {
-                for user in users.iter().filter(|user| dirty.contains(user)) {
-                    let remaining = pending.get_mut(user).expect("dirty cell has an indegree");
+        while let Some(cell_index) = ready.pop_front() {
+            let value = match &self.cells[cell_index].input {
+                Input::Literal(value) => value.clone(),
+                Input::Formula(expression) => self.evaluate(expression),
+            };
+            self.cells[cell_index].value = value;
+            evaluated.push(self.cells[cell_index].id);
+            for dependent in self.cells[cell_index].dependents.iter().copied() {
+                if self.dirty_marks[dependent] == generation {
+                    let remaining = &mut self.pending[dependent];
                     *remaining -= 1;
                     if *remaining == 0 {
-                        ready.insert(*user);
+                        ready.push_back(dependent);
                     }
                 }
             }
@@ -269,10 +293,10 @@ impl Workbook {
         RecalcReport { evaluated }
     }
 
-    fn evaluate(&self, expression: &Expr) -> Value {
+    fn evaluate(&self, expression: &Expr<usize>) -> Value {
         match expression {
             Expr::Number(value) => Value::Number(*value),
-            Expr::Reference(cell) => self.value(*cell),
+            Expr::Reference(index) => self.cells[*index].value.clone(),
             Expr::UnaryMinus(inner) => match self.evaluate(inner) {
                 Value::Number(value) => Value::Number(-value),
                 other => other,
@@ -312,6 +336,25 @@ fn apply_binary(operator: BinaryOp, left: f64, right: f64) -> Value {
         BinaryOp::Multiply => Value::Number(left * right),
         BinaryOp::Divide if right == 0.0 => Value::Error(CalcError::DivisionByZero),
         BinaryOp::Divide => Value::Number(left / right),
+    }
+}
+
+fn compile_expression(expression: Expr<CellId>, indices: &HashMap<CellId, usize>) -> Expr<usize> {
+    match expression {
+        Expr::Number(value) => Expr::Number(value),
+        Expr::Reference(cell) => Expr::Reference(indices[&cell]),
+        Expr::UnaryMinus(inner) => Expr::UnaryMinus(Box::new(compile_expression(*inner, indices))),
+        Expr::Binary(operator, left, right) => Expr::Binary(
+            operator,
+            Box::new(compile_expression(*left, indices)),
+            Box::new(compile_expression(*right, indices)),
+        ),
+        Expr::Sum(arguments) => Expr::Sum(
+            arguments
+                .into_iter()
+                .map(|argument| compile_expression(argument, indices))
+                .collect(),
+        ),
     }
 }
 
@@ -621,6 +664,41 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(workbook.value(cell(9_999, 0)), Value::Number(10_000.0));
+        let error = workbook.set_formula(cell(0, 0), "=A10000 + 1").unwrap_err();
+        let FormulaError::Cycle(path) = error else {
+            panic!("expected a cycle");
+        };
+        assert_eq!(path.len(), 10_001);
+        assert_eq!(workbook.value(cell(0, 0)), Value::Number(1.0));
+    }
+
+    #[test]
+    fn waits_for_every_dirty_input_at_a_diamond_join() {
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(0, 0), 2.0);
+        workbook.set_formula(cell(0, 1), "=A1 + 1").unwrap();
+        workbook.set_formula(cell(0, 2), "=A1 * 10").unwrap();
+        workbook.set_formula(cell(0, 3), "=B1 + C1").unwrap();
+
+        let report = workbook.set_number(cell(0, 0), 4.0);
+        assert_eq!(
+            report.evaluated,
+            vec![cell(0, 0), cell(0, 1), cell(0, 2), cell(0, 3)]
+        );
+        assert_eq!(workbook.value(cell(0, 3)), Value::Number(45.0));
+    }
+
+    #[test]
+    fn replacing_a_formula_removes_its_old_dependency_edge() {
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(0, 0), 1.0);
+        workbook.set_number(cell(0, 1), 10.0);
+        workbook.set_formula(cell(0, 2), "=A1 + 1").unwrap();
+        workbook.set_formula(cell(0, 2), "=B1 + 1").unwrap();
+
+        let report = workbook.set_number(cell(0, 0), 2.0);
+        assert_eq!(report.evaluated, vec![cell(0, 0)]);
+        assert_eq!(workbook.value(cell(0, 2)), Value::Number(11.0));
     }
 
     #[test]
