@@ -258,8 +258,11 @@ fn calc_error_label(error: &CalcError) -> &'static str {
     match error {
         CalcError::DivisionByZero => "#DIV/0!",
         CalcError::InvalidReference => "#REF!",
+        CalcError::NotAvailable => "#N/A",
         CalcError::InvalidValue => "#VALUE!",
         CalcError::InvalidNumber => "#NUM!",
+        CalcError::InvalidName => "#NAME?",
+        CalcError::NullIntersection => "#NULL!",
         CalcError::InvalidArguments => "#ARGS!",
     }
 }

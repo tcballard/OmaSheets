@@ -4,7 +4,7 @@
 //! matching `omasheets_calc::serial_date`; workbooks that declare the 1904 date
 //! system are rejected rather than silently offset by 1462 days.
 
-use calamine::{Data, Range, Reader, Xlsx, open_workbook};
+use calamine::{CellErrorType, Data, Range, Reader, Xlsx, open_workbook};
 use omasheets_calc::serial_date::DATE_SYSTEM;
 use omasheets_calc::{CalcError, CellId, FormulaError, Value, Workbook};
 use serde::{Deserialize, Serialize};
@@ -66,6 +66,9 @@ pub fn formula_error_kind(error: &FormulaError) -> &'static str {
         FormulaError::UnsupportedFunction(_) => "unsupported_function",
         FormulaError::InvalidReference(_) => "invalid_reference",
         FormulaError::UnknownSheet(_) => "unknown_sheet",
+        FormulaError::ExternalReference(_) => "external_reference",
+        FormulaError::UnknownName(_) => "unknown_name",
+        FormulaError::UnsupportedName(_) => "unsupported_name",
         FormulaError::RangeTooLarge => "range_too_large",
         FormulaError::Cycle(_) => "cycle",
     }
@@ -239,6 +242,11 @@ pub fn import_xlsx(path: &Path, limits: ImportLimits) -> Result<ImportedWorkbook
         });
     }
 
+    let defined_names: Vec<(String, String)> = source
+        .defined_names()
+        .iter()
+        .map(|(name, definition)| (name.clone(), definition.clone()))
+        .collect();
     let mut ranges = Vec::with_capacity(sheet_names.len());
     for name in &sheet_names {
         let values = source
@@ -249,7 +257,7 @@ pub fn import_xlsx(path: &Path, limits: ImportLimits) -> Result<ImportedWorkbook
             .map_err(|error| ImportError::Read(error.to_string()))?;
         ranges.push((name.clone(), values, formulas));
     }
-    import_ranges(ranges, source_sha256, limits)
+    import_ranges_with_names(ranges, defined_names, source_sha256, limits)
 }
 
 fn check_date_system(has_1904_epoch: bool) -> Result<(), ImportError> {
@@ -276,8 +284,18 @@ fn hash_file(path: &Path) -> Result<String, ImportError> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
+#[cfg(test)]
 fn import_ranges(
     ranges: Vec<(String, Range<Data>, Range<String>)>,
+    source_sha256: String,
+    limits: ImportLimits,
+) -> Result<ImportedWorkbook, ImportError> {
+    import_ranges_with_names(ranges, Vec::new(), source_sha256, limits)
+}
+
+fn import_ranges_with_names(
+    ranges: Vec<(String, Range<Data>, Range<String>)>,
+    defined_names: Vec<(String, String)>,
     source_sha256: String,
     limits: ImportLimits,
 ) -> Result<ImportedWorkbook, ImportError> {
@@ -323,6 +341,9 @@ fn import_ranges(
     let mut workbook = Workbook::default();
     for sheet in &sheets {
         workbook.define_sheet(sheet.index, sheet.name.clone());
+    }
+    for (name, definition) in defined_names {
+        workbook.define_name(name, definition);
     }
     let mut formula_records = Vec::with_capacity(observed_formulas);
 
@@ -395,13 +416,24 @@ fn set_source_value(workbook: &mut Workbook, cell: CellId, value: &Data) {
             // rejected 1904 workbooks, so no epoch shift is applied.
             workbook.set_number(cell, value.as_f64());
         }
-        Data::Error(_) => {
-            // The first M0 value model does not yet distinguish Excel error codes.
-            workbook.set_text(cell, "#SOURCE_ERROR");
+        Data::Error(error) => {
+            workbook.set_error(cell, source_error(error));
         }
         Data::Empty => {
             workbook.clear(cell);
         }
+    }
+}
+
+fn source_error(error: &CellErrorType) -> CalcError {
+    match error {
+        CellErrorType::Div0 => CalcError::DivisionByZero,
+        CellErrorType::NA => CalcError::NotAvailable,
+        CellErrorType::Name => CalcError::InvalidName,
+        CellErrorType::Null => CalcError::NullIntersection,
+        CellErrorType::Num => CalcError::InvalidNumber,
+        CellErrorType::Ref => CalcError::InvalidReference,
+        CellErrorType::Value | CellErrorType::GettingData => CalcError::InvalidValue,
     }
 }
 
@@ -414,7 +446,7 @@ fn source_value(value: &Data) -> Value {
             Value::Text(value.clone())
         }
         Data::DateTime(value) => Value::Number(value.as_f64()),
-        Data::Error(_) => Value::Error(CalcError::InvalidValue),
+        Data::Error(error) => Value::Error(source_error(error)),
         Data::Empty => Value::Blank,
     }
 }
@@ -726,6 +758,62 @@ mod tests {
         );
         assert_eq!(imported.parity().stored_values_matched, 5);
         assert_eq!(imported.parity().stored_values_mismatched, 0);
+    }
+
+    #[test]
+    fn maps_source_errors_and_defined_names_into_the_owned_engine() {
+        let imported = import_ranges_with_names(
+            vec![(
+                "Data".into(),
+                Range::from_sparse(vec![
+                    Cell::new((0, 0), Data::Int(10)),
+                    Cell::new((1, 0), Data::Int(20)),
+                    Cell::new((0, 1), Data::Error(CellErrorType::NA)),
+                    Cell::new((0, 2), Data::Int(30)),
+                    Cell::new((1, 2), Data::Error(CellErrorType::NA)),
+                    Cell::new((2, 2), Data::Error(CellErrorType::Ref)),
+                    Cell::new((3, 2), Data::Int(2)),
+                ]),
+                Range::from_sparse(vec![
+                    Cell::new((0, 2), "SUM(Rates)".into()),
+                    Cell::new((1, 2), "B1*2".into()),
+                    Cell::new((2, 2), "#REF!+1".into()),
+                    Cell::new((3, 2), "Missing+1".into()),
+                    Cell::new((4, 2), "[1]Other!A1".into()),
+                    Cell::new((5, 2), "Broken".into()),
+                ]),
+            )],
+            vec![
+                ("Rates".into(), "Data!$A$1:$A$2".into()),
+                ("Broken".into(), "[2]External!A1".into()),
+            ],
+            "j".repeat(64),
+            ImportLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 0, 2)),
+            Value::Number(30.0)
+        );
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 1, 2)),
+            Value::Error(CalcError::NotAvailable)
+        );
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 2, 2)),
+            Value::Error(CalcError::InvalidReference)
+        );
+        let parity = imported.parity();
+        assert_eq!(parity.formula_cells_loaded, 3);
+        assert_eq!(parity.stored_values_matched, 3);
+        assert_eq!(
+            imported.report().unsupported_reasons,
+            BTreeMap::from([
+                ("unknown_name".to_string(), 1),
+                ("external_reference".to_string(), 1),
+                ("unsupported_name".to_string(), 1),
+            ])
+        );
     }
 
     #[test]

@@ -24,23 +24,32 @@ the source's license or access terms.
 ## Results
 
 `enron-figshare.score-summary.json` records the aggregate two-lane score of
-the frozen sample (engine commit, wall time, process-tree peak memory, both
-lane summaries, the owned lane's unsupported-function distribution and the
-failure kinds). Scored on 2026-09-01 on a 4-vCPU Linux container in 243 s:
+the frozen sample for the current engine (engine commit, wall time,
+process-tree peak memory, both lane summaries, the owned lane's
+unsupported-function distribution and the failure kinds), and
+`enron-figshare.score-delta.json` records the owned lane against the
+baseline engine that first scored the sample. Both are aggregate only. Scored
+on 2026-09-01 on a 4-vCPU Linux container:
 
-| Lane | Opened | Formula cells | Loaded | Compared | Matched |
-|---|---|---|---|---|---|
-| Formualizer candidate | 834 / 1000 | 419,854 | 419,854 (100%) | not implemented | not implemented |
-| Owned M0 engine | 971 / 1000 | 730,879 | 600,171 (82.1%) | 600,171 | 542,159 (90.3%) |
+| Owned M0 engine lane | Baseline (`08f38d1`) | After formula gaps (`0eccaff`) |
+|---|---|---|
+| Workbooks opened | 971 / 1000 | 971 / 1000 |
+| Formula cells observed | 730,879 | 730,879 |
+| Loaded (compiled) | 600,171 (82.1%) | 662,234 (90.6%) |
+| Matched of compared | 542,159 (90.3%) | 648,639 (97.9%) |
+| Mismatched | 58,012 | 13,595 |
+| Not compiled | 130,708 | 68,645 |
+| Wall time, both lanes | 243 s | 270 s |
+| Process-tree peak RSS | 1.5 GiB | 2.1 GiB |
 
-The owned lane's 130,708 uncompiled cells split into syntax 52,523,
-unsupported function 44,259, invalid reference 24,123, unknown sheet 9,747
-and cycle 56. The unsupported functions by formula cells are led by CHOOSE
-(28,995 cells, 6 workbooks) and SUBTOTAL (9,965 cells, 24 workbooks); by
-workbooks they are led by NOW (97), TODAY (28), SUBTOTAL (24) and CELL (15).
-Mismatches are concentrated in 108 workbooks. These are real-corpus numbers
-for one frozen sample, not a product claim; the formula-gap runbook ranks its
-next tranche from this file.
+The Formualizer candidate lane is unchanged: 834 opened, 419,854 formula
+cells parsed. Of the 68,645 cells the owned engine still does not compile,
+39,987 reference other workbooks (never evaluated), 16,085 call unsupported
+functions (led by `_xll` add-in calls, `CALCSKEW`, `RAND`, `OFFSET`), 5,765
+use defined names whose definitions do not compile, 4,574 are invalid
+references, 1,836 are cycles and 278 are other syntax. The remaining
+mismatches are concentrated: 9,125 of 13,595 sit in one workbook. These are
+numbers for one frozen sample of one corpus, not a product claim.
 
 ## Not registered
 
