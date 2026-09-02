@@ -14,6 +14,10 @@ use std::fmt;
 
 /// Defined names may refer to other names; deeper chains are rejected.
 const MAX_NAME_DEPTH: usize = 8;
+/// Excel's grid: `XFD1048576` is the last cell. A token past either bound
+/// (`TABLE1`, `PIPE2`) is a defined name, never a reference, as in Excel.
+const MAX_COLUMNS: u32 = 16_384;
+const MAX_ROWS: u32 = 1_048_576;
 
 const MAX_RANGE_CELLS: usize = 1_000_000;
 
@@ -347,7 +351,7 @@ impl ParsedFormula {
         // Stand-alone parsing has no workbook, so no defined names resolve;
         // a name reference fails with `UnknownName`, as it would in a
         // workbook without definitions.
-        let defined_names = HashMap::new();
+        let defined_names = DefinedNames::default();
         Parser::new(source, sheet, &lowered, &defined_names)
             .parse()
             .map(|expression| Self { expression })
@@ -518,7 +522,7 @@ pub struct Workbook {
     dirty_marks: Vec<u64>,
     pending: Vec<usize>,
     sheet_names: HashMap<String, u32>,
-    defined_names: HashMap<String, String>,
+    defined_names: DefinedNames,
     /// Shared range nodes by identity, so every formula over the same cells
     /// shares one node and one set of member edges.
     ranges: HashMap<RangeKey, usize>,
@@ -542,7 +546,7 @@ impl Default for Workbook {
             dirty_marks: Vec::new(),
             pending: Vec::new(),
             sheet_names: HashMap::new(),
-            defined_names: HashMap::new(),
+            defined_names: DefinedNames::default(),
             ranges: HashMap::new(),
             generation: 1,
             bulk: None,
@@ -562,6 +566,25 @@ impl Workbook {
     /// `UnsupportedName` failure. The first definition of a name wins.
     pub fn define_name(&mut self, name: impl Into<String>, definition: impl Into<String>) {
         self.defined_names
+            .workbook
+            .entry(name.into().to_lowercase())
+            .or_insert_with(|| definition.into());
+    }
+
+    /// Registers a defined name scoped to one sheet (a `localSheetId` name in
+    /// a workbook file). Formulas on that sheet resolve it before any
+    /// workbook-level name of the same spelling; formulas on other sheets
+    /// never see it. The first definition per sheet wins.
+    pub fn define_sheet_name(
+        &mut self,
+        sheet: u32,
+        name: impl Into<String>,
+        definition: impl Into<String>,
+    ) {
+        self.defined_names
+            .sheet
+            .entry(sheet)
+            .or_default()
             .entry(name.into().to_lowercase())
             .or_insert_with(|| definition.into());
     }
@@ -3117,8 +3140,27 @@ struct Parser<'source, 'sheets> {
     offset: usize,
     sheet: u32,
     sheet_names: &'sheets HashMap<String, u32>,
-    defined_names: &'sheets HashMap<String, String>,
+    defined_names: &'sheets DefinedNames,
     name_depth: usize,
+}
+
+/// Defined names by scope. Lower-cased name to definition source; a
+/// sheet-scoped name shadows the workbook name of the same spelling for
+/// formulas on that sheet only.
+#[derive(Default)]
+struct DefinedNames {
+    workbook: HashMap<String, String>,
+    sheet: HashMap<u32, HashMap<String, String>>,
+}
+
+impl DefinedNames {
+    fn resolve(&self, sheet: u32, lowered: &str) -> Option<&str> {
+        self.sheet
+            .get(&sheet)
+            .and_then(|names| names.get(lowered))
+            .or_else(|| self.workbook.get(lowered))
+            .map(String::as_str)
+    }
 }
 
 impl<'source, 'sheets> Parser<'source, 'sheets> {
@@ -3126,7 +3168,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
         source: &'source str,
         sheet: u32,
         sheet_names: &'sheets HashMap<String, u32>,
-        defined_names: &'sheets HashMap<String, String>,
+        defined_names: &'sheets DefinedNames,
     ) -> Self {
         let source = source.strip_prefix('=').unwrap_or(source);
         Self {
@@ -3381,10 +3423,11 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
     }
 
     /// Expands a defined name by compiling its definition in place, with the
-    /// same sheet table and a bounded depth for names that use names.
+    /// same sheet table and a bounded depth for names that use names. A name
+    /// scoped to the formula's sheet wins over a workbook-level one.
     fn parse_defined_name(&mut self, token: &str) -> Result<Expr, FormulaError> {
         let name = token.trim_start_matches('$');
-        let Some(definition) = self.defined_names.get(&name.to_lowercase()) else {
+        let Some(definition) = self.defined_names.resolve(self.sheet, &name.to_lowercase()) else {
             return Err(FormulaError::UnknownName(name.into()));
         };
         if self.name_depth >= MAX_NAME_DEPTH {
@@ -3654,6 +3697,9 @@ fn parse_a1(reference: &str, sheet: u32) -> Result<CellId, FormulaError> {
         .ok()
         .filter(|value| *value > 0)
         .ok_or_else(|| FormulaError::InvalidReference(reference.into()))?;
+    if column > MAX_COLUMNS || row > MAX_ROWS {
+        return Err(FormulaError::InvalidReference(reference.into()));
+    }
     Ok(CellId::new(sheet, row - 1, column - 1))
 }
 
@@ -4199,6 +4245,72 @@ mod tests {
             workbook.set_formula(cell(1, 0), "=#BOGUS!"),
             Err(FormulaError::UnexpectedToken(0))
         );
+    }
+
+    #[test]
+    fn tokens_past_the_grid_are_names_not_references() {
+        let mut workbook = Workbook::default();
+        workbook.define_sheet(0, "Data");
+        workbook.set_number(cell(0, 0), 5.0);
+        workbook.set_number(cell(1, 0), 7.0);
+        workbook.define_name("Table1", "Data!$A$1:$A$2");
+        workbook.define_name("pipe1", "Data!$A$2");
+        workbook.set_formula(cell(0, 1), "=SUM(Table1)").unwrap();
+        workbook.set_formula(cell(0, 2), "=pipe1*2").unwrap();
+        assert_eq!(workbook.value(cell(0, 1)), Value::Number(12.0));
+        assert_eq!(workbook.value(cell(0, 2)), Value::Number(14.0));
+        assert_eq!(
+            workbook.set_formula(cell(0, 3), "=Curves1"),
+            Err(FormulaError::UnknownName("Curves1".into()))
+        );
+        // The last cell of the grid is still a reference; one column or one
+        // row past it is a name.
+        workbook.set_formula(cell(0, 3), "=XFD1048576+1").unwrap();
+        assert_eq!(workbook.value(cell(0, 3)), Value::Number(1.0));
+        assert_eq!(
+            workbook.set_formula(cell(0, 4), "=XFE1"),
+            Err(FormulaError::UnknownName("XFE1".into()))
+        );
+        assert_eq!(
+            workbook.set_formula(cell(0, 4), "=A1048577"),
+            Err(FormulaError::UnknownName("A1048577".into()))
+        );
+        assert!(matches!(
+            workbook.set_formula(cell(0, 4), "=Data!XFE1"),
+            Err(FormulaError::InvalidReference(_))
+        ));
+    }
+
+    #[test]
+    fn sheet_scoped_names_shadow_workbook_names_on_their_sheet() {
+        let mut workbook = Workbook::default();
+        workbook.define_sheet(0, "Buy");
+        workbook.define_sheet(1, "Sell");
+        workbook.define_sheet(2, "Summary");
+        workbook.set_number(CellId::new(0, 2, 0), 10.0);
+        workbook.set_number(CellId::new(1, 2, 0), 20.0);
+        workbook.define_sheet_name(0, "mthbeg", "Buy!$A$3");
+        workbook.define_sheet_name(1, "MthBeg", "Sell!$A$3");
+        workbook.define_name("mthbeg", "#REF!");
+        // A later definition in the same scope is ignored, as for workbook names.
+        workbook.define_sheet_name(0, "mthbeg", "Buy!$B$3");
+
+        for sheet in 0..3 {
+            workbook
+                .set_formula(CellId::new(sheet, 0, 0), "=mthbeg+1")
+                .unwrap();
+        }
+        assert_eq!(workbook.value(CellId::new(0, 0, 0)), Value::Number(11.0));
+        assert_eq!(workbook.value(CellId::new(1, 0, 0)), Value::Number(21.0));
+        // A sheet without its own definition sees the workbook name.
+        assert_eq!(
+            workbook.value(CellId::new(2, 0, 0)),
+            Value::Error(CalcError::InvalidReference)
+        );
+        let report = workbook.set_number(CellId::new(1, 2, 0), 30.0);
+        assert!(report.evaluated.contains(&CellId::new(1, 0, 0)));
+        assert_eq!(workbook.value(CellId::new(1, 0, 0)), Value::Number(31.0));
+        assert_eq!(workbook.value(CellId::new(0, 0, 0)), Value::Number(11.0));
     }
 
     #[test]
@@ -4945,7 +5057,7 @@ mod tests {
             Err(FormulaError::UnsupportedFunction("CUBEVALUE".into()))
         );
         assert_eq!(
-            workbook.set_formula(cell(0, 0), "=SUM(A1:ZZZ999999)"),
+            workbook.set_formula(cell(0, 0), "=SUM(A1:XFD999999)"),
             Err(FormulaError::RangeTooLarge)
         );
     }

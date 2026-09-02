@@ -50,6 +50,14 @@ expression plus one edge per range, however large the range. A rebinding that
 no longer forms a rectangle (a row inserted through a range bound to stable
 cells) keeps its original members as an explicit list with its own node.
 
+Defined names follow Excel's two rules that the corpus exercises most. A
+token is a cell reference only inside the grid (`XFD1048576` is the last
+cell): `Table1`, `pipe2` or `Curves1` are names, never the cells in columns
+TABLE, PIPE or CURVES. A name scoped to a sheet (`localSheetId` in a
+workbook file, `define_sheet_name` here) is seen only by formulas on that
+sheet and shadows a workbook-level name of the same spelling there; every
+other sheet sees the workbook name.
+
 Run its focused checks with:
 
 ```bash
