@@ -5,10 +5,10 @@
   "manifest_sha256": "2f5ea94c02ae3779206d6ca1b1da9e77002450bc070fa968ca566cfd526ff80d",
   "scored": "2026-09-02",
   "command": "omasheets-corpus score corpus/sources/enron-figshare.jsonl <root> <out> --timeout-seconds 30",
-  "engine_commit": "7fd2c3c338de7700357530791018b821445c882e",
+  "engine_commit": "dd1829c63eaafdc6b9deae3440a456dad1c2ea48",
   "runner": "linux x86_64 container, 4 vCPU",
-  "wall_seconds": 142.2,
-  "process_tree_peak_rss_bytes": 1543200768,
+  "wall_seconds": 139.2,
+  "process_tree_peak_rss_bytes": 1529622528,
   "candidate_engine": "formualizer-calamine-0.8.4",
   "candidate_summary": {
     "files": 1000,
@@ -19,7 +19,7 @@
     "formula_cells_observed": 419854,
     "formula_cells_loaded": 419854,
     "formula_parse_rate": 1.0,
-    "peak_rss_bytes_max": 160833536
+    "peak_rss_bytes_max": 160747520
   },
   "owned_engine": "omasheets-owned-m0",
   "owned_summary": {
@@ -28,16 +28,16 @@
     "failed": 4,
     "timed_out": 0,
     "formula_cells_observed": 924235,
-    "formula_cells_loaded": 817197,
-    "formula_cells_compared": 817197,
-    "stored_values_matched": 796872,
-    "stored_values_mismatched": 20325,
-    "unsupported_formulas": 107038,
-    "formula_parse_rate": 0.8841874631451958,
-    "comparison_coverage": 0.8841874631451958,
-    "stored_value_match_rate": 0.9751283962129083,
+    "formula_cells_loaded": 817225,
+    "formula_cells_compared": 817225,
+    "stored_values_matched": 815395,
+    "stored_values_mismatched": 1830,
+    "unsupported_formulas": 107010,
+    "formula_parse_rate": 0.8842177584705189,
+    "comparison_coverage": 0.8842177584705189,
+    "stored_value_match_rate": 0.9977607146134786,
     "unsupported_reasons": {
-      "cycle": 2314,
+      "cycle": 2286,
       "external_reference": 47007,
       "invalid_reference": 12051,
       "syntax": 10791,
@@ -47,7 +47,7 @@
     },
     "workbooks_with_skipped_sheets": 23,
     "skipped_sheets": 48,
-    "peak_rss_bytes_max": 115830784
+    "peak_rss_bytes_max": 116137984
   },
   "owned_unsupported_functions": {
     "_XLL.HPVAL": {
@@ -213,6 +213,7 @@
     "external_reference counts formulas that reach into another workbook; the engine never evaluates them.",
     "Ranges are shared graph nodes with membership decided by position, and imports load in bulk with one recalculation; the worst-workbook peak resident set fell from about 1 GB to about 110 MB and the two former 30 s timeouts import in well under 10 s.",
     "Twelve functions the corpus used most without support (YEARFRAC, DAYS360, NETWORKDAYS, WORKDAY, LOOKUP, PMT, NPV, XNPV, XIRR, NORMDIST, AVERAGEA, CORREL) now evaluate; two workbooks whose defined names are literally #REF! now report #REF! where Excel had kept a stale cached value.",
+    "Mismatch round 1: tokens past the grid resolve as names, sheet-scoped names keep their scope, criteria follow Excel for spacing, wildcards, blanks, errors and mixed types, blank lookups never match blank cells, negative zero folds to zero, INDEX passes a failed MATCH through, lookups skip error cells, math domain errors are #NUM!, and shared formulas expand from their anchor cell; the eight worst-mismatch workbooks of the previous score now match Excel cell for cell apart from three macro-backed cells.",
     "See enron-figshare.score-delta.json for the change against the previous engine."
   ]
 }

@@ -3,8 +3,8 @@
   "source": "enron-figshare",
   "manifest": "enron-figshare.jsonl",
   "manifest_sha256": "2f5ea94c02ae3779206d6ca1b1da9e77002450bc070fa968ca566cfd526ff80d",
-  "baseline_engine_commit": "ed1cc1dd69a0a9b09061d1513656f3e9e5bc8441",
-  "engine_commit": "7fd2c3c338de7700357530791018b821445c882e",
+  "baseline_engine_commit": "7fd2c3c338de7700357530791018b821445c882e",
+  "engine_commit": "dd1829c63eaafdc6b9deae3440a456dad1c2ea48",
   "scored": "2026-09-02",
   "owned_lane": {
     "opened": {
@@ -24,40 +24,40 @@
       "after": 924235
     },
     "formula_cells_loaded": {
-      "before": 816260,
-      "after": 817197
+      "before": 817197,
+      "after": 817225
     },
     "formula_cells_compared": {
-      "before": 816260,
-      "after": 817197
+      "before": 817197,
+      "after": 817225
     },
     "stored_values_matched": {
-      "before": 796076,
-      "after": 796872
+      "before": 796872,
+      "after": 815395
     },
     "stored_values_mismatched": {
-      "before": 20184,
-      "after": 20325
+      "before": 20325,
+      "after": 1830
     },
     "unsupported_formulas": {
-      "before": 107975,
-      "after": 107038
+      "before": 107038,
+      "after": 107010
     },
     "formula_parse_rate": {
-      "before": 0.8831736517227762,
-      "after": 0.8841874631451958
+      "before": 0.8841874631451958,
+      "after": 0.8842177584705189
     },
     "comparison_coverage": {
-      "before": 0.8831736517227762,
-      "after": 0.8841874631451958
+      "before": 0.8841874631451958,
+      "after": 0.8842177584705189
     },
     "stored_value_match_rate": {
-      "before": 0.9752725847156544,
-      "after": 0.9751283962129083
+      "before": 0.9751283962129083,
+      "after": 0.9977607146134786
     },
     "peak_rss_bytes_max": {
-      "before": 115863552,
-      "after": 115830784
+      "before": 115830784,
+      "after": 116137984
     }
   },
   "owned_lane_added": {
@@ -73,15 +73,15 @@
   "unsupported_reasons": {
     "before": {
       "cycle": 2314,
-      "external_reference": 46967,
+      "external_reference": 47007,
       "invalid_reference": 12051,
       "syntax": 10791,
       "unknown_name": 122,
-      "unsupported_function": 27594,
+      "unsupported_function": 26617,
       "unsupported_name": 8136
     },
     "after": {
-      "cycle": 2314,
+      "cycle": 2286,
       "external_reference": 47007,
       "invalid_reference": 12051,
       "syntax": 10791,
@@ -90,27 +90,26 @@
       "unsupported_name": 8136
     }
   },
-  "resolved_functions": [
-    "AVERAGEA",
-    "CORREL",
-    "DAYS360",
-    "LOOKUP",
-    "NETWORKDAYS",
-    "NORMDIST",
-    "NPV",
-    "PMT",
-    "WORKDAY",
-    "XIRR",
-    "XNPV",
-    "YEARFRAC"
+  "resolved_functions": [],
+  "resolved_defects": [
+    "tokens past the grid (Table1, pipe2) parsed as cell references instead of names",
+    "sheet-scoped defined names (localSheetId) lost their scope on import",
+    "COUNTIF/SUMIF-family criteria trimmed before matching; wildcards unsupported",
+    "criteria: empty-cell criterion counted blanks, blanks/errors/mixed types compared, error criteria propagated",
+    "blank lookup value matched blank cells in MATCH/VLOOKUP",
+    "negative zero from SUM and products compared below zero",
+    "INDEX turned a failed MATCH into #ARGS! instead of #N/A",
+    "shared formulas expanded from the ref corner instead of the anchor cell",
+    "lookups propagated error cells from the searched vector instead of skipping them",
+    "SQRT/LN outside their domain reported #VALUE! instead of #NUM!"
   ],
   "resolved_open_failures": {},
   "wall_seconds": {
-    "before": 144.9,
-    "after": 142.2
+    "before": 142.2,
+    "after": 139.2
   },
   "process_tree_peak_rss_bytes": {
-    "before": 1533501440,
-    "after": 1543200768
+    "before": 1543200768,
+    "after": 1529622528
   }
 }
