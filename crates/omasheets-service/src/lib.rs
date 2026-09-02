@@ -326,10 +326,10 @@ impl Service {
     }
 
     fn sheet(document: &omasheets_core::Document, sheet: &str) -> Result<SheetId, ServiceError> {
-        if let Some(id) = ObjectId::parse(sheet).map(SheetId) {
-            if document.sheets().contains(&id) {
-                return Ok(id);
-            }
+        if let Some(id) = ObjectId::parse(sheet).map(SheetId)
+            && document.sheets().contains(&id)
+        {
+            return Ok(id);
         }
         document
             .sheets()
