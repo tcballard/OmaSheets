@@ -1,6 +1,6 @@
 use omasheets_core::{Actor, ActorKind, CellValue, Command, Literal, Severity};
 use omasheets_service::{Request, Response, Service, ServiceError};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_document() -> PathBuf {
@@ -22,7 +22,7 @@ fn agent(id: &str) -> Actor {
     Actor::new(ActorKind::Agent, id)
 }
 
-fn sheet_of(service: &mut Service, path: &PathBuf, branch: Option<&str>) -> String {
+fn sheet_of(service: &mut Service, path: &Path, branch: Option<&str>) -> String {
     match service
         .handle(Request::Document {
             path: path.clone(),
@@ -37,7 +37,7 @@ fn sheet_of(service: &mut Service, path: &PathBuf, branch: Option<&str>) -> Stri
 
 fn append(
     service: &mut Service,
-    path: &PathBuf,
+    path: &Path,
     branch: Option<&str>,
     actor: Actor,
     command: Command,
