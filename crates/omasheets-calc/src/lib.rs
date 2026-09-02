@@ -2046,8 +2046,10 @@ impl Workbook {
                 let Some((node, rows, columns)) = range_parts(&arguments[0]) else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
-                let Ok(row) = positive_index(self.evaluate(&arguments[1])) else {
-                    return Value::Error(CalcError::InvalidArguments);
+                // An error row (a failed MATCH) is the result, as in Excel.
+                let row = match positive_index(self.evaluate(&arguments[1])) {
+                    Ok(row) => row,
+                    Err(error) => return Value::Error(error),
                 };
                 let column = if arguments.len() == 3 {
                     match positive_index(self.evaluate(&arguments[2])) {
@@ -4133,6 +4135,30 @@ mod tests {
             let target = cell(6, column as u32);
             workbook.set_formula(target, formula).unwrap();
             assert_eq!(workbook.value(target), Value::Number(expected), "{formula}");
+        }
+    }
+
+    #[test]
+    fn index_passes_through_the_error_of_a_failed_match() {
+        let mut workbook = Workbook::default();
+        workbook.set_text(cell(0, 0), "a");
+        workbook.set_text(cell(1, 0), "b");
+        let cases = [
+            (
+                "=INDEX(A1:A2,MATCH(\"zz\",A1:A2,0))",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            ("=INDEX(A1:A2,NA())", Value::Error(CalcError::NotAvailable)),
+            ("=INDEX(A1:A2,\"x\")", Value::Error(CalcError::InvalidValue)),
+            (
+                "=INDEX(A1:A2,MATCH(\"b\",A1:A2,0))",
+                Value::Text("b".into()),
+            ),
+        ];
+        for (column, (formula, expected)) in cases.into_iter().enumerate() {
+            let target = cell(6, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            assert_eq!(workbook.value(target), expected, "{formula}");
         }
     }
 
