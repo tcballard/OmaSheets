@@ -944,6 +944,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "omasheets-xlsx"
+version = "0.0.0"
+dependencies = [
+ "calamine",
+ "omasheets-calc",
+ "sha2",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -64,6 +64,7 @@ jobs:
           cargo test --workspace --locked --release
           cargo build --locked --release -p omasheets-corpus
           cargo build --locked --release -p omasheets-calc --bin omasheets-calc-bench
+          cargo build --locked --release -p omasheets-xlsx --bin omasheets-xlsx-score
       - name: Record an owned calculation smoke benchmark
         run: |
           mkdir -p "$RUNNER_TEMP/omasheets-m0"
@@ -77,6 +78,9 @@ jobs:
           python scripts/generate_m0_xlsx.py \
             "$evidence/corpus/formula-smoke.xlsx" --rows 250 \
             > "$evidence/fixture.json"
+          target/release/omasheets-xlsx-score \
+            "$evidence/corpus/formula-smoke.xlsx" \
+            > "$evidence/owned-score.json"
           target/release/omasheets-corpus index \
             "$evidence/corpus" "$evidence/manifest.jsonl"
           python scripts/performance.py run \
@@ -92,6 +96,14 @@ jobs:
           from pathlib import Path
 
           root = Path(os.environ["EVIDENCE"])
+          owned = json.loads((root / "owned-score.json").read_text())
+          assert owned["engine"] == "omasheets-owned-m0"
+          assert owned["formula_cells_observed"] == 250
+          assert owned["formula_cells_loaded"] == 250
+          assert owned["formula_cells_compared"] == 250
+          assert owned["stored_values_matched"] == 250
+          assert owned["stored_values_mismatched"] == 0
+          assert owned["unsupported_formulas"] == 0
           score = json.loads((root / "score.json").read_text())
           summary = score["summary"]
           assert score["stored_value_comparison"] == "not_implemented"
@@ -114,6 +126,7 @@ jobs:
             ${{ runner.temp }}/omasheets-m0/fixture.json
             ${{ runner.temp }}/omasheets-m0/calc-benchmark.json
             ${{ runner.temp }}/omasheets-m0/manifest.jsonl
+            ${{ runner.temp }}/omasheets-m0/owned-score.json
             ${{ runner.temp }}/omasheets-m0/score.json
             ${{ runner.temp }}/omasheets-m0/performance.json
           if-no-files-found: error
