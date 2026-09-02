@@ -401,7 +401,7 @@ mod tests {
         let imported = import_ranges(
             ranges(
                 vec![Cell::new((0, 0), Data::Int(2))],
-                vec![Cell::new((0, 0), "MEDIAN(1,2,3)".into())],
+                vec![Cell::new((0, 0), "CUBEVALUE(1,2,3)".into())],
             ),
             "b".repeat(64),
             ImportLimits::default(),
@@ -544,6 +544,42 @@ mod tests {
                 unsupported_formulas: 0,
             }
         );
+    }
+
+    #[test]
+    fn matches_stored_text_and_boolean_formula_results() {
+        let imported = import_ranges(
+            ranges(
+                vec![
+                    Cell::new((0, 0), Data::Int(3)),
+                    Cell::new((0, 1), Data::Int(9)),
+                    Cell::new((0, 2), Data::String("3|9".into())),
+                    Cell::new((0, 3), Data::Bool(false)),
+                    Cell::new((0, 4), Data::Float(0.03)),
+                    Cell::new((0, 5), Data::Bool(true)),
+                ],
+                vec![
+                    Cell::new((0, 1), "A1^2".into()),
+                    Cell::new((0, 2), "A1&\"|\"&B1".into()),
+                    Cell::new((0, 3), "ISBLANK(C1)".into()),
+                    Cell::new((0, 4), "A1%".into()),
+                    Cell::new((0, 5), "ISTEXT(C1)".into()),
+                ],
+            ),
+            "h".repeat(64),
+            ImportLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 0, 2)),
+            Value::Text("3|9".into())
+        );
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 0, 3)),
+            Value::Boolean(false)
+        );
+        assert_eq!(imported.parity().stored_values_matched, 5);
+        assert_eq!(imported.parity().stored_values_mismatched, 0);
     }
 
     #[test]

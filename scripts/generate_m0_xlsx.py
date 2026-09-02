@@ -6,6 +6,9 @@ adds a ``Dates`` sheet whose stored values follow Excel's 1900 date system, so
 the owned engine's date functions can be checked against cached results.
 ``--date-system 1904`` only flips the workbook's ``date1904`` flag; it exists
 so the importer's explicit rejection of that system can be exercised.
+``--operator-rows`` adds an ``Operators`` sheet covering the ``^``, ``&`` and
+``%`` operators plus type-inspection functions, with text and boolean cached
+results so parity is checked on more than numbers.
 """
 
 from __future__ import annotations
@@ -25,6 +28,9 @@ MIN_DATE_ROWS = 0
 MAX_DATE_ROWS = 10_000
 DATE_SYSTEMS = ("1900", "1904")
 DATE_FORMULAS_PER_ROW = 7
+MIN_OPERATOR_ROWS = 0
+MAX_OPERATOR_ROWS = 10_000
+OPERATOR_FORMULAS_PER_ROW = 9
 FIXED_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 # Excel serial 0 is the fictitious 1900-01-00; for real dates on or after
 # 1900-03-01 the serial is the day count from 1899-12-30. Every sampled date
@@ -53,6 +59,18 @@ def bounded_date_rows(value: str) -> int:
     if not MIN_DATE_ROWS <= rows <= MAX_DATE_ROWS:
         raise argparse.ArgumentTypeError(
             f"date rows must be between {MIN_DATE_ROWS} and {MAX_DATE_ROWS}",
+        )
+    return rows
+
+
+def bounded_operator_rows(value: str) -> int:
+    try:
+        rows = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("operator rows must be an integer") from exc
+    if not MIN_OPERATOR_ROWS <= rows <= MAX_OPERATOR_ROWS:
+        raise argparse.ArgumentTypeError(
+            f"operator rows must be between {MIN_OPERATOR_ROWS} and {MAX_OPERATOR_ROWS}",
         )
     return rows
 
@@ -167,6 +185,57 @@ def date_worksheet(rows: int) -> str:
     )
 
 
+def operator_worksheet(rows: int) -> str:
+    """Rows of small integers so every cached value is exact in IEEE-754.
+
+    Excel binds ``%`` tighter than ``^`` and negation tighter than both, so
+    ``-A^2`` is positive. ``&`` is written as ``&amp;`` inside the XML.
+    """
+    headers = [
+        "Value", "Square", "Label", "Percent", "NegSquare",
+        "LabelBlank", "Median", "SumProduct", "AsNumber", "AsText",
+    ]
+    records = [
+        '<row r="1">'
+        + "".join(
+            f'<c r="{chr(ord("A") + index)}1" t="inlineStr"><is><t>{name}</t></is></c>'
+            for index, name in enumerate(headers)
+        )
+        + "</row>",
+    ]
+    for index in range(rows):
+        row = index + 2
+        value = index + 1
+        square = value * value
+        label = f"{value}|{square}"
+        percent = value / 100
+        median_value = sorted([value, square, percent])[1]
+        records.append(
+            f'<row r="{row}">'
+            f'<c r="A{row}"><v>{value}</v></c>'
+            f'<c r="B{row}"><f>A{row}^2</f><v>{square}</v></c>'
+            f'<c r="C{row}" t="str"><f>A{row}&amp;"|"&amp;B{row}</f><v>{label}</v></c>'
+            f'<c r="D{row}"><f>A{row}%</f><v>{percent!r}</v></c>'
+            f'<c r="E{row}"><f>-A{row}^2</f><v>{square}</v></c>'
+            f'<c r="F{row}" t="b"><f>ISBLANK(C{row})</f><v>0</v></c>'
+            f'<c r="G{row}"><f>MEDIAN(A{row},B{row},D{row})</f><v>{median_value!r}</v></c>'
+            f'<c r="H{row}"><f>SUMPRODUCT(A{row}:B{row},A{row}:B{row})</f>'
+            f"<v>{square + square * square}</v></c>"
+            f'<c r="I{row}"><f>N(C{row})</f><v>0</v></c>'
+            f'<c r="J{row}" t="str"><f>T(C{row})</f><v>{label}</v></c>'
+            "</row>"
+        )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<dimension ref="A1:J{rows + 1}"/>'
+        '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
+        '<sheetFormatPr defaultRowHeight="15"/>'
+        f'<sheetData>{"".join(records)}</sheetData>'
+        '</worksheet>'
+    )
+
+
 STYLES = (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
@@ -186,27 +255,35 @@ def payloads(
     rows: int,
     date_rows: int = 0,
     date_system: str = "1900",
+    operator_rows: int = 0,
 ) -> list[tuple[str, str]]:
     if date_system not in DATE_SYSTEMS:
         raise ValueError(f"unsupported date system {date_system!r}")
     with_dates = date_rows > 0
+    worksheets = [("M0", worksheet(rows))]
+    if with_dates:
+        worksheets.append(("Dates", date_worksheet(date_rows)))
+    if operator_rows > 0:
+        worksheets.append(("Operators", operator_worksheet(operator_rows)))
     content_overrides = (
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
     )
-    sheets = '<sheet name="M0" sheetId="1" r:id="rId1"/>'
-    workbook_relationships = (
-        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-    )
+    sheets = ""
+    workbook_relationships = ""
+    for number, (name, _) in enumerate(worksheets, start=1):
+        content_overrides += (
+            f'<Override PartName="/xl/worksheets/sheet{number}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        )
+        sheets += f'<sheet name="{name}" sheetId="{number}" r:id="rId{number}"/>'
+        workbook_relationships += (
+            f'<Relationship Id="rId{number}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{number}.xml"/>'
+        )
     if with_dates:
         content_overrides += (
-            '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
             '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
         )
-        sheets += '<sheet name="Dates" sheetId="2" r:id="rId2"/>'
         workbook_relationships += (
-            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>'
-            '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            f'<Relationship Id="rId{len(worksheets) + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
         )
     workbook_properties = '<workbookPr date1904="1"/>' if date_system == "1904" else ""
     members = [
@@ -243,10 +320,10 @@ def payloads(
             f"{workbook_relationships}"
             '</Relationships>',
         ),
-        ("xl/worksheets/sheet1.xml", worksheet(rows)),
     ]
+    for number, (_, xml) in enumerate(worksheets, start=1):
+        members.append((f"xl/worksheets/sheet{number}.xml", xml))
     if with_dates:
-        members.append(("xl/worksheets/sheet2.xml", date_worksheet(date_rows)))
         members.append(("xl/styles.xml", STYLES))
     return members
 
@@ -264,6 +341,7 @@ def generate(
     rows: int,
     date_rows: int = 0,
     date_system: str = "1900",
+    operator_rows: int = 0,
 ) -> dict[str, object]:
     output.parent.mkdir(parents=True, exist_ok=True)
     created = False
@@ -276,7 +354,7 @@ def generate(
             strict_timestamps=True,
         ) as archive:
             created = True
-            for name, payload in payloads(rows, date_rows, date_system):
+            for name, payload in payloads(rows, date_rows, date_system, operator_rows):
                 info, encoded = member(name, payload)
                 archive.writestr(info, encoded, compresslevel=9)
     except Exception:
@@ -292,14 +370,24 @@ def generate(
         "sha256": sha256(output),
         "bytes": output.stat().st_size,
         "data_rows": rows,
-        "header_cells": 3 + (8 if date_rows else 0),
+        "header_cells": 3 + (8 if date_rows else 0) + (10 if operator_rows else 0),
         "numeric_value_cells": rows * 2,
         "date_rows": date_rows,
         "date_system": date_system,
         "date_value_cells": date_rows,
         "date_formula_cells": date_rows * DATE_FORMULAS_PER_ROW,
-        "formula_cells": rows + date_rows * DATE_FORMULAS_PER_ROW,
-        "logical_cells": (rows + 1) * 3 + ((date_rows + 1) * 8 if date_rows else 0),
+        "operator_rows": operator_rows,
+        "operator_formula_cells": operator_rows * OPERATOR_FORMULAS_PER_ROW,
+        "formula_cells": (
+            rows
+            + date_rows * DATE_FORMULAS_PER_ROW
+            + operator_rows * OPERATOR_FORMULAS_PER_ROW
+        ),
+        "logical_cells": (
+            (rows + 1) * 3
+            + ((date_rows + 1) * 8 if date_rows else 0)
+            + ((operator_rows + 1) * 10 if operator_rows else 0)
+        ),
     }
 
 
@@ -309,6 +397,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rows", type=bounded_rows, default=100)
     parser.add_argument("--date-rows", type=bounded_date_rows, default=0)
     parser.add_argument("--date-system", choices=DATE_SYSTEMS, default="1900")
+    parser.add_argument("--operator-rows", type=bounded_operator_rows, default=0)
     return parser
 
 
@@ -319,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
         arguments.rows,
         arguments.date_rows,
         arguments.date_system,
+        arguments.operator_rows,
     )
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))
     return 0

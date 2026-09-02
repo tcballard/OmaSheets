@@ -86,6 +86,7 @@ enum Expr<R = CellId> {
     Text(String),
     Reference(R),
     UnaryMinus(Box<Expr<R>>),
+    Percent(Box<Expr<R>>),
     Binary(BinaryOp, Box<Expr<R>>, Box<Expr<R>>),
     Range {
         items: Vec<Expr<R>>,
@@ -101,6 +102,8 @@ enum BinaryOp {
     Subtract,
     Multiply,
     Divide,
+    Power,
+    Concat,
     Equal,
     NotEqual,
     Less,
@@ -167,6 +170,15 @@ enum Function {
     EDate,
     EoMonth,
     Weekday,
+    IsBlank,
+    IsNumber,
+    IsText,
+    IsLogical,
+    IsError,
+    N,
+    T,
+    SumProduct,
+    Median,
 }
 
 #[derive(Clone, Debug)]
@@ -410,6 +422,10 @@ impl Workbook {
                 Value::Text(_) => Value::Error(CalcError::InvalidValue),
                 other => other,
             },
+            Expr::Percent(inner) => match number(self.evaluate(inner)) {
+                Ok(value) => Value::Number(value / 100.0),
+                Err(error) => Value::Error(error),
+            },
             Expr::Binary(operator, left, right) => {
                 let left = self.evaluate(left);
                 let right = self.evaluate(right);
@@ -471,6 +487,21 @@ impl Workbook {
         ) {
             return self.evaluate_date_function(function, arguments);
         }
+        if matches!(
+            function,
+            Function::IsBlank
+                | Function::IsNumber
+                | Function::IsText
+                | Function::IsLogical
+                | Function::IsError
+                | Function::N
+                | Function::T
+        ) {
+            return self.evaluate_inspection_function(function, arguments);
+        }
+        if function == Function::SumProduct {
+            return self.evaluate_sumproduct(arguments);
+        }
 
         let mut values = Vec::new();
         for argument in arguments {
@@ -505,6 +536,7 @@ impl Workbook {
                     .count() as f64,
             ),
             Function::Product => Value::Number(numbers.into_iter().product()),
+            Function::Median if !numbers.is_empty() => median(numbers),
             Function::Abs => unary_number(&values, f64::abs),
             Function::Int => unary_number(&values, f64::floor),
             Function::Sqrt => {
@@ -590,8 +622,76 @@ impl Workbook {
             | Function::Day
             | Function::EDate
             | Function::EoMonth
-            | Function::Weekday => Value::Error(CalcError::InvalidArguments),
+            | Function::Weekday
+            | Function::IsBlank
+            | Function::IsNumber
+            | Function::IsText
+            | Function::IsLogical
+            | Function::IsError
+            | Function::N
+            | Function::T
+            | Function::SumProduct
+            | Function::Median => Value::Error(CalcError::InvalidArguments),
         }
+    }
+
+    /// Type inspection takes exactly one scalar argument and never propagates
+    /// an error from it: `ISERROR(1/0)` is `TRUE`, `ISBLANK(1/0)` is `FALSE`.
+    /// `N` and `T` do propagate errors, matching Excel.
+    fn evaluate_inspection_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+        if arguments.len() != 1 || matches!(arguments[0], Expr::Range { .. }) {
+            return Value::Error(CalcError::InvalidArguments);
+        }
+        let value = self.evaluate(&arguments[0]);
+        match function {
+            Function::IsBlank => Value::Boolean(matches!(value, Value::Blank)),
+            Function::IsNumber => Value::Boolean(matches!(value, Value::Number(_))),
+            Function::IsText => Value::Boolean(matches!(value, Value::Text(_))),
+            Function::IsLogical => Value::Boolean(matches!(value, Value::Boolean(_))),
+            Function::IsError => Value::Boolean(matches!(value, Value::Error(_))),
+            Function::N => match value {
+                Value::Number(number) => Value::Number(number),
+                Value::Boolean(true) => Value::Number(1.0),
+                Value::Boolean(false) | Value::Blank | Value::Text(_) => Value::Number(0.0),
+                error @ Value::Error(_) => error,
+            },
+            Function::T => match value {
+                text @ Value::Text(_) => text,
+                Value::Number(_) | Value::Boolean(_) | Value::Blank => Value::Text(String::new()),
+                error @ Value::Error(_) => error,
+            },
+            _ => unreachable!("dispatched above"),
+        }
+    }
+
+    /// `SUMPRODUCT(range, ...)`: every argument must have the same shape;
+    /// non-numeric entries count as zero and errors propagate.
+    fn evaluate_sumproduct(&self, arguments: &[Expr<usize>]) -> Value {
+        if arguments.is_empty() {
+            return Value::Error(CalcError::InvalidArguments);
+        }
+        let shape = |expression: &Expr<usize>| match expression {
+            Expr::Range { rows, columns, .. } => (*rows, *columns),
+            _ => (1, 1),
+        };
+        let expected = shape(&arguments[0]);
+        if arguments.iter().any(|argument| shape(argument) != expected) {
+            return Value::Error(CalcError::InvalidValue);
+        }
+        let mut products = vec![1.0; expected.0 * expected.1];
+        let mut values = Vec::with_capacity(products.len());
+        for argument in arguments {
+            values.clear();
+            self.flatten_values(argument, &mut values);
+            for (product, value) in products.iter_mut().zip(&values) {
+                *product *= match value {
+                    Value::Number(number) => *number,
+                    Value::Error(error) => return Value::Error(error.clone()),
+                    _ => 0.0,
+                };
+            }
+        }
+        Value::Number(products.iter().sum())
     }
 
     /// Date functions take scalar serial arguments and return serials; every
@@ -944,6 +1044,12 @@ fn apply_binary(operator: BinaryOp, left: Value, right: Value) -> Value {
     if let Value::Error(error) = &right {
         return Value::Error(error.clone());
     }
+    if operator == BinaryOp::Concat {
+        return match (text_value(&left), text_value(&right)) {
+            (Ok(left), Ok(right)) => Value::Text(left + &right),
+            (Err(error), _) | (_, Err(error)) => Value::Error(error),
+        };
+    }
     if matches!(operator, BinaryOp::Equal | BinaryOp::NotEqual) {
         let numerically_equal = match (number(left.clone()), number(right.clone())) {
             (Ok(left), Ok(right)) => left == right,
@@ -966,12 +1072,32 @@ fn apply_binary(operator: BinaryOp, left: Value, right: Value) -> Value {
         BinaryOp::Multiply => Value::Number(left * right),
         BinaryOp::Divide if right == 0.0 => Value::Error(CalcError::DivisionByZero),
         BinaryOp::Divide => Value::Number(left / right),
-        BinaryOp::Equal | BinaryOp::NotEqual => unreachable!("handled above"),
+        BinaryOp::Power => {
+            let result = left.powf(right);
+            if (left == 0.0 && right == 0.0) || !result.is_finite() {
+                Value::Error(CalcError::InvalidNumber)
+            } else {
+                Value::Number(result)
+            }
+        }
+        BinaryOp::Equal | BinaryOp::NotEqual | BinaryOp::Concat => {
+            unreachable!("handled above")
+        }
         BinaryOp::Less => Value::Boolean(left < right),
         BinaryOp::LessOrEqual => Value::Boolean(left <= right),
         BinaryOp::Greater => Value::Boolean(left > right),
         BinaryOp::GreaterOrEqual => Value::Boolean(left >= right),
     }
+}
+
+fn median(mut numbers: Vec<f64>) -> Value {
+    numbers.sort_by(f64::total_cmp);
+    let middle = numbers.len() / 2;
+    Value::Number(if numbers.len() % 2 == 1 {
+        numbers[middle]
+    } else {
+        (numbers[middle - 1] + numbers[middle]) / 2.0
+    })
 }
 
 fn unary_number(values: &[Value], operation: impl FnOnce(f64) -> f64) -> Value {
@@ -1278,6 +1404,7 @@ fn compile_expression(expression: Expr<CellId>, indices: &HashMap<CellId, usize>
         Expr::Text(value) => Expr::Text(value),
         Expr::Reference(cell) => Expr::Reference(indices[&cell]),
         Expr::UnaryMinus(inner) => Expr::UnaryMinus(Box::new(compile_expression(*inner, indices))),
+        Expr::Percent(inner) => Expr::Percent(Box::new(compile_expression(*inner, indices))),
         Expr::Binary(operator, left, right) => Expr::Binary(
             operator,
             Box::new(compile_expression(*left, indices)),
@@ -1310,7 +1437,7 @@ fn collect_dependencies(expression: &Expr, output: &mut BTreeSet<CellId>) {
         Expr::Reference(cell) => {
             output.insert(*cell);
         }
-        Expr::UnaryMinus(inner) => collect_dependencies(inner, output),
+        Expr::UnaryMinus(inner) | Expr::Percent(inner) => collect_dependencies(inner, output),
         Expr::Binary(_, left, right) => {
             collect_dependencies(left, output);
             collect_dependencies(right, output);
@@ -1359,7 +1486,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
     }
 
     fn parse_comparison(&mut self) -> Result<Expr, FormulaError> {
-        let mut left = self.parse_additive()?;
+        let mut left = self.parse_concatenation()?;
         loop {
             self.skip_space();
             let (operator, width) = if self.remaining().starts_with("<>") {
@@ -1377,8 +1504,22 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
                 }
             };
             self.offset += width;
-            let right = self.parse_additive()?;
+            let right = self.parse_concatenation()?;
             left = Expr::Binary(operator, Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_concatenation(&mut self) -> Result<Expr, FormulaError> {
+        let mut left = self.parse_additive()?;
+        loop {
+            self.skip_space();
+            if self.peek() != Some(b'&') {
+                break;
+            }
+            self.offset += 1;
+            let right = self.parse_additive()?;
+            left = Expr::Binary(BinaryOp::Concat, Box::new(left), Box::new(right));
         }
         Ok(left)
     }
@@ -1400,7 +1541,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
     }
 
     fn parse_multiplicative(&mut self) -> Result<Expr, FormulaError> {
-        let mut left = self.parse_primary()?;
+        let mut left = self.parse_power()?;
         loop {
             self.skip_space();
             let operator = match self.peek() {
@@ -1409,19 +1550,58 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
                 _ => break,
             };
             self.offset += 1;
-            let right = self.parse_primary()?;
+            let right = self.parse_power()?;
             left = Expr::Binary(operator, Box::new(left), Box::new(right));
         }
         Ok(left)
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, FormulaError> {
+    /// Excel's `^` is left-associative: `2^3^2` is 64.
+    fn parse_power(&mut self) -> Result<Expr, FormulaError> {
+        let mut left = self.parse_unary()?;
+        loop {
+            self.skip_space();
+            if self.peek() != Some(b'^') {
+                break;
+            }
+            self.offset += 1;
+            let right = self.parse_unary()?;
+            left = Expr::Binary(BinaryOp::Power, Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_unary(&mut self) -> Result<Expr, FormulaError> {
         self.skip_space();
         match self.peek() {
             Some(b'-') => {
                 self.offset += 1;
-                Ok(Expr::UnaryMinus(Box::new(self.parse_primary()?)))
+                Ok(Expr::UnaryMinus(Box::new(self.parse_unary()?)))
             }
+            Some(b'+') => {
+                self.offset += 1;
+                self.parse_unary()
+            }
+            _ => self.parse_postfix(),
+        }
+    }
+
+    fn parse_postfix(&mut self) -> Result<Expr, FormulaError> {
+        let mut expression = self.parse_primary()?;
+        loop {
+            self.skip_space();
+            if self.peek() != Some(b'%') {
+                break;
+            }
+            self.offset += 1;
+            expression = Expr::Percent(Box::new(expression));
+        }
+        Ok(expression)
+    }
+
+    fn parse_primary(&mut self) -> Result<Expr, FormulaError> {
+        self.skip_space();
+        match self.peek() {
             Some(b'(') => {
                 self.offset += 1;
                 let expression = self.parse_comparison()?;
@@ -1677,6 +1857,15 @@ fn parse_function_name(name: &str) -> Result<Function, FormulaError> {
         "EDATE" => Ok(Function::EDate),
         "EOMONTH" => Ok(Function::EoMonth),
         "WEEKDAY" => Ok(Function::Weekday),
+        "ISBLANK" => Ok(Function::IsBlank),
+        "ISNUMBER" => Ok(Function::IsNumber),
+        "ISTEXT" => Ok(Function::IsText),
+        "ISLOGICAL" => Ok(Function::IsLogical),
+        "ISERROR" => Ok(Function::IsError),
+        "N" => Ok(Function::N),
+        "T" => Ok(Function::T),
+        "SUMPRODUCT" => Ok(Function::SumProduct),
+        "MEDIAN" => Ok(Function::Median),
         _ => Err(FormulaError::UnsupportedFunction(name.to_ascii_uppercase())),
     }
 }
@@ -2120,6 +2309,118 @@ mod tests {
     }
 
     #[test]
+    fn applies_excel_operator_precedence_for_power_percent_and_concatenation() {
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(0, 0), 3.0);
+        workbook.set_text(cell(1, 0), "x");
+        for (column, formula, expected) in [
+            (1, "=-2^2", Value::Number(4.0)),
+            (2, "=2^3^2", Value::Number(64.0)),
+            (3, "=2*3^2+1", Value::Number(19.0)),
+            (4, "=50%*2", Value::Number(1.0)),
+            (5, "=10%%", Value::Number(0.001)),
+            (6, "=A1^2%", Value::Number(3_f64.powf(0.02))),
+            (7, "=\"a\"&1&TRUE&A2", Value::Text("a1TRUEx".into())),
+            (8, "=1+2&\"x\"", Value::Text("3x".into())),
+            (9, "=\"1\"&\"2\"=12", Value::Boolean(false)),
+            (10, "=+A1--A1", Value::Number(6.0)),
+            (11, "=4^0.5", Value::Number(2.0)),
+            (12, "=0^0", Value::Error(CalcError::InvalidNumber)),
+            (13, "=(-8)^(1/3)", Value::Error(CalcError::InvalidNumber)),
+            (14, "=10^400", Value::Error(CalcError::InvalidNumber)),
+            (15, "=A2^2", Value::Error(CalcError::InvalidValue)),
+            (16, "=A2%", Value::Error(CalcError::InvalidValue)),
+            (17, "=\"a\"&1/0", Value::Error(CalcError::DivisionByZero)),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
+        }
+        assert_eq!(
+            workbook.set_formula(cell(2, 0), "=2^"),
+            Err(FormulaError::UnexpectedToken(2))
+        );
+        assert_eq!(
+            workbook.set_formula(cell(2, 0), "=%2"),
+            Err(FormulaError::UnexpectedToken(0))
+        );
+    }
+
+    #[test]
+    fn inspects_value_types_without_propagating_errors() {
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(0, 0), 2.0);
+        workbook.set_text(cell(1, 0), "note");
+        workbook.set_boolean(cell(2, 0), true);
+        workbook.clear(cell(3, 0));
+        workbook.set_formula(cell(4, 0), "=1/0").unwrap();
+        for (column, formula, expected) in [
+            (1, "=ISBLANK(A4)", Value::Boolean(true)),
+            (2, "=ISBLANK(A5)", Value::Boolean(false)),
+            (3, "=ISNUMBER(A1)", Value::Boolean(true)),
+            (4, "=ISNUMBER(A2)", Value::Boolean(false)),
+            (5, "=ISTEXT(A2)", Value::Boolean(true)),
+            (6, "=ISLOGICAL(A3)", Value::Boolean(true)),
+            (7, "=ISERROR(A5)", Value::Boolean(true)),
+            (8, "=ISERROR(A1)", Value::Boolean(false)),
+            (9, "=N(A3)", Value::Number(1.0)),
+            (10, "=N(A2)", Value::Number(0.0)),
+            (11, "=N(A5)", Value::Error(CalcError::DivisionByZero)),
+            (12, "=T(A2)", Value::Text("note".into())),
+            (13, "=T(A1)", Value::Text(String::new())),
+            (
+                14,
+                "=ISNUMBER(A1:A2)",
+                Value::Error(CalcError::InvalidArguments),
+            ),
+            (15, "=ISBLANK()", Value::Error(CalcError::InvalidArguments)),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
+        }
+    }
+
+    #[test]
+    fn evaluates_sumproduct_and_median_over_aligned_ranges() {
+        let mut workbook = Workbook::default();
+        for (row, quantity, price) in [(0, 2.0, 10.0), (1, 3.0, 20.0), (2, 4.0, 30.0)] {
+            workbook.set_number(cell(row, 0), quantity);
+            workbook.set_number(cell(row, 1), price);
+        }
+        workbook.set_text(cell(3, 0), "n/a");
+        workbook.set_number(cell(3, 1), 40.0);
+        for (column, formula, expected) in [
+            (2, "=SUMPRODUCT(A1:A3,B1:B3)", Value::Number(200.0)),
+            (3, "=SUMPRODUCT(A1:A4,B1:B4)", Value::Number(200.0)),
+            (4, "=SUMPRODUCT(A1:A3)", Value::Number(9.0)),
+            (5, "=SUMPRODUCT(A1,B1)", Value::Number(20.0)),
+            (
+                6,
+                "=SUMPRODUCT(A1:A3,B1:B2)",
+                Value::Error(CalcError::InvalidValue),
+            ),
+            (
+                7,
+                "=SUMPRODUCT()",
+                Value::Error(CalcError::InvalidArguments),
+            ),
+            (8, "=MEDIAN(B1:B4)", Value::Number(25.0)),
+            (9, "=MEDIAN(A1:A4)", Value::Number(3.0)),
+            (10, "=MEDIAN(A4)", Value::Error(CalcError::InvalidArguments)),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
+        }
+        workbook.set_formula(cell(4, 0), "=1/0").unwrap();
+        workbook
+            .set_formula(cell(1, 2), "=SUMPRODUCT(A1:A5,B1:B5)")
+            .unwrap();
+        assert_eq!(
+            workbook.value(cell(1, 2)),
+            Value::Error(CalcError::DivisionByZero)
+        );
+    }
+
+    #[test]
     fn keeps_clock_dependent_date_functions_out_of_the_engine() {
         let mut workbook = Workbook::default();
         assert_eq!(
@@ -2136,8 +2437,8 @@ mod tests {
     fn rejects_unsupported_functions_and_oversized_ranges() {
         let mut workbook = Workbook::default();
         assert_eq!(
-            workbook.set_formula(cell(0, 0), "=MEDIAN(A1:A2)"),
-            Err(FormulaError::UnsupportedFunction("MEDIAN".into()))
+            workbook.set_formula(cell(0, 0), "=CUBEVALUE(A1:A2)"),
+            Err(FormulaError::UnsupportedFunction("CUBEVALUE".into()))
         );
         assert_eq!(
             workbook.set_formula(cell(0, 0), "=SUM(A1:ZZZ999999)"),
