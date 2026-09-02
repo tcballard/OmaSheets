@@ -63,6 +63,13 @@ jobs:
         run: |
           cargo test --workspace --locked --release
           cargo build --locked --release -p omasheets-corpus
+          cargo build --locked --release -p omasheets-calc --bin omasheets-calc-bench
+      - name: Record an owned calculation smoke benchmark
+        run: |
+          mkdir -p "$RUNNER_TEMP/omasheets-m0"
+          target/release/omasheets-calc-bench \
+            --formulas 10000 --iterations 10 \
+            > "$RUNNER_TEMP/omasheets-m0/calc-benchmark.json"
       - name: Exercise one immutable Excel-syntax workbook
         run: |
           evidence="$RUNNER_TEMP/omasheets-m0"
@@ -105,6 +112,7 @@ jobs:
           name: omasheets-m0-corpus-smoke-linux-x86_64
           path: |
             ${{ runner.temp }}/omasheets-m0/fixture.json
+            ${{ runner.temp }}/omasheets-m0/calc-benchmark.json
             ${{ runner.temp }}/omasheets-m0/manifest.jsonl
             ${{ runner.temp }}/omasheets-m0/score.json
             ${{ runner.temp }}/omasheets-m0/performance.json
