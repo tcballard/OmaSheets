@@ -8,13 +8,14 @@ not connected to the v0.0.2 LibreOffice compatibility product.
 The current syntax slice includes numeric, boolean and quoted-text literals;
 A1 references (including absolute markers); unquoted (`Inputs!A1`) and quoted
 (`'Owner''s Data'!A1`) cross-sheet references; arithmetic and comparison
-operators; parentheses; and bounded rectangular ranges. Forty-one function
+operators; parentheses; and bounded rectangular ranges. Forty-five function
 names are implemented across the initial head:
 
 - aggregate: `SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `PRODUCT`;
 - math: `ABS`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `INT`, `MOD`, `POWER`, `SQRT`;
 - logical: `IF`, `AND`, `OR`, `NOT`, `IFERROR`.
 - conditional aggregate: `COUNTIF`, `SUMIF`;
+- exact lookup: `INDEX`, `MATCH`, `VLOOKUP`, `XLOOKUP`;
 - extended math: `SIGN`, `CEILING`, `FLOOR`, `TRUNC`, `EXP`, `LN`, `LOG`,
   `LOG10`, `PI`;
 - text: `LEN`, `LEFT`, `RIGHT`, `MID`, `TRIM`, `UPPER`, `LOWER`, `CONCAT`
@@ -31,6 +32,12 @@ not yet accepted.
 Cross-sheet ranges qualify the first endpoint (`Inputs!A1:A10`). External
 workbook references, 3D references, and a separately qualified second range
 endpoint are not yet accepted.
+
+The lookup slice is deliberately exact-match only. `MATCH` accepts an omitted
+or zero match mode, `VLOOKUP` requires `FALSE`, and `XLOOKUP` supports its
+optional not-found result. Approximate, wildcard, reverse, and binary-search
+modes remain explicit invalid arguments until their compatibility semantics are
+implemented and tested.
 
 Run its focused checks with:
 
