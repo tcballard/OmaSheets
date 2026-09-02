@@ -490,6 +490,8 @@ fn import_ranges_with_names(
         })
         .collect();
     let mut workbook = Workbook::default();
+    // One recalculation for the whole import instead of one per cell.
+    workbook.begin_bulk();
     for sheet in &sheets {
         workbook.define_sheet(sheet.index, sheet.name.clone());
     }
@@ -536,6 +538,7 @@ fn import_ranges_with_names(
         }
     }
     let formula_cells_loaded = stored_formula_values.len();
+    workbook.end_bulk();
     Ok(ImportedWorkbook {
         workbook,
         sheets,
