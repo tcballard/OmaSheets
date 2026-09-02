@@ -4,7 +4,7 @@
 //! matching `omasheets_calc::serial_date`; workbooks that declare the 1904 date
 //! system are rejected rather than silently offset by 1462 days.
 
-use calamine::{CellErrorType, Data, Range, Reader, Xlsx, open_workbook};
+use calamine::{CellErrorType, Data, Range, Reader, Xlsx};
 use omasheets_calc::serial_date::DATE_SYSTEM;
 use omasheets_calc::{CalcError, CellId, FormulaError, Value, Workbook};
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::File;
-use std::io::Read;
+use std::io::{BufReader, Cursor, Read, Seek, Write};
 use std::path::Path;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -94,6 +94,9 @@ pub struct ScoreReport {
     pub unsupported_functions: BTreeMap<String, usize>,
     /// Compile-failure kinds and how many formula cells hit each.
     pub unsupported_reasons: BTreeMap<String, usize>,
+    /// Sheet entries without a worksheet part that the importer skipped.
+    #[serde(default)]
+    pub skipped_sheets: Vec<String>,
 }
 
 pub const ENGINE_NAME: &str = "omasheets-owned-m0";
@@ -115,6 +118,9 @@ pub struct ImportedWorkbook {
     /// Always `"1900"`: the importer refuses every other date system.
     pub date_system: &'static str,
     pub unsupported: Vec<UnsupportedFormula>,
+    /// Sheets named in `xl/workbook.xml` without a worksheet part, skipped by
+    /// [`import_xlsx`]'s in-memory repair; empty for well-formed packages.
+    pub skipped_sheets: Vec<String>,
     stored_formula_values: Vec<(CellId, Value)>,
     formula_cells_observed: usize,
     formula_cells_loaded: usize,
@@ -180,6 +186,7 @@ impl ImportedWorkbook {
             unsupported_formulas: parity.unsupported_formulas,
             unsupported_functions: self.unsupported_functions(),
             unsupported_reasons: self.unsupported_reasons(),
+            skipped_sheets: self.skipped_sheets.clone(),
         }
     }
 }
@@ -231,8 +238,7 @@ impl std::error::Error for ImportError {}
 
 pub fn import_xlsx(path: &Path, limits: ImportLimits) -> Result<ImportedWorkbook, ImportError> {
     let source_sha256 = hash_file(path)?;
-    let mut source: Xlsx<_> = open_workbook(path)
-        .map_err(|error: calamine::XlsxError| ImportError::Open(error.to_string()))?;
+    let (mut source, skipped_sheets) = open_repaired(path)?;
     check_date_system(source.has_1904_epoch())?;
     let sheet_names = source.sheet_names();
     if sheet_names.len() > limits.max_sheets {
@@ -257,7 +263,152 @@ pub fn import_xlsx(path: &Path, limits: ImportLimits) -> Result<ImportedWorkbook
             .map_err(|error| ImportError::Read(error.to_string()))?;
         ranges.push((name.clone(), values, formulas));
     }
-    import_ranges_with_names(ranges, defined_names, source_sha256, limits)
+    let mut imported = import_ranges_with_names(ranges, defined_names, source_sha256, limits)?;
+    imported.skipped_sheets = skipped_sheets;
+    Ok(imported)
+}
+
+/// Opens a workbook, and when Calamine refuses it because a `<sheet>` entry
+/// carries an empty or dangling relationship id, opens an in-memory copy of
+/// the package whose `xl/workbook.xml` omits those entries.
+///
+/// Every such sheet in the frozen Enron sample is a `veryHidden` legacy macro
+/// module left behind by an `.xls` conversion: it has no worksheet part, so
+/// nothing is lost by skipping it, and the names of the skipped sheets are
+/// reported so the omission is never silent. The source file is never
+/// modified; the repair exists only in memory for this import.
+/// A workbook reader over either the file itself or the in-memory repaired
+/// copy, with the names of the sheet entries the repair skipped.
+type OpenedWorkbook = (Xlsx<Box<dyn ReadSeek>>, Vec<String>);
+
+fn open_repaired(path: &Path) -> Result<OpenedWorkbook, ImportError> {
+    let file = File::open(path).map_err(|error| ImportError::Open(error.to_string()))?;
+    match Xlsx::new(Box::new(BufReader::new(file)) as Box<dyn ReadSeek>) {
+        Ok(workbook) => Ok((workbook, Vec::new())),
+        Err(calamine::XlsxError::RelationshipNotFound) => {
+            let (repaired, skipped) = repair_dangling_sheets(path)?;
+            if skipped.is_empty() {
+                return Err(ImportError::Open("Relationship not found".into()));
+            }
+            let workbook = Xlsx::new(Box::new(Cursor::new(repaired)) as Box<dyn ReadSeek>)
+                .map_err(|error| ImportError::Open(error.to_string()))?;
+            Ok((workbook, skipped))
+        }
+        Err(error) => Err(ImportError::Open(error.to_string())),
+    }
+}
+
+pub trait ReadSeek: Read + Seek {}
+impl<T: Read + Seek> ReadSeek for T {}
+
+/// Largest `xl/workbook.xml` the repair will rewrite; real workbook parts are
+/// a few kilobytes, and the copy is held in memory.
+const MAX_WORKBOOK_PART_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Rebuilds the package without the `<sheet>` entries whose relationship id
+/// is empty or absent from `xl/_rels/workbook.xml.rels`, copying every other
+/// part byte for byte. Returns the new package and the skipped sheet names.
+fn repair_dangling_sheets(path: &Path) -> Result<(Vec<u8>, Vec<String>), ImportError> {
+    let file = File::open(path).map_err(|error| ImportError::Open(error.to_string()))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|error| ImportError::Open(error.to_string()))?;
+    let read_part =
+        |archive: &mut zip::ZipArchive<File>, name: &str| -> Result<String, ImportError> {
+            let mut part = archive
+                .by_name(name)
+                .map_err(|error| ImportError::Open(format!("{name}: {error}")))?;
+            if part.size() > MAX_WORKBOOK_PART_BYTES {
+                return Err(ImportError::Open(format!(
+                    "{name} exceeds the repair size limit"
+                )));
+            }
+            let mut text = String::new();
+            part.read_to_string(&mut text)
+                .map_err(|error| ImportError::Open(format!("{name}: {error}")))?;
+            Ok(text)
+        };
+    let relationships = read_part(&mut archive, "xl/_rels/workbook.xml.rels")?;
+    let workbook = read_part(&mut archive, "xl/workbook.xml")?;
+    let known_ids: std::collections::HashSet<String> =
+        attribute_values(&relationships, "Id").into_iter().collect();
+    let (rewritten, skipped) = drop_dangling_sheets(&workbook, &known_ids);
+    if skipped.is_empty() {
+        return Ok((Vec::new(), skipped));
+    }
+
+    let mut output = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index_raw(index)
+            .map_err(|error| ImportError::Open(error.to_string()))?;
+        if entry.name() == "xl/workbook.xml" {
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            output
+                .start_file("xl/workbook.xml", options)
+                .and_then(|()| output.write_all(rewritten.as_bytes()).map_err(Into::into))
+                .map_err(|error| ImportError::Open(error.to_string()))?;
+        } else {
+            output
+                .raw_copy_file(entry)
+                .map_err(|error| ImportError::Open(error.to_string()))?;
+        }
+    }
+    let cursor = output
+        .finish()
+        .map_err(|error| ImportError::Open(error.to_string()))?;
+    Ok((cursor.into_inner(), skipped))
+}
+
+/// Values of every `name="…"` attribute in `xml`, in document order. The
+/// package parts involved are machine-written, so a lexical scan is enough.
+fn attribute_values(xml: &str, name: &str) -> Vec<String> {
+    let needle = format!("{name}=\"");
+    let mut values = Vec::new();
+    let mut rest = xml;
+    while let Some(start) = rest.find(&needle) {
+        let after = &rest[start + needle.len()..];
+        let Some(end) = after.find('"') else { break };
+        values.push(after[..end].to_string());
+        rest = &after[end + 1..];
+    }
+    values
+}
+
+/// Removes `<sheet …/>` elements whose `r:id` is empty or unknown and returns
+/// the rewritten XML with the names of the removed sheets.
+fn drop_dangling_sheets(
+    workbook_xml: &str,
+    known_ids: &std::collections::HashSet<String>,
+) -> (String, Vec<String>) {
+    let mut output = String::with_capacity(workbook_xml.len());
+    let mut skipped = Vec::new();
+    let mut rest = workbook_xml;
+    while let Some(start) = rest.find("<sheet ") {
+        let Some(length) = rest[start..].find("/>") else {
+            break;
+        };
+        let element = &rest[start..start + length + 2];
+        let id = attribute_values(element, "r:id").into_iter().next();
+        let dangling = match id {
+            Some(id) => id.is_empty() || !known_ids.contains(&id),
+            None => true,
+        };
+        output.push_str(&rest[..start]);
+        if dangling {
+            skipped.push(
+                attribute_values(element, "name")
+                    .into_iter()
+                    .next()
+                    .unwrap_or_default(),
+            );
+        } else {
+            output.push_str(element);
+        }
+        rest = &rest[start + length + 2..];
+    }
+    output.push_str(rest);
+    (output, skipped)
 }
 
 fn check_date_system(has_1904_epoch: bool) -> Result<(), ImportError> {
@@ -394,6 +545,7 @@ fn import_ranges_with_names(
         source_sha256,
         date_system: DATE_SYSTEM,
         unsupported,
+        skipped_sheets: Vec::new(),
         stored_formula_values,
         formula_cells_observed: observed_formulas,
         formula_cells_loaded,
@@ -472,6 +624,112 @@ fn values_match(stored: &Value, calculated: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A minimal package: one real worksheet plus `<sheet>` entries that
+    /// point nowhere, the shape left behind by converted legacy macro sheets.
+    fn package_with_dangling_sheets(dangling: &[(&str, &str)]) -> Vec<u8> {
+        let sheets: String = dangling
+            .iter()
+            .map(|(name, id)| {
+                format!(r#"<sheet name="{name}" sheetId="9" state="veryHidden" r:id="{id}"/>"#)
+            })
+            .collect();
+        let parts = [
+            (
+                "[Content_Types].xml",
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#.to_string(),
+            ),
+            (
+                "_rels/.rels",
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#.to_string(),
+            ),
+            (
+                "xl/workbook.xml",
+                format!(
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/>{sheets}</sheets><definedNames><definedName name="Total">Data!$A$3</definedName></definedNames></workbook>"#
+                ),
+            ),
+            (
+                "xl/_rels/workbook.xml.rels",
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#.to_string(),
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>2</v></c></row><row r="2"><c r="A2"><v>3</v></c></row><row r="3"><c r="A3"><f>A1+A2</f><v>5</v></c></row></sheetData></worksheet>"#.to_string(),
+            ),
+        ];
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, body) in parts {
+            writer
+                .start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(body.as_bytes()).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    fn temporary_xlsx(bytes: &[u8]) -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "omasheets-xlsx-{}-{nonce}.xlsx",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn dangling_sheet_entries_are_skipped_in_memory_and_reported() {
+        let path = temporary_xlsx(&package_with_dangling_sheets(&[
+            ("Module1", ""),
+            ("Code", "rId7"),
+        ]));
+        let imported = import_xlsx(&path, ImportLimits::default()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(imported.sheets.len(), 1);
+        assert_eq!(imported.skipped_sheets, vec!["Module1", "Code"]);
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 2, 0)),
+            Value::Number(5.0)
+        );
+        let report = imported.report();
+        assert_eq!(report.skipped_sheets, vec!["Module1", "Code"]);
+        assert_eq!(report.stored_values_matched, 1);
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("\"skipped_sheets\":[\"Module1\",\"Code\"]"));
+    }
+
+    #[test]
+    fn well_formed_packages_are_not_rewritten() {
+        let path = temporary_xlsx(&package_with_dangling_sheets(&[]));
+        let imported = import_xlsx(&path, ImportLimits::default()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert!(imported.skipped_sheets.is_empty());
+        assert_eq!(imported.report().skipped_sheets, Vec::<String>::new());
+    }
+
+    #[test]
+    fn dropping_dangling_sheets_keeps_every_other_byte() {
+        let known: std::collections::HashSet<String> = ["rId1".to_string()].into_iter().collect();
+        let xml = r#"<sheets><sheet name="A" sheetId="1" r:id="rId1"/><sheet name="M" sheetId="2" state="veryHidden" r:id=""/><sheet name="N" sheetId="3" r:id="rId9"/></sheets><definedNames/>"#;
+        let (rewritten, skipped) = drop_dangling_sheets(xml, &known);
+        assert_eq!(skipped, vec!["M", "N"]);
+        assert_eq!(
+            rewritten,
+            r#"<sheets><sheet name="A" sheetId="1" r:id="rId1"/></sheets><definedNames/>"#
+        );
+        assert_eq!(attribute_values(xml, "name"), vec!["A", "M", "N"]);
+        let (unchanged, none) =
+            drop_dangling_sheets(r#"<sheets><sheet name="A" r:id="rId1"/></sheets>"#, &known);
+        assert!(none.is_empty());
+        assert_eq!(
+            unchanged,
+            r#"<sheets><sheet name="A" r:id="rId1"/></sheets>"#
+        );
+    }
     use calamine::{Cell, ExcelDateTime, ExcelDateTimeType};
 
     fn date_cell(row: u32, column: u32, serial: f64) -> Cell<Data> {
