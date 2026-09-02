@@ -2996,8 +2996,8 @@ fn criterion_matches(candidate: Value, criterion: Value) -> Result<bool, CalcErr
         let left = left.to_lowercase();
         let right = right.to_lowercase();
         return Ok(match operator {
-            BinaryOp::Equal => left == right,
-            BinaryOp::NotEqual => left != right,
+            BinaryOp::Equal => wildcard_matches(&right, &left),
+            BinaryOp::NotEqual => !wildcard_matches(&right, &left),
             BinaryOp::Less => left < right,
             BinaryOp::LessOrEqual => left <= right,
             BinaryOp::Greater => left > right,
@@ -3013,8 +3013,58 @@ fn criterion_matches(candidate: Value, criterion: Value) -> Result<bool, CalcErr
     }
 }
 
+/// Excel's criteria wildcards: `?` is one character, `*` any run, `~`
+/// escapes the next character. Both sides are already lower-cased.
+fn wildcard_matches(pattern: &str, text: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let text: Vec<char> = text.chars().collect();
+    let (mut p, mut t) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while t < text.len() {
+        match pattern.get(p) {
+            Some('*') => {
+                star = Some((p, t));
+                p += 1;
+            }
+            Some('?') => {
+                p += 1;
+                t += 1;
+            }
+            Some(&character) => {
+                let literal = if character == '~' {
+                    p += 1;
+                    pattern.get(p).copied()
+                } else {
+                    Some(character)
+                };
+                if literal == Some(text[t]) {
+                    p += 1;
+                    t += 1;
+                } else if let Some((star_p, star_t)) = star {
+                    p = star_p + 1;
+                    t = star_t + 1;
+                    star = Some((star_p, star_t + 1));
+                } else {
+                    return false;
+                }
+            }
+            None => {
+                let Some((star_p, star_t)) = star else {
+                    return false;
+                };
+                p = star_p + 1;
+                t = star_t + 1;
+                star = Some((star_p, star_t + 1));
+            }
+        }
+    }
+    pattern[p..].iter().all(|character| *character == '*')
+}
+
+/// Splits a criterion string into its comparison and operand. The operand
+/// keeps its spacing when it is text (Excel matches `"Ltd "` only against
+/// `"Ltd "`); numbers and booleans are recognised after trimming.
 fn parse_criterion(criterion: &str) -> (BinaryOp, Value) {
-    let criterion = criterion.trim();
     let (operator, operand) = if let Some(value) = criterion.strip_prefix("<=") {
         (BinaryOp::LessOrEqual, value)
     } else if let Some(value) = criterion.strip_prefix(">=") {
@@ -3030,14 +3080,14 @@ fn parse_criterion(criterion: &str) -> (BinaryOp, Value) {
     } else {
         (BinaryOp::Equal, criterion)
     };
-    let operand = operand.trim();
-    let value = if operand.is_empty() {
+    let trimmed = operand.trim();
+    let value = if trimmed.is_empty() {
         Value::Blank
-    } else if operand.eq_ignore_ascii_case("TRUE") {
+    } else if trimmed.eq_ignore_ascii_case("TRUE") {
         Value::Boolean(true)
-    } else if operand.eq_ignore_ascii_case("FALSE") {
+    } else if trimmed.eq_ignore_ascii_case("FALSE") {
         Value::Boolean(false)
-    } else if let Ok(value) = operand.parse::<f64>() {
+    } else if let Ok(value) = trimmed.parse::<f64>() {
         Value::Number(value)
     } else {
         Value::Text(operand.into())
@@ -3971,6 +4021,40 @@ mod tests {
             .unwrap();
         assert_eq!(workbook.value(cell(0, 2)), Value::Number(3.0));
         assert_eq!(workbook.value(cell(1, 2)), Value::Number(120.0));
+    }
+
+    #[test]
+    fn text_criteria_keep_their_spacing_and_match_wildcards() {
+        let mut workbook = Workbook::default();
+        workbook.set_text(cell(0, 0), "ABQ Energy Group, Ltd ");
+        workbook.set_text(cell(1, 0), "AEP Energy Services ");
+        workbook.set_text(cell(2, 0), "abq energy group, ltd ");
+        workbook.set_text(cell(3, 0), "Total*");
+        workbook.set_number(cell(4, 0), 7.0);
+        for row in 0..5 {
+            workbook.set_number(cell(row, 1), f64::from(1 << row));
+        }
+        workbook.set_text(cell(0, 2), "ABQ Energy Group, Ltd ");
+        let cases = [
+            // A criterion taken from a cell keeps its trailing space, so it
+            // matches the two spellings of that customer and nothing else.
+            ("=SUMIF(A1:A5,C1,B1:B5)", 5.0),
+            ("=SUMIF(A1:A5,\"ABQ Energy Group, Ltd\",B1:B5)", 0.0),
+            ("=COUNTIF(A1:A5,\"<>ABQ Energy Group, Ltd \")", 3.0),
+            ("=SUMIF(A1:A5,\"*Energy*\",B1:B5)", 7.0),
+            ("=COUNTIF(A1:A5,\"A?Q*\")", 2.0),
+            ("=COUNTIF(A1:A5,\"*Ltd \")", 2.0),
+            ("=COUNTIF(A1:A5,\"Total~*\")", 1.0),
+            ("=COUNTIF(A1:A5,\"Total*\")", 1.0),
+            ("=COUNTIF(A1:A5,\"*\")", 4.0),
+            ("=COUNTIF(A1:A5,\"<>*Services*\")", 4.0),
+            ("=COUNTIF(A1:A5,\" 7 \")", 1.0),
+        ];
+        for (column, (formula, expected)) in cases.into_iter().enumerate() {
+            let target = cell(6, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            assert_eq!(workbook.value(target), Value::Number(expected), "{formula}");
+        }
     }
 
     #[test]

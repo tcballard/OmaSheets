@@ -25,9 +25,10 @@ names are implemented across the initial head:
 invalid arity, invalid coercions and oversized ranges fail explicitly rather
 than silently producing a plausible number.
 
-The first `COUNTIF`/`SUMIF` criteria slice supports comparison prefixes and
-case-insensitive literal text. Wildcards and locale-specific number parsing are
-not yet accepted.
+`COUNTIF`/`SUMIF`-family criteria follow Excel: a comparison prefix (`>=`,
+`<>`, ...), case-insensitive text with its spacing kept (`"Ltd "` matches only
+`"Ltd "`), and the wildcards `?` and `*` with `~` as the escape. Locale-specific
+number parsing is not attempted.
 
 Cross-sheet ranges qualify the first endpoint (`Inputs!A1:A10`). External
 workbook references, 3D references, and a separately qualified second range
