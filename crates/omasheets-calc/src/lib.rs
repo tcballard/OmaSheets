@@ -511,6 +511,9 @@ pub struct Workbook {
     /// shares one node and one set of member edges.
     ranges: HashMap<RangeKey, usize>,
     generation: u64,
+    /// While a bulk load is open, commits record their cells here instead of
+    /// recalculating, and `end_bulk` evaluates everything once.
+    bulk: Option<Vec<usize>>,
     /// The cell whose formula is being evaluated, for implicit intersection
     /// and `ROW()`/`COLUMN()`. Evaluation is sequential, so a plain cell is
     /// enough.
@@ -530,6 +533,7 @@ impl Default for Workbook {
             defined_names: HashMap::new(),
             ranges: HashMap::new(),
             generation: 1,
+            bulk: None,
             evaluating: std::cell::Cell::new(CellId::new(0, 0, 0)),
         }
     }
@@ -779,6 +783,40 @@ impl Workbook {
     /// Every position of the range in row-major order with the cell that
     /// exists there, found by scanning the sheet index rather than by
     /// probing each position.
+    /// Visits every existing cell inside a rectangle as (row-major position,
+    /// cell index), scanning the sheet index rather than probing positions.
+    fn for_each_rectangle_cell(
+        &self,
+        anchor: CellId,
+        rows: usize,
+        columns: usize,
+        mut visit: impl FnMut(usize, usize),
+    ) {
+        let Some(sheet) = self.sheet_cells.get(&anchor.sheet) else {
+            return;
+        };
+        let last_row = anchor.row + (rows as u32 - 1);
+        let last_column = anchor.column + (columns as u32 - 1);
+        let position = |row: u32, column: u32| {
+            (row - anchor.row) as usize * columns + (column - anchor.column) as usize
+        };
+        if columns <= 8 && rows <= 4096 {
+            for row in anchor.row..=last_row {
+                for ((_, column), index) in sheet.range((row, anchor.column)..=(row, last_column)) {
+                    visit(position(row, *column), *index);
+                }
+            }
+        } else {
+            for ((row, column), index) in sheet.range((anchor.row, 0)..=(last_row, u32::MAX)) {
+                if *column >= anchor.column && *column <= last_column {
+                    visit(position(*row, *column), *index);
+                }
+            }
+        }
+    }
+
+    /// Every position of the range in row-major order with the cell that
+    /// exists there.
     fn range_cells(&self, node: usize) -> Vec<Option<usize>> {
         match self.range_shape(node) {
             RangeShape::Rectangle {
@@ -787,32 +825,9 @@ impl Workbook {
                 columns,
             } => {
                 let mut output = vec![None; rows * columns];
-                let Some(sheet) = self.sheet_cells.get(&anchor.sheet) else {
-                    return output;
-                };
-                let last_row = anchor.row + (rows as u32 - 1);
-                let last_column = anchor.column + (columns as u32 - 1);
-                let mut place = |row: u32, column: u32, index: usize| {
-                    output[(row - anchor.row) as usize * columns
-                        + (column - anchor.column) as usize] = Some(index);
-                };
-                if columns <= 8 && rows <= 4096 {
-                    for row in anchor.row..=last_row {
-                        for ((_, column), index) in
-                            sheet.range((row, anchor.column)..=(row, last_column))
-                        {
-                            place(row, *column, *index);
-                        }
-                    }
-                } else {
-                    for ((row, column), index) in
-                        sheet.range((anchor.row, 0)..=(last_row, u32::MAX))
-                    {
-                        if *column >= anchor.column && *column <= last_column {
-                            place(*row, *column, *index);
-                        }
-                    }
-                }
+                self.for_each_rectangle_cell(anchor, rows, columns, |position, index| {
+                    output[position] = Some(index);
+                });
                 output
             }
             RangeShape::Members => self.cells[node]
@@ -823,11 +838,27 @@ impl Workbook {
         }
     }
 
+    /// Every value of the range in row-major order, blank where no cell
+    /// exists, in one allocation.
     fn range_values(&self, node: usize) -> Vec<Value> {
-        self.range_cells(node)
-            .into_iter()
-            .map(|cell| cell.map_or(Value::Blank, |cell| self.cells[cell].value.clone()))
-            .collect()
+        match self.range_shape(node) {
+            RangeShape::Rectangle {
+                anchor,
+                rows,
+                columns,
+            } => {
+                let mut output = vec![Value::Blank; rows * columns];
+                self.for_each_rectangle_cell(anchor, rows, columns, |position, index| {
+                    output[position] = self.cells[index].value.clone();
+                });
+                output
+            }
+            RangeShape::Members => self.cells[node]
+                .dependencies
+                .iter()
+                .map(|member| self.cells[*member].value.clone())
+                .collect(),
+        }
     }
 
     fn ensure_cell(&mut self, cell: CellId) -> usize {
@@ -867,7 +898,30 @@ impl Workbook {
         entry.input = input;
         entry.dependencies = dependencies;
         entry.value = Value::Blank;
-        self.recalculate_from(changed)
+        if let Some(pending) = &mut self.bulk {
+            pending.push(changed);
+            return RecalcReport::default();
+        }
+        self.recalculate(&[changed])
+    }
+
+    /// Starts a bulk load: every edit until [`Workbook::end_bulk`] updates
+    /// the graph without evaluating, so an import of many cells costs one
+    /// recalculation instead of one per cell. Values read during a bulk load
+    /// are blank; cycles are still rejected per formula.
+    pub fn begin_bulk(&mut self) {
+        if self.bulk.is_none() {
+            self.bulk = Some(Vec::new());
+        }
+    }
+
+    /// Ends a bulk load and evaluates every cell it touched, with their
+    /// dependents, in one topological pass.
+    pub fn end_bulk(&mut self) -> RecalcReport {
+        match self.bulk.take() {
+            Some(seeds) => self.recalculate(&seeds),
+            None => RecalcReport::default(),
+        }
     }
 
     fn prospective_cycle(
@@ -945,15 +999,20 @@ impl Workbook {
         None
     }
 
-    fn recalculate_from(&mut self, changed: usize) -> RecalcReport {
+    fn recalculate(&mut self, seeds: &[usize]) -> RecalcReport {
         self.generation = self.generation.wrapping_add(1);
         if self.generation == 0 {
             self.dirty_marks.fill(0);
             self.generation = 1;
         }
         let generation = self.generation;
-        self.dirty_marks[changed] = generation;
-        let mut dirty = vec![changed];
+        let mut dirty = Vec::with_capacity(seeds.len());
+        for seed in seeds {
+            if self.dirty_marks[*seed] != generation {
+                self.dirty_marks[*seed] = generation;
+                dirty.push(*seed);
+            }
+        }
         let mut cursor = 0;
         // Rectangle nodes have no member edges: their pending count is the
         // number of dirty cells they cover, accumulated while marking.
@@ -3687,6 +3746,37 @@ mod tests {
         assert_eq!(range_node_count(&workbook), 1);
         workbook.set_number(cell(998, 0), 5.0);
         assert_eq!(workbook.value(cell(0, 2)), Value::Number(1008.0));
+    }
+
+    #[test]
+    fn bulk_loads_evaluate_once_and_land_the_same_values() {
+        let mut direct = Workbook::default();
+        let mut bulk = Workbook::default();
+        bulk.begin_bulk();
+        for workbook in [&mut direct, &mut bulk] {
+            workbook.set_formula(cell(0, 1), "=SUM(A1:A1000)").unwrap();
+            for row in 0..1000 {
+                workbook.set_number(cell(row, 0), 1.0);
+            }
+            workbook.set_formula(cell(1, 1), "=B1*2").unwrap();
+        }
+        assert_eq!(
+            bulk.value(cell(0, 1)),
+            Value::Blank,
+            "nothing evaluates until end_bulk"
+        );
+        let report = bulk.end_bulk();
+        assert_eq!(report.evaluated.len(), 1002);
+        assert_eq!(bulk.value(cell(0, 1)), Value::Number(1000.0));
+        assert_eq!(bulk.value(cell(1, 1)), direct.value(cell(1, 1)));
+        assert_eq!(bulk.end_bulk(), RecalcReport::default());
+        assert!(matches!(
+            bulk.set_formula(cell(500, 0), "=B2"),
+            Err(FormulaError::Cycle(_))
+        ));
+        let report = bulk.set_number(cell(999, 0), 2.0);
+        assert_eq!(report.evaluated.len(), 3);
+        assert_eq!(bulk.value(cell(1, 1)), Value::Number(2002.0));
     }
 
     #[test]
