@@ -2168,9 +2168,6 @@ impl Workbook {
                 }
                 for index in 0..length {
                     let candidate = self.range_value(lookup_node, index);
-                    if matches!(candidate, Value::Error(_)) {
-                        return candidate;
-                    }
                     if lookup_equal(&lookup, &candidate) {
                         return self.range_value(return_node, index);
                     }
@@ -2219,11 +2216,10 @@ fn match_position(
     if let Value::Error(error) = lookup {
         return Err(error.clone());
     }
+    // Error cells in the searched vector never match and never propagate,
+    // as in Excel: a `#REF!` among the keys leaves the lookup `#N/A`.
     if mode == MatchMode::Exact {
         for (index, candidate) in candidates.iter().enumerate() {
-            if let Value::Error(error) = candidate {
-                return Err(error.clone());
-            }
             if lookup_equal(lookup, candidate) {
                 return Ok(index);
             }
@@ -2233,7 +2229,7 @@ fn match_position(
     let populated: Vec<(usize, &Value)> = candidates
         .iter()
         .enumerate()
-        .filter(|(_, candidate)| !matches!(candidate, Value::Blank))
+        .filter(|(_, candidate)| !matches!(candidate, Value::Blank | Value::Error(_)))
         .collect();
     if populated.is_empty() {
         return Err(CalcError::NotAvailable);
@@ -2327,7 +2323,9 @@ fn positive_index(value: Value) -> Result<usize, CalcError> {
 fn lookup_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Text(left), Value::Text(right)) => left.eq_ignore_ascii_case(right),
-        (Value::Blank, _) | (_, Value::Blank) => false,
+        (Value::Blank, _) | (_, Value::Blank) | (Value::Error(_), _) | (_, Value::Error(_)) => {
+            false
+        }
         _ => left == right,
     }
 }
@@ -2768,10 +2766,11 @@ fn unary_number(values: &[Value], operation: impl FnOnce(f64) -> f64) -> Value {
     match number(values[0].clone()) {
         Ok(value) => {
             let result = operation(value);
-            if result.is_nan() {
-                Value::Error(CalcError::InvalidValue)
-            } else {
+            // Outside the function's domain (`SQRT(-1)`, `LN(0)`) is `#NUM!`.
+            if result.is_finite() {
                 Value::Number(result)
+            } else {
+                Value::Error(CalcError::InvalidNumber)
             }
         }
         Err(error) => Value::Error(error),
@@ -4135,6 +4134,52 @@ mod tests {
             let target = cell(6, column as u32);
             workbook.set_formula(target, formula).unwrap();
             assert_eq!(workbook.value(target), Value::Number(expected), "{formula}");
+        }
+    }
+
+    #[test]
+    fn lookups_skip_error_cells_and_math_domain_errors_are_num() {
+        let mut workbook = Workbook::default();
+        // A1 = #REF!, A2 = "k", A3 = 3; B1..B3 = 10, #DIV/0!, 30.
+        workbook.set_error(cell(0, 0), CalcError::InvalidReference);
+        workbook.set_text(cell(1, 0), "k");
+        workbook.set_number(cell(2, 0), 3.0);
+        workbook.set_number(cell(0, 1), 10.0);
+        workbook.set_error(cell(1, 1), CalcError::DivisionByZero);
+        workbook.set_number(cell(2, 1), 30.0);
+        let cases = [
+            (
+                "=VLOOKUP(\"k\",A1:B3,2,FALSE)",
+                Value::Error(CalcError::DivisionByZero),
+            ),
+            ("=VLOOKUP(3,A1:B3,2,FALSE)", Value::Number(30.0)),
+            (
+                "=VLOOKUP(\"zz\",A1:B3,2,FALSE)",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            ("=VLOOKUP(3,A1:B3,2,TRUE)", Value::Number(30.0)),
+            ("=MATCH(3,A1:A3,0)", Value::Number(3.0)),
+            (
+                "=MATCH(\"zz\",A1:A3,0)",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            ("=XLOOKUP(3,A1:A3,B1:B3)", Value::Number(30.0)),
+            (
+                "=XLOOKUP(\"zz\",A1:A3,B1:B3)",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            (
+                "=VLOOKUP(A1,A1:B3,2,FALSE)",
+                Value::Error(CalcError::InvalidReference),
+            ),
+            ("=SQRT(-1)", Value::Error(CalcError::InvalidNumber)),
+            ("=LN(0)", Value::Error(CalcError::InvalidNumber)),
+            ("=SQRT(16)", Value::Number(4.0)),
+        ];
+        for (column, (formula, expected)) in cases.into_iter().enumerate() {
+            let target = cell(6, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            assert_eq!(workbook.value(target), expected, "{formula}");
         }
     }
 
