@@ -49,6 +49,62 @@ class M0FixtureTests(unittest.TestCase):
             self.assertIn("<f>A3+B3</f><v>6</v>", sheet)
             self.assertNotIn("of:=", sheet)
 
+    def test_date_rows_add_a_styled_dates_sheet_with_excel_stored_values(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workbook = Path(temporary) / "dates.xlsx"
+            report = generate_m0_xlsx.generate(workbook, 1, date_rows=3)
+            self.assertEqual(report["date_rows"], 3)
+            self.assertEqual(report["date_system"], "1900")
+            self.assertEqual(report["date_value_cells"], 3)
+            self.assertEqual(report["date_formula_cells"], 21)
+            self.assertEqual(report["formula_cells"], 22)
+            self.assertEqual(report["header_cells"], 11)
+            self.assertEqual(report["logical_cells"], 38)
+            with zipfile.ZipFile(workbook) as archive:
+                names = archive.namelist()
+                self.assertIn("xl/worksheets/sheet2.xml", names)
+                self.assertIn("xl/styles.xml", names)
+                book = archive.read("xl/workbook.xml").decode()
+                styles = archive.read("xl/styles.xml").decode()
+                sheet = archive.read("xl/worksheets/sheet2.xml").decode()
+            self.assertIn('<sheet name="Dates" sheetId="2" r:id="rId2"/>', book)
+            self.assertNotIn("date1904", book)
+            self.assertIn('<xf numFmtId="14"', styles)
+            # 2023-12-31 is serial 45291 and a Sunday; EDATE and EOMONTH both
+            # land on 2024-01-31 (serial 45322).
+            self.assertIn('<c r="A2" s="1"><v>45291</v></c>', sheet)
+            self.assertIn("<f>YEAR(A2)</f><v>2023</v>", sheet)
+            self.assertIn("<f>MONTH(A2)</f><v>12</v>", sheet)
+            self.assertIn("<f>DAY(A2)</f><v>31</v>", sheet)
+            self.assertIn('s="1"><f>EDATE(A2,1)</f><v>45322</v>', sheet)
+            self.assertIn('s="1"><f>EOMONTH(A2,1)</f><v>45322</v>', sheet)
+            self.assertIn('s="1"><f>DATE(B2,C2,D2)</f><v>45291</v>', sheet)
+            self.assertIn("<f>WEEKDAY(A2)</f><v>1</v>", sheet)
+            # 2024-01-31 (row 4) shows EDATE clamping to the leap day.
+            self.assertIn('<c r="A4" s="1"><v>45322</v></c>', sheet)
+            self.assertIn('s="1"><f>EDATE(A4,1)</f><v>45351</v>', sheet)
+
+    def test_date_system_flag_only_marks_the_workbook_epoch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workbook = Path(temporary) / "dates-1904.xlsx"
+            report = generate_m0_xlsx.generate(
+                workbook, 1, date_rows=1, date_system="1904"
+            )
+            self.assertEqual(report["date_system"], "1904")
+            with zipfile.ZipFile(workbook) as archive:
+                book = archive.read("xl/workbook.xml").decode()
+            self.assertIn('<workbookPr date1904="1"/><sheets>', book)
+            with self.assertRaises(ValueError):
+                generate_m0_xlsx.payloads(1, 1, "1901")
+
+    def test_default_report_declares_no_date_rows(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            report = generate_m0_xlsx.generate(Path(temporary) / "plain.xlsx", 2)
+            self.assertEqual(report["date_rows"], 0)
+            self.assertEqual(report["date_formula_cells"], 0)
+            self.assertEqual(report["formula_cells"], 2)
+            self.assertEqual(report["date_system"], "1900")
+
     def test_generation_refuses_to_replace_existing_output(self):
         with tempfile.TemporaryDirectory() as temporary:
             workbook = Path(temporary) / "fixture.xlsx"
@@ -63,6 +119,12 @@ class M0FixtureTests(unittest.TestCase):
                 generate_m0_xlsx.main(["fixture.xlsx", "--rows", "0"])
             with self.assertRaises(SystemExit):
                 generate_m0_xlsx.main(["fixture.xlsx", "--rows", "100001"])
+            with self.assertRaises(SystemExit):
+                generate_m0_xlsx.main(["fixture.xlsx", "--date-rows", "-1"])
+            with self.assertRaises(SystemExit):
+                generate_m0_xlsx.main(["fixture.xlsx", "--date-rows", "10001"])
+            with self.assertRaises(SystemExit):
+                generate_m0_xlsx.main(["fixture.xlsx", "--date-system", "1901"])
 
 
 if __name__ == "__main__":

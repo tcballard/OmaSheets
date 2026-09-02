@@ -1,6 +1,11 @@
 //! Bounded `.xlsx` import into the owned OmaSheets M0 calculation engine.
+//!
+//! Date-formatted cells are imported as the raw serial numbers the file stores,
+//! matching `omasheets_calc::serial_date`; workbooks that declare the 1904 date
+//! system are rejected rather than silently offset by 1462 days.
 
 use calamine::{Data, Range, Reader, Xlsx, open_workbook};
+use omasheets_calc::serial_date::DATE_SYSTEM;
 use omasheets_calc::{CalcError, CellId, FormulaError, Value, Workbook};
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -51,6 +56,8 @@ pub struct ImportedWorkbook {
     pub workbook: Workbook,
     pub sheets: Vec<SheetInfo>,
     pub source_sha256: String,
+    /// Always `"1900"`: the importer refuses every other date system.
+    pub date_system: &'static str,
     pub unsupported: Vec<UnsupportedFormula>,
     stored_formula_values: Vec<(CellId, Value)>,
     formula_cells_observed: usize,
@@ -83,6 +90,7 @@ pub enum ImportError {
     TooManySheets { observed: usize, maximum: usize },
     TooManyCells { observed: usize, maximum: usize },
     TooManyFormulas { observed: usize, maximum: usize },
+    UnsupportedDateSystem { observed: &'static str },
 }
 
 impl fmt::Display for ImportError {
@@ -108,6 +116,12 @@ impl fmt::Display for ImportError {
                     "workbook has {observed} formulas; limit is {maximum}"
                 )
             }
+            Self::UnsupportedDateSystem { observed } => {
+                write!(
+                    formatter,
+                    "workbook uses the {observed} date system; only the {DATE_SYSTEM} date system is supported"
+                )
+            }
         }
     }
 }
@@ -118,6 +132,7 @@ pub fn import_xlsx(path: &Path, limits: ImportLimits) -> Result<ImportedWorkbook
     let source_sha256 = hash_file(path)?;
     let mut source: Xlsx<_> = open_workbook(path)
         .map_err(|error: calamine::XlsxError| ImportError::Open(error.to_string()))?;
+    check_date_system(source.has_1904_epoch())?;
     let sheet_names = source.sheet_names();
     if sheet_names.len() > limits.max_sheets {
         return Err(ImportError::TooManySheets {
@@ -137,6 +152,14 @@ pub fn import_xlsx(path: &Path, limits: ImportLimits) -> Result<ImportedWorkbook
         ranges.push((name.clone(), values, formulas));
     }
     import_ranges(ranges, source_sha256, limits)
+}
+
+fn check_date_system(has_1904_epoch: bool) -> Result<(), ImportError> {
+    if has_1904_epoch {
+        Err(ImportError::UnsupportedDateSystem { observed: "1904" })
+    } else {
+        Ok(())
+    }
 }
 
 fn hash_file(path: &Path) -> Result<String, ImportError> {
@@ -246,6 +269,7 @@ fn import_ranges(
         workbook,
         sheets,
         source_sha256,
+        date_system: DATE_SYSTEM,
         unsupported,
         stored_formula_values,
         formula_cells_observed: observed_formulas,
@@ -268,6 +292,8 @@ fn set_source_value(workbook: &mut Workbook, cell: CellId, value: &Data) {
             workbook.set_text(cell, value.clone());
         }
         Data::DateTime(value) => {
+            // The raw 1900-system serial; `check_date_system` has already
+            // rejected 1904 workbooks, so no epoch shift is applied.
             workbook.set_number(cell, value.as_f64());
         }
         Data::Error(_) => {
@@ -312,7 +338,18 @@ fn values_match(stored: &Value, calculated: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use calamine::Cell;
+    use calamine::{Cell, ExcelDateTime, ExcelDateTimeType};
+
+    fn date_cell(row: u32, column: u32, serial: f64) -> Cell<Data> {
+        Cell::new(
+            (row, column),
+            Data::DateTime(ExcelDateTime::new(
+                serial,
+                ExcelDateTimeType::DateTime,
+                false,
+            )),
+        )
+    }
 
     fn ranges(
         values: Vec<Cell<Data>>,
@@ -448,6 +485,78 @@ mod tests {
                 observed: 1,
                 maximum: 0,
             }
+        );
+    }
+
+    #[test]
+    fn imports_date_cells_as_serials_and_matches_stored_date_formula_values() {
+        let imported = import_ranges(
+            ranges(
+                vec![
+                    date_cell(0, 0, 45_322.0), // 2024-01-31
+                    Cell::new((0, 1), Data::Int(2024)),
+                    Cell::new((0, 2), Data::Int(1)),
+                    Cell::new((0, 3), Data::Int(31)),
+                    date_cell(0, 4, 45_351.0), // EDATE clamps to 2024-02-29
+                    date_cell(0, 5, 45_351.0),
+                    date_cell(0, 6, 45_322.0),
+                    Cell::new((0, 7), Data::Int(4)), // Wednesday
+                    date_cell(1, 0, 60.0),           // the fictitious 1900-02-29
+                    Cell::new((1, 1), Data::Int(1900)),
+                    Cell::new((1, 2), Data::Int(2)),
+                    Cell::new((1, 3), Data::Int(29)),
+                ],
+                vec![
+                    Cell::new((0, 1), "YEAR(A1)".into()),
+                    Cell::new((0, 2), "MONTH(A1)".into()),
+                    Cell::new((0, 3), "DAY(A1)".into()),
+                    Cell::new((0, 4), "EDATE(A1,1)".into()),
+                    Cell::new((0, 5), "EOMONTH(A1,1)".into()),
+                    Cell::new((0, 6), "DATE(B1,C1,D1)".into()),
+                    Cell::new((0, 7), "WEEKDAY(A1)".into()),
+                    Cell::new((1, 1), "YEAR(A2)".into()),
+                    Cell::new((1, 2), "MONTH(A2)".into()),
+                    Cell::new((1, 3), "DAY(A2)".into()),
+                ],
+            ),
+            "g".repeat(64),
+            ImportLimits::default(),
+        )
+        .unwrap();
+
+        assert_eq!(imported.date_system, "1900");
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 0, 0)),
+            Value::Number(45_322.0)
+        );
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 0, 6)),
+            Value::Number(45_322.0)
+        );
+        assert_eq!(
+            imported.parity(),
+            ParitySummary {
+                formula_cells_observed: 10,
+                formula_cells_loaded: 10,
+                formula_cells_compared: 10,
+                stored_values_matched: 10,
+                stored_values_mismatched: 0,
+                unsupported_formulas: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_the_1904_date_system_before_reading_any_cell() {
+        assert_eq!(check_date_system(false), Ok(()));
+        let error = check_date_system(true).unwrap_err();
+        assert_eq!(
+            error,
+            ImportError::UnsupportedDateSystem { observed: "1904" }
+        );
+        assert_eq!(
+            error.to_string(),
+            "workbook uses the 1904 date system; only the 1900 date system is supported"
         );
     }
 

@@ -3,6 +3,11 @@
 //! This crate deliberately starts with a narrow Excel-compatible surface. It
 //! proves the dependency and incremental-recalculation semantics independently
 //! of the candidate import engine; it is not yet the installed product engine.
+//!
+//! Dates are Excel 1900-system serial numbers; see [`serial_date`] for the
+//! boundary rules and the deliberately unsupported cases.
+
+pub mod serial_date;
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -33,9 +38,15 @@ pub enum Value {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CalcError {
+    /// Excel `#DIV/0!`.
     DivisionByZero,
+    /// Excel `#REF!` and `#N/A`.
     InvalidReference,
+    /// Excel `#VALUE!`.
     InvalidValue,
+    /// Excel `#NUM!`: a numeric argument outside the function's domain.
+    InvalidNumber,
+    /// Wrong argument count or shape for the function.
     InvalidArguments,
 }
 
@@ -149,6 +160,13 @@ enum Function {
     Match,
     VLookup,
     XLookup,
+    Date,
+    Year,
+    Month,
+    Day,
+    EDate,
+    EoMonth,
+    Weekday,
 }
 
 #[derive(Clone, Debug)]
@@ -441,6 +459,18 @@ impl Workbook {
         ) {
             return self.evaluate_lookup_function(function, arguments);
         }
+        if matches!(
+            function,
+            Function::Date
+                | Function::Year
+                | Function::Month
+                | Function::Day
+                | Function::EDate
+                | Function::EoMonth
+                | Function::Weekday
+        ) {
+            return self.evaluate_date_function(function, arguments);
+        }
 
         let mut values = Vec::new();
         for argument in arguments {
@@ -553,7 +583,74 @@ impl Workbook {
             | Function::Index
             | Function::Match
             | Function::VLookup
-            | Function::XLookup => Value::Error(CalcError::InvalidArguments),
+            | Function::XLookup
+            | Function::Date
+            | Function::Year
+            | Function::Month
+            | Function::Day
+            | Function::EDate
+            | Function::EoMonth
+            | Function::Weekday => Value::Error(CalcError::InvalidArguments),
+        }
+    }
+
+    /// Date functions take scalar serial arguments and return serials; every
+    /// calendar rule lives in [`serial_date`].
+    fn evaluate_date_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+        let expected_arity: &[usize] = match function {
+            Function::Date => &[3],
+            Function::Year | Function::Month | Function::Day => &[1],
+            Function::EDate | Function::EoMonth => &[2],
+            Function::Weekday => &[1, 2],
+            _ => unreachable!("dispatched above"),
+        };
+        if !expected_arity.contains(&arguments.len()) {
+            return Value::Error(CalcError::InvalidArguments);
+        }
+        let mut numbers = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            match date_number(self.evaluate(argument)) {
+                Ok(value) => numbers.push(value),
+                Err(error) => return Value::Error(error),
+            }
+        }
+        let result = match function {
+            Function::Date => serial_date::date_serial(numbers[0], numbers[1], numbers[2]),
+            Function::Year | Function::Month | Function::Day => {
+                serial_date::serial_from_number(numbers[0])
+                    .and_then(serial_date::civil_from_serial)
+                    .map(|date| match function {
+                        Function::Year => date.year,
+                        Function::Month => i64::from(date.month),
+                        _ => i64::from(date.day),
+                    })
+            }
+            Function::EDate | Function::EoMonth => {
+                match (
+                    serial_date::serial_from_number(numbers[0]),
+                    serial_offset(numbers[1]),
+                ) {
+                    (Ok(start), Ok(months)) if function == Function::EDate => {
+                        serial_date::add_months(start, months)
+                    }
+                    (Ok(start), Ok(months)) => serial_date::end_of_month(start, months),
+                    (Err(error), _) | (_, Err(error)) => Err(error),
+                }
+            }
+            Function::Weekday => {
+                match (
+                    serial_date::serial_from_number(numbers[0]),
+                    numbers.get(1).copied().map_or(Ok(1), serial_offset),
+                ) {
+                    (Ok(serial), Ok(return_type)) => serial_date::weekday(serial, return_type),
+                    (Err(error), _) | (_, Err(error)) => Err(error),
+                }
+            }
+            _ => unreachable!("dispatched above"),
+        };
+        match result {
+            Ok(value) => Value::Number(value as f64),
+            Err(error) => Value::Error(error),
         }
     }
 
@@ -798,6 +895,26 @@ fn lookup_equal(left: &Value, right: &Value) -> bool {
         (Value::Text(left), Value::Text(right)) => left.eq_ignore_ascii_case(right),
         _ => left == right,
     }
+}
+
+/// Date arguments accept numbers and blanks only. Booleans and text are
+/// `#VALUE!` rather than being coerced, so a text date never becomes a
+/// plausible serial without an explicit parse step.
+fn date_number(value: Value) -> Result<f64, CalcError> {
+    match value {
+        Value::Number(value) => Ok(value),
+        Value::Blank => Ok(0.0),
+        Value::Boolean(_) | Value::Text(_) => Err(CalcError::InvalidValue),
+        Value::Error(error) => Err(error),
+    }
+}
+
+/// Month offsets and weekday return types are truncated integers.
+fn serial_offset(value: f64) -> Result<i64, CalcError> {
+    if !value.is_finite() || value.abs() > 1.0e9 {
+        return Err(CalcError::InvalidNumber);
+    }
+    Ok(value.trunc() as i64)
 }
 
 fn number(value: Value) -> Result<f64, CalcError> {
@@ -1553,6 +1670,13 @@ fn parse_function_name(name: &str) -> Result<Function, FormulaError> {
         "MATCH" => Ok(Function::Match),
         "VLOOKUP" => Ok(Function::VLookup),
         "XLOOKUP" => Ok(Function::XLookup),
+        "DATE" => Ok(Function::Date),
+        "YEAR" => Ok(Function::Year),
+        "MONTH" => Ok(Function::Month),
+        "DAY" => Ok(Function::Day),
+        "EDATE" => Ok(Function::EDate),
+        "EOMONTH" => Ok(Function::EoMonth),
+        "WEEKDAY" => Ok(Function::Weekday),
         _ => Err(FormulaError::UnsupportedFunction(name.to_ascii_uppercase())),
     }
 }
@@ -1943,6 +2067,69 @@ mod tests {
             .unwrap_err();
         assert_eq!(error, FormulaError::UnknownSheet("Missing".into()));
         assert_eq!(workbook.value(CellId::new(0, 0, 0)), Value::Number(10.0));
+    }
+
+    #[test]
+    fn evaluates_date_functions_on_serials_with_the_1900_quirk() {
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(0, 0), 45_323.6); // 2024-02-01 14:24
+        workbook.set_number(cell(1, 0), 60.0); // Excel's fictitious 1900-02-29
+        workbook.set_text(cell(2, 0), "2024-02-01");
+        workbook.set_boolean(cell(3, 0), true);
+
+        for (column, formula, expected) in [
+            (1, "=DATE(2024,2,1)", Value::Number(45_323.0)),
+            (2, "=DATE(1900,2,29)", Value::Number(60.0)),
+            (3, "=DATE(1900,1,0)", Value::Number(0.0)),
+            (4, "=YEAR(A1)", Value::Number(2024.0)),
+            (5, "=MONTH(A1)", Value::Number(2.0)),
+            (6, "=DAY(A1)", Value::Number(1.0)),
+            (7, "=YEAR(A2)+MONTH(A2)+DAY(A2)", Value::Number(1931.0)),
+            (8, "=EDATE(A1,1)", Value::Number(45_352.0)),
+            (9, "=EDATE(DATE(2024,1,31),1)", Value::Number(45_351.0)),
+            (10, "=EOMONTH(A1,0)", Value::Number(45_351.0)),
+            (11, "=EOMONTH(A1,-1)", Value::Number(45_322.0)),
+            (12, "=WEEKDAY(A1)", Value::Number(5.0)),
+            (13, "=WEEKDAY(A1,2)", Value::Number(4.0)),
+            (14, "=DAY(A5)", Value::Number(0.0)),
+            (15, "=YEAR(A3)", Value::Error(CalcError::InvalidValue)),
+            (16, "=YEAR(A4)", Value::Error(CalcError::InvalidValue)),
+            (17, "=YEAR(-1)", Value::Error(CalcError::InvalidNumber)),
+            (
+                18,
+                "=DATE(10000,1,1)",
+                Value::Error(CalcError::InvalidNumber),
+            ),
+            (19, "=WEEKDAY(A1,4)", Value::Error(CalcError::InvalidNumber)),
+            (20, "=EDATE(A1)", Value::Error(CalcError::InvalidArguments)),
+            (
+                21,
+                "=YEAR(A1:A2)",
+                Value::Error(CalcError::InvalidArguments),
+            ),
+            (22, "=IFERROR(YEAR(A3),YEAR(A1))", Value::Number(2024.0)),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
+        }
+
+        let report = workbook.set_number(cell(0, 0), 45_292.0); // 2024-01-01
+        assert!(report.evaluated.contains(&cell(0, 4)));
+        assert_eq!(workbook.value(cell(0, 5)), Value::Number(1.0));
+        assert_eq!(workbook.value(cell(0, 8)), Value::Number(45_323.0));
+    }
+
+    #[test]
+    fn keeps_clock_dependent_date_functions_out_of_the_engine() {
+        let mut workbook = Workbook::default();
+        assert_eq!(
+            workbook.set_formula(cell(0, 0), "=TODAY()"),
+            Err(FormulaError::UnsupportedFunction("TODAY".into()))
+        );
+        assert_eq!(
+            workbook.set_formula(cell(0, 0), "=NOW()"),
+            Err(FormulaError::UnsupportedFunction("NOW".into()))
+        );
     }
 
     #[test]
