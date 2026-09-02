@@ -4,7 +4,7 @@
 //! matching `omasheets_calc::serial_date`; workbooks that declare the 1904 date
 //! system are rejected rather than silently offset by 1462 days.
 
-use calamine::{CellErrorType, Data, Range, Reader, Xlsx};
+use calamine::{Cell, CellErrorType, Data, Range, Reader, Xlsx, XlsxFormulaMetadata};
 use omasheets_calc::serial_date::DATE_SYSTEM;
 use omasheets_calc::{CalcError, CellId, FormulaError, Value, Workbook};
 use serde::{Deserialize, Serialize};
@@ -256,14 +256,60 @@ pub fn import_xlsx(path: &Path, limits: ImportLimits) -> Result<ImportedWorkbook
         let values = source
             .worksheet_range(name)
             .map_err(|error| ImportError::Read(error.to_string()))?;
-        let formulas = source
-            .worksheet_formula(name)
-            .map_err(|error| ImportError::Read(error.to_string()))?;
+        let formulas = read_formulas(&mut source, name)?;
         ranges.push((name.clone(), values, formulas));
     }
     let mut imported = import_ranges_with_names(ranges, defined_names, source_sha256, limits)?;
     imported.skipped_sheets = skipped_sheets;
     Ok(imported)
+}
+
+/// Reads a sheet's formulas, expanding shared formulas from their anchor
+/// cell. Calamine's `worksheet_formula` shifts a derived cell from the
+/// top-left of the shared `ref` range instead; Excel anchors a group at its
+/// first cell, which need not be that corner (a corner cell can carry its own
+/// formula), and the corpus has sheets whose derived cells came out shifted
+/// by a column as a result. A derived cell whose anchor appears later in the
+/// stream is resolved at the end; one whose anchor never appears is skipped.
+fn read_formulas<RS: Read + Seek>(
+    source: &mut Xlsx<RS>,
+    name: &str,
+) -> Result<Range<String>, ImportError> {
+    let read_error = |error: calamine::XlsxError| ImportError::Read(error.to_string());
+    let mut reader = source.worksheet_cells_reader(name).map_err(read_error)?;
+    let mut anchors: HashMap<usize, ((u32, u32), String)> = HashMap::new();
+    let mut cells = Vec::new();
+    let mut pending = Vec::new();
+    while let Some(record) = reader
+        .next_cell_with_formula_metadata()
+        .map_err(read_error)?
+    {
+        match record.formula {
+            Some(XlsxFormulaMetadata::Normal { formula }) => {
+                cells.push(Cell::new(record.pos, formula));
+            }
+            Some(XlsxFormulaMetadata::Shared {
+                shared_index,
+                formula,
+                ..
+            }) => {
+                anchors.insert(shared_index, (record.pos, formula.clone()));
+                cells.push(Cell::new(record.pos, formula));
+            }
+            Some(XlsxFormulaMetadata::SharedDerived { shared_index }) => {
+                pending.push((record.pos, shared_index));
+            }
+            _ => {}
+        }
+    }
+    for (position, shared_index) in pending {
+        if let Some((anchor, template)) = anchors.get(&shared_index) {
+            let formula =
+                calamine::expand_shared_formula(template, *anchor, position).map_err(read_error)?;
+            cells.push(Cell::new(position, formula));
+        }
+    }
+    Ok(Range::from_sparse(cells))
 }
 
 /// Opens a workbook, and when Calamine refuses it because a `<sheet>` entry
@@ -778,12 +824,19 @@ mod tests {
             dangling,
             r#"<definedName name="Total">Data!$A$3</definedName>"#,
             "",
+            "",
         )
     }
 
     /// A minimal package with the given dangling `<sheet>` entries, the given
-    /// `<definedNames>` body and extra `<c>` cells appended to row 1.
-    fn package(dangling: &[(&str, &str)], defined_names: &str, extra_cells: &str) -> Vec<u8> {
+    /// `<definedNames>` body, extra `<c>` cells appended to row 1 and extra
+    /// `<row>` elements appended after row 3.
+    fn package(
+        dangling: &[(&str, &str)],
+        defined_names: &str,
+        extra_cells: &str,
+        extra_rows: &str,
+    ) -> Vec<u8> {
         let sheets: String = dangling
             .iter()
             .map(|(name, id)| {
@@ -812,7 +865,7 @@ mod tests {
             (
                 "xl/worksheets/sheet1.xml",
                 format!(
-                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>2</v></c>{extra_cells}</row><row r="2"><c r="A2"><v>3</v></c></row><row r="3"><c r="A3"><f>A1+A2</f><v>5</v></c></row></sheetData></worksheet>"#
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>2</v></c>{extra_cells}</row><row r="2"><c r="A2"><v>3</v></c></row><row r="3"><c r="A3"><f>A1+A2</f><v>5</v></c></row>{extra_rows}</sheetData></worksheet>"#
                 ),
             ),
         ];
@@ -866,6 +919,7 @@ mod tests {
             &[],
             xml,
             r#"<c r="B1"><f>Total*10</f><v>20</v></c><c r="C1" t="str"><f>Joined</f><v>2x</v></c>"#,
+            "",
         ));
         let imported = import_xlsx(&path, ImportLimits::default()).unwrap();
         std::fs::remove_file(&path).unwrap();
@@ -878,6 +932,33 @@ mod tests {
             Value::Text("2x".into())
         );
         assert_eq!(imported.parity().stored_values_matched, 3);
+        assert_eq!(imported.parity().stored_values_mismatched, 0);
+    }
+
+    #[test]
+    fn shared_formulas_expand_from_their_anchor_cell() {
+        // The shared group is anchored at B5 with ref A5:B6; A5 carries its
+        // own formula. A6 is therefore B5's template shifted one row down
+        // and one column left (A5*2 = 140), not the ref corner's (B5*2 = 44).
+        let rows = r#"<row r="4"><c r="A4"><v>7</v></c><c r="B4"><v>11</v></c></row><row r="5"><c r="A5"><f>A4*10</f><v>70</v></c><c r="B5"><f t="shared" ref="A5:B6" si="0">B4*2</f><v>22</v></c></row><row r="6"><c r="A6"><f t="shared" si="0"/><v>140</v></c><c r="B6"><f t="shared" si="0"/><v>44</v></c></row>"#;
+        let path = temporary_xlsx(&package(
+            &[],
+            r#"<definedName name="Total">Data!$A$3</definedName>"#,
+            "",
+            rows,
+        ));
+        let imported = import_xlsx(&path, ImportLimits::default()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        for (cell, expected) in [
+            (CellId::new(0, 4, 0), 70.0),
+            (CellId::new(0, 4, 1), 22.0),
+            (CellId::new(0, 5, 0), 140.0),
+            (CellId::new(0, 5, 1), 44.0),
+        ] {
+            assert_eq!(imported.workbook.value(cell), Value::Number(expected));
+        }
+        assert_eq!(imported.parity().formula_cells_loaded, 5);
+        assert_eq!(imported.parity().stored_values_matched, 5);
         assert_eq!(imported.parity().stored_values_mismatched, 0);
     }
 
