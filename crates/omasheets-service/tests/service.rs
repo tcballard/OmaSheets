@@ -1,0 +1,412 @@
+use omasheets_core::{Actor, ActorKind, CellValue, Command, Literal, Severity};
+use omasheets_service::{Request, Response, Service, ServiceError};
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn temp_document() -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "omasheets-service-{}-{nonce}.omasheets",
+        std::process::id()
+    ))
+}
+
+fn human(id: &str) -> Actor {
+    Actor::new(ActorKind::Human, id)
+}
+
+fn agent(id: &str) -> Actor {
+    Actor::new(ActorKind::Agent, id)
+}
+
+fn sheet_of(service: &mut Service, path: &PathBuf, branch: Option<&str>) -> String {
+    match service
+        .handle(Request::Document {
+            path: path.clone(),
+            branch: branch.map(str::to_string),
+        })
+        .unwrap()
+    {
+        Response::Document(summary) => summary.sheets[0].id.to_string(),
+        other => panic!("{other:?}"),
+    }
+}
+
+fn append(
+    service: &mut Service,
+    path: &PathBuf,
+    branch: Option<&str>,
+    actor: Actor,
+    command: Command,
+) -> Result<Response, ServiceError> {
+    service.handle(Request::Append {
+        path: path.clone(),
+        branch: branch.map(str::to_string),
+        actor,
+        command,
+    })
+}
+
+#[test]
+fn one_api_drives_the_whole_branch_workflow() {
+    let path = temp_document();
+    let clock = std::sync::atomic::AtomicI64::new(0);
+    let mut service =
+        Service::new(move || clock.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1);
+    let created = service
+        .handle(Request::Create {
+            path: path.clone(),
+            name: "Plan".into(),
+            actor: human("tom"),
+        })
+        .unwrap();
+    assert!(matches!(created, Response::Created { ref branch, .. } if branch == "main"));
+
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::AddSheet {
+            name: "Model".into(),
+        },
+    )
+    .unwrap();
+    let sheet = sheet_of(&mut service, &path, None);
+    let sheet_id = omasheets_core::SheetId(omasheets_core::ObjectId::parse(&sheet).unwrap());
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::AddColumns {
+            sheet: sheet_id,
+            count: 2,
+            at: 0,
+        },
+    )
+    .unwrap();
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::AddRows {
+            sheet: sheet_id,
+            count: 3,
+            at: 0,
+            table: None,
+        },
+    )
+    .unwrap();
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::SetValue {
+            sheet: sheet_id,
+            a1: "A1".into(),
+            value: Literal::Number(4.0),
+        },
+    )
+    .unwrap();
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::SetFormula {
+            sheet: sheet_id,
+            a1: "B1".into(),
+            source: "=A1*2".into(),
+        },
+    )
+    .unwrap();
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::AddCheck {
+            name: "small".into(),
+            sheet: sheet_id,
+            a1: "A1".into(),
+            severity: Severity::Error,
+            message: "must be true".into(),
+        },
+    )
+    .unwrap();
+
+    // Sheets resolve by name as well as by id.
+    let by_name = service
+        .handle(Request::Cell {
+            path: path.clone(),
+            branch: None,
+            sheet: "Model".into(),
+            a1: "B1".into(),
+        })
+        .unwrap();
+    assert!(
+        matches!(by_name, Response::Cell(ref report) if report.value == CellValue::Number(8.0) && report.a1.as_deref() == Some("B1"))
+    );
+
+    let cells = service
+        .handle(Request::Cells {
+            path: path.clone(),
+            branch: None,
+            sheet: sheet.clone(),
+            start: 0,
+            limit: Some(1),
+        })
+        .unwrap();
+    let Response::Cells(page) = cells else {
+        panic!("{cells:?}")
+    };
+    assert_eq!(page.total, 2);
+    assert_eq!(page.cells.len(), 1);
+    assert_eq!(page.next, Some(1));
+    let cells = service
+        .handle(Request::Cells {
+            path: path.clone(),
+            branch: None,
+            sheet: sheet.clone(),
+            start: 1,
+            limit: None,
+        })
+        .unwrap();
+    let Response::Cells(page) = cells else {
+        panic!("{cells:?}")
+    };
+    assert_eq!(page.cells.len(), 1);
+    assert_eq!(page.next, None);
+    assert!(matches!(
+        service.handle(Request::Cells { path: path.clone(), branch: None, sheet: sheet.clone(), start: 0, limit: Some(0) }),
+        Err(ServiceError { ref code, .. }) if code == "invalid_limit"
+    ));
+
+    let lineage = service
+        .handle(Request::Lineage {
+            path: path.clone(),
+            branch: None,
+            sheet: sheet.clone(),
+            a1: "B1".into(),
+        })
+        .unwrap();
+    assert!(matches!(lineage, Response::Lineage(Some(ref lineage)) if lineage.inputs.len() == 1));
+
+    // An agent cannot touch main, but can work on its own branch.
+    let refused = append(
+        &mut service,
+        &path,
+        None,
+        agent("planner"),
+        Command::SetValue {
+            sheet: sheet_id,
+            a1: "A1".into(),
+            value: Literal::Number(1.0),
+        },
+    );
+    assert!(matches!(refused, Err(ServiceError { ref code, .. }) if code == "agent_on_main"));
+    service
+        .handle(Request::Branch {
+            path: path.clone(),
+            name: "agent-work".into(),
+            from: None,
+            actor: agent("planner"),
+        })
+        .unwrap();
+    append(
+        &mut service,
+        &path,
+        Some("agent-work"),
+        agent("planner"),
+        Command::SetValue {
+            sheet: sheet_id,
+            a1: "A1".into(),
+            value: Literal::Number(5.0),
+        },
+    )
+    .unwrap();
+    let branch_cell = service
+        .handle(Request::Cell {
+            path: path.clone(),
+            branch: Some("agent-work".into()),
+            sheet: sheet.clone(),
+            a1: "B1".into(),
+        })
+        .unwrap();
+    assert!(
+        matches!(branch_cell, Response::Cell(ref report) if report.value == CellValue::Number(10.0))
+    );
+    let main_cell = service
+        .handle(Request::Cell {
+            path: path.clone(),
+            branch: None,
+            sheet: sheet.clone(),
+            a1: "B1".into(),
+        })
+        .unwrap();
+    assert!(
+        matches!(main_cell, Response::Cell(ref report) if report.value == CellValue::Number(8.0))
+    );
+
+    // The check reads A1 as a truth value: a number is not TRUE, so it fails
+    // on both branches, and the merge is refused until it passes.
+    let checked = service
+        .handle(Request::Check {
+            path: path.clone(),
+            branch: Some("agent-work".into()),
+        })
+        .unwrap();
+    assert!(matches!(checked, Response::Checked { passed: false, .. }));
+    let refused = service.handle(Request::Merge {
+        path: path.clone(),
+        source: "agent-work".into(),
+        target: None,
+        approver: human("tom"),
+    });
+    assert!(
+        matches!(refused, Err(ServiceError { ref code, ref details, .. }) if code == "checks_failed" && details.is_some())
+    );
+    let refused = service.handle(Request::Merge {
+        path: path.clone(),
+        source: "agent-work".into(),
+        target: None,
+        approver: agent("planner"),
+    });
+    assert!(matches!(refused, Err(ServiceError { ref code, .. }) if code == "unauthorized"));
+
+    append(
+        &mut service,
+        &path,
+        Some("agent-work"),
+        agent("planner"),
+        Command::SetValue {
+            sheet: sheet_id,
+            a1: "A1".into(),
+            value: Literal::Boolean(true),
+        },
+    )
+    .unwrap();
+    let diff = service
+        .handle(Request::Diff {
+            path: path.clone(),
+            source: "agent-work".into(),
+            target: None,
+        })
+        .unwrap();
+    let Response::Diff(diff) = diff else {
+        panic!("{diff:?}")
+    };
+    assert_eq!(diff.source_operations.len(), 2);
+    assert!(diff.conflicts.is_empty());
+    let merged = service
+        .handle(Request::Merge {
+            path: path.clone(),
+            source: "agent-work".into(),
+            target: None,
+            approver: human("tom"),
+        })
+        .unwrap();
+    assert!(matches!(merged, Response::Merged(ref report) if report.replayed.len() == 2));
+    let main_cell = service
+        .handle(Request::Cell {
+            path: path.clone(),
+            branch: None,
+            sheet: sheet.clone(),
+            a1: "A1".into(),
+        })
+        .unwrap();
+    assert!(
+        matches!(main_cell, Response::Cell(ref report) if report.value == CellValue::Boolean(true))
+    );
+
+    // Close, reopen through a fresh service: the same state comes back.
+    assert!(matches!(
+        service
+            .handle(Request::Close { path: path.clone() })
+            .unwrap(),
+        Response::Closed
+    ));
+    assert!(matches!(
+        service.handle(Request::Close { path: path.clone() }),
+        Err(ServiceError { ref code, .. }) if code == "not_open"
+    ));
+    let mut reopened = Service::default();
+    let opened = reopened
+        .handle(Request::Open { path: path.clone() })
+        .unwrap();
+    assert!(
+        matches!(opened, Response::Opened { ref branches, .. } if branches == &["agent-work".to_string(), "main".to_string()] || branches == &["main".to_string(), "agent-work".to_string()])
+    );
+    let summary = reopened
+        .handle(Request::Document {
+            path: path.clone(),
+            branch: None,
+        })
+        .unwrap();
+    let Response::Document(summary) = summary else {
+        panic!("{summary:?}")
+    };
+    assert_eq!(summary.sheets[0].name, "Model");
+    assert_eq!(summary.sheets[0].cells, 2);
+    assert_eq!(summary.checks, 1);
+    assert!(summary.load.is_some());
+    reopened.close_all().unwrap();
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
+
+#[test]
+fn requests_and_responses_round_trip_as_tagged_json() {
+    let request = Request::Append {
+        path: "/tmp/x.omasheets".into(),
+        branch: None,
+        actor: human("tom"),
+        command: Command::SetFormula {
+            sheet: omasheets_core::SheetId(omasheets_core::ObjectId::from_seed("s")),
+            a1: "A1".into(),
+            source: "=1+1".into(),
+        },
+    };
+    let json = serde_json::to_string(&request).unwrap();
+    assert!(json.contains("\"kind\":\"append\""));
+    assert!(json.contains("\"command\":\"set_formula\""));
+    assert_eq!(serde_json::from_str::<Request>(&json).unwrap(), request);
+    let minimal: Request =
+        serde_json::from_str(r#"{"kind":"document","path":"/tmp/x.omasheets"}"#).unwrap();
+    assert!(matches!(minimal, Request::Document { branch: None, .. }));
+    let error = ServiceError {
+        code: "unknown_branch".into(),
+        message: "no".into(),
+        details: None,
+    };
+    assert_eq!(
+        serde_json::to_string(&error).unwrap(),
+        r#"{"code":"unknown_branch","message":"no"}"#
+    );
+}
+
+#[test]
+fn bad_paths_and_actors_are_refused_before_any_file_is_touched() {
+    let mut service = Service::default();
+    assert!(matches!(
+        service.handle(Request::Open { path: "/nonexistent/dir/x.omasheets".into() }),
+        Err(ServiceError { ref code, .. }) if code == "invalid_path"
+    ));
+    let path = temp_document();
+    assert!(matches!(
+        service.handle(Request::Create { path: path.clone(), name: "x".into(), actor: human("   ") }),
+        Err(ServiceError { ref code, .. }) if code == "invalid_actor"
+    ));
+    assert!(!path.exists());
+    assert!(matches!(
+        service.handle(Request::Open { path: path.clone() }),
+        Err(ServiceError { ref code, .. }) if code == "not_a_document"
+    ));
+}

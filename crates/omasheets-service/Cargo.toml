@@ -1,0 +1,13 @@
+[package]
+name = "omasheets-service"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+omasheets-core = { path = "../omasheets-core" }
+omasheets-store = { path = "../omasheets-store" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
