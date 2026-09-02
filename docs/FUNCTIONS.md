@@ -1,7 +1,7 @@
 # Supported formula functions
 
 The owned M0 engine (`crates/omasheets-calc`) accepts exactly the
-83 function names listed below, grouped for reading.
+95 function names listed below, grouped for reading.
 A test in the calc crate fails when this file and the registry disagree, so
 the count here is never edited by hand: add the function to the registry and
 regenerate this list.
@@ -44,6 +44,9 @@ unsorted keys are undefined in Excel and are not promised here.
 - `VAR.S`
 - `VARP`
 - `VAR.P`
+- `AVERAGEA`
+- `CORREL`
+- `NORMDIST`
 
 ### Conditional aggregates
 
@@ -117,6 +120,7 @@ unsorted keys are undefined in Excel and are not promised here.
 - `HLOOKUP`
 - `ROW`
 - `COLUMN`
+- `LOOKUP`
 
 ### Dates (1900 serial system)
 
@@ -127,4 +131,15 @@ unsorted keys are undefined in Excel and are not promised here.
 - `EDATE`
 - `EOMONTH`
 - `WEEKDAY`
+- `YEARFRAC`
+- `DAYS360`
+- `NETWORKDAYS`
+- `WORKDAY`
+
+### Financial
+
+- `PMT`
+- `NPV`
+- `XNPV`
+- `XIRR`
 
