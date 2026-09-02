@@ -142,12 +142,75 @@ enum Expr<R = CellId> {
     UnaryMinus(Box<Expr<R>>),
     Percent(Box<Expr<R>>),
     Binary(BinaryOp, Box<Expr<R>>, Box<Expr<R>>),
+    /// A rectangle of cells anchored at its top-left cell, or, after a
+    /// rebinding that no longer forms a rectangle, an explicit member list in
+    /// row-major order. Only parsed formulas (`R = CellId`) carry this
+    /// variant; compiling turns it into a shared [`Expr::RangeNode`].
     Range {
-        items: Vec<Expr<R>>,
+        anchor: R,
+        members: Option<Vec<R>>,
+        rows: usize,
+        columns: usize,
+    },
+    /// A compiled range: one shared node in the workbook graph whose
+    /// dependencies are the member cells. Every formula over the same cells
+    /// points at the same node, so a range costs its members once, not once
+    /// per formula.
+    RangeNode {
+        node: usize,
         rows: usize,
         columns: usize,
     },
     Function(Function, Vec<Expr<R>>),
+}
+
+/// Cells of a rectangle in row-major order.
+fn rectangle_cells(anchor: CellId, rows: usize, columns: usize) -> impl Iterator<Item = CellId> {
+    (0..rows).flat_map(move |row| {
+        (0..columns).map(move |column| {
+            CellId::new(
+                anchor.sheet,
+                anchor.row + row as u32,
+                anchor.column + column as u32,
+            )
+        })
+    })
+}
+
+/// Identity of a shared range node: the rectangle it covers, or its explicit
+/// member list when a rebinding broke the rectangle.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum RangeKey {
+    Rectangle {
+        anchor: CellId,
+        rows: usize,
+        columns: usize,
+    },
+    Members {
+        members: Vec<CellId>,
+        rows: usize,
+        columns: usize,
+    },
+}
+
+fn range_key(
+    anchor: CellId,
+    members: Option<Vec<CellId>>,
+    rows: usize,
+    columns: usize,
+) -> RangeKey {
+    match members {
+        None => RangeKey::Rectangle {
+            anchor,
+            rows,
+            columns,
+        },
+        Some(members) => RangeKey::Members {
+            members,
+            rows,
+            columns,
+        },
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -303,12 +366,26 @@ fn visit_references(expression: &Expr<CellId>, visit: &mut impl FnMut(CellId)) {
             visit_references(left, visit);
             visit_references(right, visit);
         }
-        Expr::Range { items, .. } | Expr::Function(_, items) => {
+        Expr::Range {
+            anchor,
+            members,
+            rows,
+            columns,
+        } => match members {
+            Some(members) => members.iter().for_each(|cell| visit(*cell)),
+            None => rectangle_cells(*anchor, *rows, *columns).for_each(visit),
+        },
+        Expr::Function(_, items) => {
             for item in items {
                 visit_references(item, visit);
             }
         }
-        Expr::Number(_) | Expr::Boolean(_) | Expr::Text(_) | Expr::Error(_) | Expr::Empty => {}
+        Expr::RangeNode { .. }
+        | Expr::Number(_)
+        | Expr::Boolean(_)
+        | Expr::Text(_)
+        | Expr::Error(_)
+        | Expr::Empty => {}
     }
 }
 
@@ -320,12 +397,41 @@ fn rebind_references(expression: &mut Expr<CellId>, map: &mut impl FnMut(CellId)
             rebind_references(left, map);
             rebind_references(right, map);
         }
-        Expr::Range { items, .. } | Expr::Function(_, items) => {
+        Expr::Range {
+            anchor,
+            members,
+            rows,
+            columns,
+        } => {
+            let mapped: Vec<CellId> = match members {
+                Some(members) => members.iter().map(|cell| map(*cell)).collect(),
+                None => rectangle_cells(*anchor, *rows, *columns)
+                    .map(&mut *map)
+                    .collect(),
+            };
+            let first = mapped[0];
+            let rectangular = mapped.iter().enumerate().all(|(index, cell)| {
+                *cell
+                    == CellId::new(
+                        first.sheet,
+                        first.row + (index / *columns) as u32,
+                        first.column + (index % *columns) as u32,
+                    )
+            });
+            *anchor = first;
+            *members = if rectangular { None } else { Some(mapped) };
+        }
+        Expr::Function(_, items) => {
             for item in items {
                 rebind_references(item, map);
             }
         }
-        Expr::Number(_) | Expr::Boolean(_) | Expr::Text(_) | Expr::Error(_) | Expr::Empty => {}
+        Expr::RangeNode { .. }
+        | Expr::Number(_)
+        | Expr::Boolean(_)
+        | Expr::Text(_)
+        | Expr::Error(_)
+        | Expr::Empty => {}
     }
 }
 
@@ -333,6 +439,14 @@ fn rebind_references(expression: &mut Expr<CellId>, map: &mut impl FnMut(CellId)
 enum Input {
     Literal(Value),
     Formula(Expr<usize>),
+    /// A shared range node. Its `dependencies` are the member cells in
+    /// row-major order and its `dependents` the formulas that read it; it
+    /// carries no value of its own. `anchor` is set for rectangles so
+    /// implicit intersection can index arithmetically; the shape travels
+    /// with each [`Expr::RangeNode`] that reads the node.
+    Range {
+        anchor: Option<CellId>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -357,6 +471,9 @@ pub struct Workbook {
     pending: Vec<usize>,
     sheet_names: HashMap<String, u32>,
     defined_names: HashMap<String, String>,
+    /// Shared range nodes by identity, so every formula over the same cells
+    /// shares one node and one set of member edges.
+    ranges: HashMap<RangeKey, usize>,
     generation: u64,
     /// The cell whose formula is being evaluated, for implicit intersection
     /// and `ROW()`/`COLUMN()`. Evaluation is sequential, so a plain cell is
@@ -373,6 +490,7 @@ impl Default for Workbook {
             pending: Vec::new(),
             sheet_names: HashMap::new(),
             defined_names: HashMap::new(),
+            ranges: HashMap::new(),
             generation: 1,
             evaluating: std::cell::Cell::new(CellId::new(0, 0, 0)),
         }
@@ -439,17 +557,82 @@ impl Workbook {
         formula: ParsedFormula,
     ) -> Result<RecalcReport, FormulaError> {
         let parsed = formula.expression;
-        let mut dependencies = BTreeSet::new();
-        collect_dependencies(&parsed, &mut dependencies);
-        if let Some(path) = self.prospective_cycle(cell, &dependencies) {
+        let mut cells = BTreeSet::new();
+        let mut range_keys = Vec::new();
+        collect_dependencies(&parsed, &mut cells, &mut range_keys);
+        let mut range_nodes: HashMap<RangeKey, usize> = HashMap::new();
+        for key in range_keys {
+            let node = self.ensure_range(&key);
+            range_nodes.insert(key, node);
+        }
+        if let Some(path) = self.prospective_cycle(cell, &cells, range_nodes.values().copied()) {
             return Err(FormulaError::Cycle(path));
         }
-        let dependencies: Vec<usize> = dependencies
+        let mut dependencies: Vec<usize> = cells
             .into_iter()
             .map(|dependency| self.ensure_cell(dependency))
             .collect();
-        let expression = compile_expression(parsed, &self.indices);
+        dependencies.extend(range_nodes.values().copied());
+        dependencies.sort_unstable();
+        dependencies.dedup();
+        let expression = compile_expression(parsed, &self.indices, &range_nodes);
         Ok(self.commit(cell, Input::Formula(expression), dependencies))
+    }
+
+    /// Returns the shared node for `key`, creating it and its member cells
+    /// on first use. A node is a graph vertex like a cell: members point at
+    /// it as a dependent, formulas that read the range depend on it.
+    fn ensure_range(&mut self, key: &RangeKey) -> usize {
+        if let Some(node) = self.ranges.get(key) {
+            return *node;
+        }
+        let (member_ids, anchor): (Vec<CellId>, Option<CellId>) = match key {
+            RangeKey::Rectangle {
+                anchor,
+                rows,
+                columns,
+            } => (
+                rectangle_cells(*anchor, *rows, *columns).collect(),
+                Some(*anchor),
+            ),
+            RangeKey::Members { members, .. } => (members.clone(), None),
+        };
+        let members: Vec<usize> = member_ids
+            .iter()
+            .map(|member| self.ensure_cell(*member))
+            .collect();
+        let node = self.cells.len();
+        for member in &members {
+            self.cells[*member].dependents.push(node);
+        }
+        self.cells.push(Cell {
+            id: member_ids[0],
+            input: Input::Range { anchor },
+            dependencies: members,
+            dependents: Vec::new(),
+            value: Value::Blank,
+        });
+        self.dirty_marks.push(0);
+        self.pending.push(0);
+        self.ranges.insert(key.clone(), node);
+        node
+    }
+
+    fn range_members(&self, node: usize) -> &[usize] {
+        &self.cells[node].dependencies
+    }
+
+    fn range_value(&self, node: usize, index: usize) -> Value {
+        self.cells[self.cells[node].dependencies[index]]
+            .value
+            .clone()
+    }
+
+    fn range_values(&self, node: usize) -> Vec<Value> {
+        self.range_members(node)
+            .iter()
+            .map(|member| self.cells[*member].value.clone())
+            .collect()
     }
 
     fn ensure_cell(&mut self, cell: CellId) -> usize {
@@ -492,6 +675,7 @@ impl Workbook {
         &self,
         changed: CellId,
         dependencies: &BTreeSet<CellId>,
+        range_nodes: impl Iterator<Item = usize>,
     ) -> Option<Vec<CellId>> {
         if dependencies.contains(&changed) {
             return Some(vec![changed, changed]);
@@ -500,6 +684,7 @@ impl Workbook {
         let targets: HashSet<usize> = dependencies
             .iter()
             .filter_map(|dependency| self.indices.get(dependency).copied())
+            .chain(range_nodes)
             .collect();
         if targets.is_empty() {
             return None;
@@ -516,8 +701,13 @@ impl Workbook {
                     path.push(cursor);
                 }
                 path.reverse();
-                let mut path: Vec<CellId> =
-                    path.into_iter().map(|index| self.cells[index].id).collect();
+                // Range nodes are not cells; the path names the member cell
+                // through which the cycle enters the range.
+                let mut path: Vec<CellId> = path
+                    .into_iter()
+                    .filter(|index| !matches!(self.cells[*index].input, Input::Range { .. }))
+                    .map(|index| self.cells[index].id)
+                    .collect();
                 path.push(changed);
                 return Some(path);
             }
@@ -564,21 +754,29 @@ impl Workbook {
             .filter(|index| self.pending[*index] == 0)
             .collect();
         let mut evaluated = Vec::with_capacity(dirty.len());
+        let mut range_nodes_passed = 0;
 
         while let Some(cell_index) = ready.pop_front() {
             let value = match &self.cells[cell_index].input {
-                Input::Literal(value) => value.clone(),
+                Input::Literal(value) => Some(value.clone()),
                 Input::Formula(expression) => {
                     self.evaluating.set(self.cells[cell_index].id);
-                    match self.evaluate(expression) {
+                    Some(match self.evaluate(expression) {
                         // A formula whose result is an empty reference shows 0.
                         Value::Blank => Value::Number(0.0),
                         value => value,
-                    }
+                    })
                 }
+                // A range node only orders its members before its readers.
+                Input::Range { .. } => None,
             };
-            self.cells[cell_index].value = value;
-            evaluated.push(self.cells[cell_index].id);
+            match value {
+                Some(value) => {
+                    self.cells[cell_index].value = value;
+                    evaluated.push(self.cells[cell_index].id);
+                }
+                None => range_nodes_passed += 1,
+            }
             for dependent in self.cells[cell_index].dependents.iter().copied() {
                 if self.dirty_marks[dependent] == generation {
                     let remaining = &mut self.pending[dependent];
@@ -590,7 +788,7 @@ impl Workbook {
             }
         }
         debug_assert_eq!(
-            evaluated.len(),
+            evaluated.len() + range_nodes_passed,
             dirty.len(),
             "cycles are rejected before commit"
         );
@@ -621,11 +819,12 @@ impl Workbook {
                 let right = self.evaluate(right);
                 apply_binary(*operator, left, right)
             }
-            Expr::Range {
-                items,
+            Expr::RangeNode {
+                node,
                 rows,
                 columns,
-            } => self.implicit_intersection(items, *rows, *columns),
+            } => self.implicit_intersection(*node, *rows, *columns),
+            Expr::Range { .. } => unreachable!("parsed ranges are compiled to range nodes"),
             Expr::Function(function, arguments) => self.evaluate_function(*function, arguments),
         }
     }
@@ -633,22 +832,45 @@ impl Workbook {
     /// A range used where one value is expected picks the cell in the
     /// evaluating formula's row (vertical range), column (horizontal range)
     /// or both, as Excel's implicit intersection does; otherwise `#VALUE!`.
-    fn implicit_intersection(&self, items: &[Expr<usize>], rows: usize, columns: usize) -> Value {
+    fn implicit_intersection(&self, node: usize, rows: usize, columns: usize) -> Value {
         if rows == 1 && columns == 1 {
-            return self.evaluate(&items[0]);
+            return self.range_value(node, 0);
         }
         let origin = self.evaluating.get();
-        let position = |item: &Expr<usize>| match item {
-            Expr::Reference(index) => Some(self.cells[*index].id),
-            _ => None,
-        };
-        let chosen = items.iter().find(|item| {
-            position(item).is_some_and(|id| {
+        let chosen = match self.cells[node].input {
+            Input::Range {
+                anchor: Some(anchor),
+                ..
+            } => {
+                let row_offset = if rows == 1 {
+                    Some(0)
+                } else {
+                    origin
+                        .row
+                        .checked_sub(anchor.row)
+                        .map(|offset| offset as usize)
+                        .filter(|offset| *offset < rows)
+                };
+                let column_offset = if columns == 1 {
+                    Some(0)
+                } else {
+                    origin
+                        .column
+                        .checked_sub(anchor.column)
+                        .map(|offset| offset as usize)
+                        .filter(|offset| *offset < columns)
+                };
+                row_offset
+                    .zip(column_offset)
+                    .map(|(row, column)| row * columns + column)
+            }
+            _ => self.range_members(node).iter().position(|member| {
+                let id = self.cells[*member].id;
                 (columns == 1 || id.column == origin.column) && (rows == 1 || id.row == origin.row)
-            })
-        });
+            }),
+        };
         match chosen {
-            Some(item) => self.evaluate(item),
+            Some(index) => self.range_value(node, index),
             None => Value::Error(CalcError::InvalidValue),
         }
     }
@@ -946,9 +1168,14 @@ impl Workbook {
 
     fn flatten_values_skipping_subtotals(&self, expression: &Expr<usize>, output: &mut Vec<Value>) {
         match expression {
-            Expr::Range { items, .. } => {
-                for item in items {
-                    self.flatten_values_skipping_subtotals(item, output);
+            Expr::RangeNode { node, .. } => {
+                for member in self.range_members(*node) {
+                    if let Input::Formula(Expr::Function(Function::SubTotal, _)) =
+                        &self.cells[*member].input
+                    {
+                        continue;
+                    }
+                    output.push(self.cells[*member].value.clone());
                 }
             }
             Expr::Reference(index) => {
@@ -970,10 +1197,7 @@ impl Workbook {
         let id = match arguments {
             [] => self.evaluating.get(),
             [Expr::Reference(index)] => self.cells[*index].id,
-            [Expr::Range { items, .. }] => match items.first() {
-                Some(Expr::Reference(index)) => self.cells[*index].id,
-                _ => return Value::Error(CalcError::InvalidArguments),
-            },
+            [Expr::RangeNode { node, .. }] => self.cells[self.range_members(*node)[0]].id,
             _ => return Value::Error(CalcError::InvalidArguments),
         };
         Value::Number(
@@ -989,7 +1213,7 @@ impl Workbook {
     /// an error from it: `ISERROR(1/0)` is `TRUE`, `ISBLANK(1/0)` is `FALSE`.
     /// `N` and `T` do propagate errors, matching Excel.
     fn evaluate_inspection_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
-        if arguments.len() != 1 || matches!(arguments[0], Expr::Range { .. }) {
+        if arguments.len() != 1 || matches!(arguments[0], Expr::RangeNode { .. }) {
             return Value::Error(CalcError::InvalidArguments);
         }
         let value = self.evaluate(&arguments[0]);
@@ -1024,7 +1248,7 @@ impl Workbook {
             return Value::Error(CalcError::InvalidArguments);
         }
         let shape = |expression: &Expr<usize>| match expression {
-            Expr::Range { rows, columns, .. } => (*rows, *columns),
+            Expr::RangeNode { rows, columns, .. } => (*rows, *columns),
             _ => (1, 1),
         };
         let expected = shape(&arguments[0]);
@@ -1109,9 +1333,9 @@ impl Workbook {
 
     fn flatten_values(&self, expression: &Expr<usize>, output: &mut Vec<Value>) {
         match expression {
-            Expr::Range { items, .. } => {
-                for item in items {
-                    self.flatten_values(item, output);
+            Expr::RangeNode { node, .. } => {
+                for member in self.range_members(*node) {
+                    output.push(self.cells[*member].value.clone());
                 }
             }
             Expr::Empty => {}
@@ -1204,7 +1428,7 @@ impl Workbook {
     fn evaluate_lookup_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
         match function {
             Function::Index if matches!(arguments.len(), 2 | 3) => {
-                let Some((items, rows, columns)) = range_parts(&arguments[0]) else {
+                let Some((node, rows, columns)) = range_parts(&arguments[0]) else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
                 let Ok(row) = positive_index(self.evaluate(&arguments[1])) else {
@@ -1215,20 +1439,21 @@ impl Workbook {
                         Ok(column) => column,
                         Err(error) => return Value::Error(error),
                     }
-                } else if *columns == 1 {
+                } else if columns == 1 {
                     1
-                } else if *rows == 1 {
-                    return items
-                        .get(row - 1)
-                        .map(|item| self.evaluate(item))
-                        .unwrap_or(Value::Error(CalcError::InvalidReference));
+                } else if rows == 1 {
+                    return if row <= columns {
+                        self.range_value(node, row - 1)
+                    } else {
+                        Value::Error(CalcError::InvalidReference)
+                    };
                 } else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
-                if row > *rows || column > *columns {
+                if row > rows || column > columns {
                     return Value::Error(CalcError::InvalidReference);
                 }
-                self.evaluate(&items[(row - 1) * *columns + column - 1])
+                self.range_value(node, (row - 1) * columns + column - 1)
             }
             Function::Match if matches!(arguments.len(), 2 | 3) => {
                 let mode = if arguments.len() == 3 {
@@ -1243,13 +1468,13 @@ impl Workbook {
                 if matches!(lookup, Value::Error(_)) {
                     return lookup;
                 }
-                let Some((items, rows, columns)) = range_parts(&arguments[1]) else {
+                let Some((node, rows, columns)) = range_parts(&arguments[1]) else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
-                if *rows != 1 && *columns != 1 {
+                if rows != 1 && columns != 1 {
                     return Value::Error(CalcError::InvalidArguments);
                 }
-                let candidates: Vec<Value> = items.iter().map(|item| self.evaluate(item)).collect();
+                let candidates = self.range_values(node);
                 match match_position(&lookup, &candidates, mode) {
                     Ok(position) => Value::Number((position + 1) as f64),
                     Err(error) => Value::Error(error),
@@ -1276,7 +1501,7 @@ impl Workbook {
                 if matches!(lookup, Value::Error(_)) {
                     return lookup;
                 }
-                let Some((items, rows, columns)) = range_parts(&arguments[1]) else {
+                let Some((node, rows, columns)) = range_parts(&arguments[1]) else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
                 let Ok(offset) = positive_index(self.evaluate(&arguments[2])) else {
@@ -1284,24 +1509,23 @@ impl Workbook {
                 };
                 let vertical = function == Function::VLookup;
                 let (lanes, lane_length) = if vertical {
-                    (*rows, *columns)
+                    (rows, columns)
                 } else {
-                    (*columns, *rows)
+                    (columns, rows)
                 };
                 if offset > lane_length {
                     return Value::Error(CalcError::InvalidReference);
                 }
                 let at = |lane: usize, position: usize| {
                     if vertical {
-                        &items[lane * *columns + position]
+                        self.range_value(node, lane * columns + position)
                     } else {
-                        &items[position * *columns + lane]
+                        self.range_value(node, position * columns + lane)
                     }
                 };
-                let candidates: Vec<Value> =
-                    (0..lanes).map(|lane| self.evaluate(at(lane, 0))).collect();
+                let candidates: Vec<Value> = (0..lanes).map(|lane| at(lane, 0)).collect();
                 match match_position(&lookup, &candidates, mode) {
-                    Ok(lane) => self.evaluate(at(lane, offset - 1)),
+                    Ok(lane) => at(lane, offset - 1),
                     Err(error) => Value::Error(error),
                 }
             }
@@ -1310,27 +1534,28 @@ impl Workbook {
                 if matches!(lookup, Value::Error(_)) {
                     return lookup;
                 }
-                let Some((lookup_items, lookup_rows, lookup_columns)) = range_parts(&arguments[1])
+                let Some((lookup_node, lookup_rows, lookup_columns)) = range_parts(&arguments[1])
                 else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
-                let Some((return_items, return_rows, return_columns)) = range_parts(&arguments[2])
+                let Some((return_node, return_rows, return_columns)) = range_parts(&arguments[2])
                 else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
-                if (*lookup_rows != 1 && *lookup_columns != 1)
-                    || (*return_rows != 1 && *return_columns != 1)
-                    || lookup_items.len() != return_items.len()
+                let length = self.range_members(lookup_node).len();
+                if (lookup_rows != 1 && lookup_columns != 1)
+                    || (return_rows != 1 && return_columns != 1)
+                    || length != self.range_members(return_node).len()
                 {
                     return Value::Error(CalcError::InvalidArguments);
                 }
-                for (index, item) in lookup_items.iter().enumerate() {
-                    let candidate = self.evaluate(item);
+                for index in 0..length {
+                    let candidate = self.range_value(lookup_node, index);
                     if matches!(candidate, Value::Error(_)) {
                         return candidate;
                     }
                     if lookup_equal(&lookup, &candidate) {
-                        return self.evaluate(&return_items[index]);
+                        return self.range_value(return_node, index);
                     }
                 }
                 if arguments.len() == 4 {
@@ -1457,13 +1682,13 @@ fn typed_compare(left: &Value, right: &Value) -> Result<std::cmp::Ordering, Calc
     })
 }
 
-fn range_parts<R>(expression: &Expr<R>) -> Option<(&[Expr<R>], &usize, &usize)> {
+fn range_parts(expression: &Expr<usize>) -> Option<(usize, usize, usize)> {
     match expression {
-        Expr::Range {
-            items,
+        Expr::RangeNode {
+            node,
             rows,
             columns,
-        } => Some((items, rows, columns)),
+        } => Some((*node, *rows, *columns)),
         _ => None,
     }
 }
@@ -1961,7 +2186,11 @@ fn parse_criterion(criterion: &str) -> (BinaryOp, Value) {
     (operator, value)
 }
 
-fn compile_expression(expression: Expr<CellId>, indices: &HashMap<CellId, usize>) -> Expr<usize> {
+fn compile_expression(
+    expression: Expr<CellId>,
+    indices: &HashMap<CellId, usize>,
+    range_nodes: &HashMap<RangeKey, usize>,
+) -> Expr<usize> {
     match expression {
         Expr::Number(value) => Expr::Number(value),
         Expr::Boolean(value) => Expr::Boolean(value),
@@ -1969,54 +2198,71 @@ fn compile_expression(expression: Expr<CellId>, indices: &HashMap<CellId, usize>
         Expr::Error(error) => Expr::Error(error),
         Expr::Empty => Expr::Empty,
         Expr::Reference(cell) => Expr::Reference(indices[&cell]),
-        Expr::UnaryMinus(inner) => Expr::UnaryMinus(Box::new(compile_expression(*inner, indices))),
-        Expr::Percent(inner) => Expr::Percent(Box::new(compile_expression(*inner, indices))),
+        Expr::UnaryMinus(inner) => {
+            Expr::UnaryMinus(Box::new(compile_expression(*inner, indices, range_nodes)))
+        }
+        Expr::Percent(inner) => {
+            Expr::Percent(Box::new(compile_expression(*inner, indices, range_nodes)))
+        }
         Expr::Binary(operator, left, right) => Expr::Binary(
             operator,
-            Box::new(compile_expression(*left, indices)),
-            Box::new(compile_expression(*right, indices)),
+            Box::new(compile_expression(*left, indices, range_nodes)),
+            Box::new(compile_expression(*right, indices, range_nodes)),
         ),
         Expr::Range {
-            items,
+            anchor,
+            members,
             rows,
             columns,
-        } => Expr::Range {
-            items: items
-                .into_iter()
-                .map(|argument| compile_expression(argument, indices))
-                .collect(),
+        } => Expr::RangeNode {
+            node: range_nodes[&range_key(anchor, members, rows, columns)],
             rows,
             columns,
         },
+        Expr::RangeNode { .. } => unreachable!("parsed formulas never hold range nodes"),
         Expr::Function(function, arguments) => Expr::Function(
             function,
             arguments
                 .into_iter()
-                .map(|argument| compile_expression(argument, indices))
+                .map(|argument| compile_expression(argument, indices, range_nodes))
                 .collect(),
         ),
     }
 }
 
-fn collect_dependencies(expression: &Expr, output: &mut BTreeSet<CellId>) {
+fn collect_dependencies(
+    expression: &Expr,
+    cells: &mut BTreeSet<CellId>,
+    ranges: &mut Vec<RangeKey>,
+) {
     match expression {
         Expr::Reference(cell) => {
-            output.insert(*cell);
+            cells.insert(*cell);
         }
-        Expr::UnaryMinus(inner) | Expr::Percent(inner) => collect_dependencies(inner, output),
+        Expr::UnaryMinus(inner) | Expr::Percent(inner) => {
+            collect_dependencies(inner, cells, ranges)
+        }
         Expr::Binary(_, left, right) => {
-            collect_dependencies(left, output);
-            collect_dependencies(right, output);
+            collect_dependencies(left, cells, ranges);
+            collect_dependencies(right, cells, ranges);
         }
         Expr::Range {
-            items: arguments, ..
-        }
-        | Expr::Function(_, arguments) => {
+            anchor,
+            members,
+            rows,
+            columns,
+        } => ranges.push(range_key(*anchor, members.clone(), *rows, *columns)),
+        Expr::Function(_, arguments) => {
             for argument in arguments {
-                collect_dependencies(argument, output);
+                collect_dependencies(argument, cells, ranges);
             }
         }
-        Expr::Number(_) | Expr::Boolean(_) | Expr::Text(_) | Expr::Error(_) | Expr::Empty => {}
+        Expr::RangeNode { .. }
+        | Expr::Number(_)
+        | Expr::Boolean(_)
+        | Expr::Text(_)
+        | Expr::Error(_)
+        | Expr::Empty => {}
     }
 }
 
@@ -2568,14 +2814,9 @@ fn expand_range(first: CellId, second: CellId) -> Result<Expr, FormulaError> {
     if count > MAX_RANGE_CELLS {
         return Err(FormulaError::RangeTooLarge);
     }
-    let mut references = Vec::with_capacity(count);
-    for row in first_row..=last_row {
-        for column in first_column..=last_column {
-            references.push(Expr::Reference(CellId::new(first.sheet, row, column)));
-        }
-    }
     Ok(Expr::Range {
-        items: references,
+        anchor: CellId::new(first.sheet, first_row, first_column),
+        members: None,
         rows,
         columns,
     })
@@ -3145,6 +3386,121 @@ mod tests {
             workbook.set_formula(cell(0, 3), "=VLOOKUP(1,[5]Q!$A$1:$C$5,3)"),
             Err(FormulaError::ExternalReference(_))
         ));
+    }
+
+    /// Graph vertices beyond the cells that exist: the shared range nodes.
+    fn range_node_count(workbook: &Workbook) -> usize {
+        workbook.ranges.len()
+    }
+
+    #[test]
+    fn formulas_over_the_same_range_share_one_node() {
+        let mut workbook = Workbook::default();
+        for row in 0..1000 {
+            workbook.set_number(cell(row, 0), 1.0);
+        }
+        workbook.define_name("Data", "$A$1:$A$1000");
+        for column in 1..=200 {
+            workbook.set_formula(cell(0, column), "=SUM(Data)").unwrap();
+            workbook
+                .set_formula(cell(1, column), "=SUM(A1:A1000)+MAX(A1:A1000)")
+                .unwrap();
+        }
+        assert_eq!(range_node_count(&workbook), 1);
+        // One member edge per cell for the node, plus the node's readers.
+        assert_eq!(
+            workbook.cells[workbook.indices[&cell(500, 0)]]
+                .dependents
+                .len(),
+            1
+        );
+        let node = workbook.ranges.values().next().copied().unwrap();
+        assert_eq!(workbook.cells[node].dependents.len(), 400);
+        assert_eq!(workbook.value(cell(0, 200)), Value::Number(1000.0));
+        assert_eq!(workbook.value(cell(1, 200)), Value::Number(1001.0));
+
+        let report = workbook.set_number(cell(999, 0), 5.0);
+        assert_eq!(
+            report.evaluated.len(),
+            401,
+            "changed cell plus every reader, no node"
+        );
+        assert_eq!(workbook.value(cell(0, 200)), Value::Number(1004.0));
+        assert_eq!(workbook.value(cell(1, 200)), Value::Number(1009.0));
+
+        // Replacing a reader drops it from the node without disturbing others.
+        workbook.set_number(cell(0, 1), 0.0);
+        assert_eq!(workbook.cells[node].dependents.len(), 399);
+        assert_eq!(range_node_count(&workbook), 1);
+        workbook.set_number(cell(998, 0), 5.0);
+        assert_eq!(workbook.value(cell(0, 2)), Value::Number(1008.0));
+    }
+
+    #[test]
+    fn a_formula_inside_its_own_range_is_a_cycle_named_by_the_member_cell() {
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(0, 0), 1.0);
+        assert_eq!(
+            workbook.set_formula(cell(4, 0), "=SUM(A1:A10)"),
+            Err(FormulaError::Cycle(vec![cell(4, 0), cell(4, 0)]))
+        );
+        workbook.set_formula(cell(0, 1), "=SUM(A1:A3)").unwrap();
+        assert!(matches!(
+            workbook.set_formula(cell(2, 0), "=B1*2"),
+            Err(FormulaError::Cycle(_))
+        ));
+        assert_eq!(workbook.value(cell(0, 1)), Value::Number(1.0));
+    }
+
+    #[test]
+    fn rebound_ranges_stay_rectangular_or_become_explicit_member_lists() {
+        let parsed = ParsedFormula::parse("=SUM(A1:B2)", 0, &HashMap::new()).unwrap();
+        assert_eq!(
+            parsed.references(),
+            vec![cell(0, 0), cell(0, 1), cell(1, 0), cell(1, 1)]
+        );
+        let shifted = parsed
+            .clone()
+            .map_references(|id| CellId::new(id.sheet, id.row + 3, id.column + 1));
+        assert!(matches!(
+            &shifted.expression,
+            Expr::Function(Function::Sum, arguments)
+                if matches!(arguments[0], Expr::Range { anchor, members: None, rows: 2, columns: 2 }
+                    if anchor == cell(3, 1))
+        ));
+        // A row inserted through the middle of the range keeps the original
+        // four cells, which no longer form a rectangle.
+        let split = parsed.map_references(|id| {
+            CellId::new(
+                id.sheet,
+                if id.row >= 1 { id.row + 1 } else { id.row },
+                id.column,
+            )
+        });
+        assert!(matches!(
+            &split.expression,
+            Expr::Function(Function::Sum, arguments)
+                if matches!(&arguments[0], Expr::Range { members: Some(members), rows: 2, columns: 2, .. }
+                    if members == &vec![cell(0, 0), cell(0, 1), cell(2, 0), cell(2, 1)])
+        ));
+        let mut workbook = Workbook::default();
+        for (row, column, value) in [
+            (0, 0, 1.0),
+            (0, 1, 2.0),
+            (1, 0, 100.0),
+            (1, 1, 100.0),
+            (2, 0, 3.0),
+            (2, 1, 4.0),
+        ] {
+            workbook.set_number(cell(row, column), value);
+        }
+        workbook.set_parsed_formula(cell(5, 5), split).unwrap();
+        assert_eq!(workbook.value(cell(5, 5)), Value::Number(10.0));
+        workbook
+            .set_formula(cell(6, 5), "=INDEX(A1:B3,3,2)")
+            .unwrap();
+        assert_eq!(workbook.value(cell(6, 5)), Value::Number(4.0));
+        assert_eq!(range_node_count(&workbook), 2);
     }
 
     #[test]
