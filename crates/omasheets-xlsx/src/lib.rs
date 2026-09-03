@@ -4,12 +4,12 @@
 //! matching `omasheets_calc::serial_date`; workbooks that declare the 1904 date
 //! system are rejected rather than silently offset by 1462 days.
 
-use calamine::{CellErrorType, Data, Range, Reader, Xlsx};
+use calamine::{Cell, CellErrorType, Data, Range, Reader, Xlsx, XlsxFormulaMetadata};
 use omasheets_calc::serial_date::DATE_SYSTEM;
 use omasheets_calc::{CalcError, CellId, FormulaError, Value, Workbook};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fs::File;
 use std::io::{BufReader, Cursor, Read, Seek, Write};
@@ -127,6 +127,16 @@ pub struct ImportedWorkbook {
 }
 
 impl ImportedWorkbook {
+    /// The compared formula cells whose recalculated value differs from the
+    /// stored one, with both values, for tooling that investigates
+    /// mismatches; the score report itself stays aggregate.
+    pub fn mismatched_cells(&self) -> impl Iterator<Item = (CellId, &Value, Value)> {
+        self.stored_formula_values
+            .iter()
+            .map(|(cell, stored)| (*cell, stored, self.workbook.value(*cell)))
+            .filter(|(_, stored, calculated)| !values_match(stored, calculated))
+    }
+
     pub fn parity(&self) -> ParitySummary {
         let stored_values_matched = self
             .stored_formula_values
@@ -248,24 +258,74 @@ pub fn import_xlsx(path: &Path, limits: ImportLimits) -> Result<ImportedWorkbook
         });
     }
 
-    let defined_names: Vec<(String, String)> = source
-        .defined_names()
-        .iter()
-        .map(|(name, definition)| (name.clone(), definition.clone()))
-        .collect();
+    // Read the names from the package part rather than through Calamine,
+    // which drops each name's `localSheetId` scope.
+    let defined_names = read_defined_names(path)?;
     let mut ranges = Vec::with_capacity(sheet_names.len());
     for name in &sheet_names {
         let values = source
             .worksheet_range(name)
             .map_err(|error| ImportError::Read(error.to_string()))?;
-        let formulas = source
-            .worksheet_formula(name)
-            .map_err(|error| ImportError::Read(error.to_string()))?;
+        let formulas = read_formulas(&mut source, name)?;
         ranges.push((name.clone(), values, formulas));
     }
     let mut imported = import_ranges_with_names(ranges, defined_names, source_sha256, limits)?;
     imported.skipped_sheets = skipped_sheets;
     Ok(imported)
+}
+
+/// Reads a sheet's formulas, expanding shared formulas from their anchor
+/// cell. Calamine's `worksheet_formula` shifts a derived cell from the
+/// top-left of the shared `ref` range instead; Excel anchors a group at its
+/// first cell, which need not be that corner (a corner cell can carry its own
+/// formula), and the corpus has sheets whose derived cells came out shifted
+/// by a column as a result. A derived cell whose anchor appears later in the
+/// stream is resolved at the end; one whose anchor never appears is skipped.
+fn read_formulas<RS: Read + Seek>(
+    source: &mut Xlsx<RS>,
+    name: &str,
+) -> Result<Range<String>, ImportError> {
+    let read_error = |error: calamine::XlsxError| ImportError::Read(error.to_string());
+    // Chart and dialog sheets have no cells; Calamine's own range readers
+    // return an empty range for them and so does this one.
+    let mut reader = match source.worksheet_cells_reader(name) {
+        Ok(reader) => reader,
+        Err(calamine::XlsxError::NotAWorksheet(_)) => return Ok(Range::default()),
+        Err(error) => return Err(read_error(error)),
+    };
+    let mut anchors: HashMap<usize, ((u32, u32), String)> = HashMap::new();
+    let mut cells = Vec::new();
+    let mut pending = Vec::new();
+    while let Some(record) = reader
+        .next_cell_with_formula_metadata()
+        .map_err(read_error)?
+    {
+        match record.formula {
+            Some(XlsxFormulaMetadata::Normal { formula }) => {
+                cells.push(Cell::new(record.pos, formula));
+            }
+            Some(XlsxFormulaMetadata::Shared {
+                shared_index,
+                formula,
+                ..
+            }) => {
+                anchors.insert(shared_index, (record.pos, formula.clone()));
+                cells.push(Cell::new(record.pos, formula));
+            }
+            Some(XlsxFormulaMetadata::SharedDerived { shared_index }) => {
+                pending.push((record.pos, shared_index));
+            }
+            _ => {}
+        }
+    }
+    for (position, shared_index) in pending {
+        if let Some((anchor, template)) = anchors.get(&shared_index) {
+            let formula =
+                calamine::expand_shared_formula(template, *anchor, position).map_err(read_error)?;
+            cells.push(Cell::new(position, formula));
+        }
+    }
+    Ok(Range::from_sparse(cells))
 }
 
 /// Opens a workbook, and when Calamine refuses it because a `<sheet>` entry
@@ -312,21 +372,6 @@ fn repair_dangling_sheets(path: &Path) -> Result<(Vec<u8>, Vec<String>), ImportE
     let file = File::open(path).map_err(|error| ImportError::Open(error.to_string()))?;
     let mut archive =
         zip::ZipArchive::new(file).map_err(|error| ImportError::Open(error.to_string()))?;
-    let read_part =
-        |archive: &mut zip::ZipArchive<File>, name: &str| -> Result<String, ImportError> {
-            let mut part = archive
-                .by_name(name)
-                .map_err(|error| ImportError::Open(format!("{name}: {error}")))?;
-            if part.size() > MAX_WORKBOOK_PART_BYTES {
-                return Err(ImportError::Open(format!(
-                    "{name} exceeds the repair size limit"
-                )));
-            }
-            let mut text = String::new();
-            part.read_to_string(&mut text)
-                .map_err(|error| ImportError::Open(format!("{name}: {error}")))?;
-            Ok(text)
-        };
     let relationships = read_part(&mut archive, "xl/_rels/workbook.xml.rels")?;
     let workbook = read_part(&mut archive, "xl/workbook.xml")?;
     let known_ids: std::collections::HashSet<String> =
@@ -362,6 +407,149 @@ fn repair_dangling_sheets(path: &Path) -> Result<(Vec<u8>, Vec<String>), ImportE
 
 /// Values of every `name="…"` attribute in `xml`, in document order. The
 /// package parts involved are machine-written, so a lexical scan is enough.
+/// Reads one small XML part of the package as text, refusing parts over
+/// [`MAX_WORKBOOK_PART_BYTES`].
+fn read_part(archive: &mut zip::ZipArchive<File>, name: &str) -> Result<String, ImportError> {
+    let mut part = archive
+        .by_name(name)
+        .map_err(|error| ImportError::Open(format!("{name}: {error}")))?;
+    if part.size() > MAX_WORKBOOK_PART_BYTES {
+        return Err(ImportError::Open(format!(
+            "{name} exceeds the workbook part size limit"
+        )));
+    }
+    let mut text = String::new();
+    part.read_to_string(&mut text)
+        .map_err(|error| ImportError::Open(format!("{name}: {error}")))?;
+    Ok(text)
+}
+
+/// A defined name from `xl/workbook.xml`. `sheet` is the name of the scope
+/// sheet for a `localSheetId` name and `None` for a workbook-level name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DefinedName {
+    pub sheet: Option<String>,
+    pub name: String,
+    pub definition: String,
+}
+
+/// Reads every `<definedName>` of the workbook part with its scope. A
+/// `localSheetId` is an index into the part's own `<sheet>` list, so it is
+/// resolved to a sheet name here, before any repair renumbers the sheets; a
+/// name whose scope index points past that list is dropped.
+fn read_defined_names(path: &Path) -> Result<Vec<DefinedName>, ImportError> {
+    let file = File::open(path).map_err(|error| ImportError::Open(error.to_string()))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|error| ImportError::Open(error.to_string()))?;
+    let workbook = read_part(&mut archive, "xl/workbook.xml")?;
+    Ok(parse_defined_names(&workbook))
+}
+
+fn parse_defined_names(workbook_xml: &str) -> Vec<DefinedName> {
+    let mut sheets = Vec::new();
+    let mut rest = workbook_xml;
+    while let Some(start) = rest.find("<sheet ") {
+        let Some(length) = rest[start..].find('>') else {
+            break;
+        };
+        let element = &rest[start..start + length];
+        if let Some(name) = attribute(element, "name") {
+            sheets.push(name);
+        }
+        rest = &rest[start + length + 1..];
+    }
+    let mut names = Vec::new();
+    let mut rest = workbook_xml;
+    while let Some(start) = rest.find("<definedName ") {
+        let after_tag = &rest[start..];
+        let Some(tag_end) = after_tag.find('>') else {
+            break;
+        };
+        let tag = &after_tag[..tag_end];
+        let self_closing = tag.ends_with('/');
+        let body_start = tag_end + 1;
+        let (definition, consumed) = if self_closing {
+            (String::new(), body_start)
+        } else {
+            match after_tag[body_start..].find("</definedName>") {
+                Some(end) => (
+                    unescape_xml(&after_tag[body_start..body_start + end]),
+                    body_start + end,
+                ),
+                None => break,
+            }
+        };
+        rest = &after_tag[consumed..];
+        let Some(name) = attribute(tag, "name") else {
+            continue;
+        };
+        let sheet = match attribute(tag, "localSheetId") {
+            None => None,
+            Some(index) => match index.parse::<usize>().ok().and_then(|i| sheets.get(i)) {
+                Some(sheet) => Some(sheet.clone()),
+                None => continue,
+            },
+        };
+        names.push(DefinedName {
+            sheet,
+            name,
+            definition,
+        });
+    }
+    names
+}
+
+/// The value of attribute `name` in one start tag, unescaped.
+fn attribute(tag: &str, name: &str) -> Option<String> {
+    let needle = format!(" {name}=\"");
+    let start = tag.find(&needle)? + needle.len();
+    let end = tag[start..].find('"')?;
+    Some(unescape_xml(&tag[start..start + end]))
+}
+
+/// Decodes the five XML entities and numeric character references; anything
+/// else is kept as written.
+fn unescape_xml(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('&') {
+        output.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let Some(end) = after.find(';').filter(|end| *end <= 10) else {
+            output.push('&');
+            rest = after;
+            continue;
+        };
+        let entity = &after[..end];
+        let decoded = match entity {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            _ => entity
+                .strip_prefix('#')
+                .and_then(|number| match number.strip_prefix('x') {
+                    Some(hex) => u32::from_str_radix(hex, 16).ok(),
+                    None => number.parse::<u32>().ok(),
+                })
+                .and_then(char::from_u32),
+        };
+        match decoded {
+            Some(character) => {
+                output.push(character);
+                rest = &after[end + 1..];
+            }
+            None => {
+                output.push('&');
+                rest = after;
+            }
+        }
+    }
+    output.push_str(rest);
+    output
+}
+
 fn attribute_values(xml: &str, name: &str) -> Vec<String> {
     let needle = format!("{name}=\"");
     let mut values = Vec::new();
@@ -446,7 +634,7 @@ fn import_ranges(
 
 fn import_ranges_with_names(
     ranges: Vec<(String, Range<Data>, Range<String>)>,
-    defined_names: Vec<(String, String)>,
+    defined_names: Vec<DefinedName>,
     source_sha256: String,
     limits: ImportLimits,
 ) -> Result<ImportedWorkbook, ImportError> {
@@ -495,8 +683,20 @@ fn import_ranges_with_names(
     for sheet in &sheets {
         workbook.define_sheet(sheet.index, sheet.name.clone());
     }
-    for (name, definition) in defined_names {
-        workbook.define_name(name, definition);
+    let sheet_indices: HashMap<&str, u32> = sheets
+        .iter()
+        .map(|sheet| (sheet.name.as_str(), sheet.index))
+        .collect();
+    for name in defined_names {
+        match name.sheet {
+            None => workbook.define_name(name.name, name.definition),
+            // A scope naming a sheet the repair skipped goes with that sheet.
+            Some(scope) => {
+                if let Some(index) = sheet_indices.get(scope.as_str()) {
+                    workbook.define_sheet_name(*index, name.name, name.definition);
+                }
+            }
+        }
     }
     let mut formula_records = Vec::with_capacity(observed_formulas);
 
@@ -625,9 +825,61 @@ fn values_match(stored: &Value, calculated: &Value) -> bool {
 mod tests {
     use super::*;
 
+    fn workbook_name(name: &str, definition: &str) -> DefinedName {
+        DefinedName {
+            sheet: None,
+            name: name.into(),
+            definition: definition.into(),
+        }
+    }
+
     /// A minimal package: one real worksheet plus `<sheet>` entries that
     /// point nowhere, the shape left behind by converted legacy macro sheets.
     fn package_with_dangling_sheets(dangling: &[(&str, &str)]) -> Vec<u8> {
+        package(
+            dangling,
+            r#"<definedName name="Total">Data!$A$3</definedName>"#,
+            "",
+            "",
+        )
+    }
+
+    /// A minimal package with the given dangling `<sheet>` entries, the given
+    /// `<definedNames>` body, extra `<c>` cells appended to row 1 and extra
+    /// `<row>` elements appended after row 3.
+    fn package(
+        dangling: &[(&str, &str)],
+        defined_names: &str,
+        extra_cells: &str,
+        extra_rows: &str,
+    ) -> Vec<u8> {
+        package_with_chartsheet(dangling, defined_names, extra_cells, extra_rows, false)
+    }
+
+    /// As [`package`], optionally with a chartsheet named `Chart` after the
+    /// worksheet.
+    fn package_with_chartsheet(
+        dangling: &[(&str, &str)],
+        defined_names: &str,
+        extra_cells: &str,
+        extra_rows: &str,
+        chartsheet: bool,
+    ) -> Vec<u8> {
+        let chart_sheet_entry = if chartsheet {
+            r#"<sheet name="Chart" sheetId="2" r:id="rId2"/>"#
+        } else {
+            ""
+        };
+        let chart_relationship = if chartsheet {
+            r#"<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chartsheet" Target="chartsheets/sheet1.xml"/>"#
+        } else {
+            ""
+        };
+        let chart_override = if chartsheet {
+            r#"<Override PartName="/xl/chartsheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.chartsheet+xml"/>"#
+        } else {
+            ""
+        };
         let sheets: String = dangling
             .iter()
             .map(|(name, id)| {
@@ -637,7 +889,9 @@ mod tests {
         let parts = [
             (
                 "[Content_Types].xml",
-                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#.to_string(),
+                format!(
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>{chart_override}</Types>"#
+                ),
             ),
             (
                 "_rels/.rels",
@@ -646,16 +900,24 @@ mod tests {
             (
                 "xl/workbook.xml",
                 format!(
-                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/>{sheets}</sheets><definedNames><definedName name="Total">Data!$A$3</definedName></definedNames></workbook>"#
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/>{chart_sheet_entry}{sheets}</sheets><definedNames>{defined_names}</definedNames></workbook>"#
                 ),
             ),
             (
                 "xl/_rels/workbook.xml.rels",
-                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#.to_string(),
+                format!(
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>{chart_relationship}</Relationships>"#
+                ),
+            ),
+            (
+                "xl/chartsheets/sheet1.xml",
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><chartsheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetPr/><sheetViews><sheetView workbookViewId="0"/></sheetViews></chartsheet>"#.to_string(),
             ),
             (
                 "xl/worksheets/sheet1.xml",
-                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>2</v></c></row><row r="2"><c r="A2"><v>3</v></c></row><row r="3"><c r="A3"><f>A1+A2</f><v>5</v></c></row></sheetData></worksheet>"#.to_string(),
+                format!(
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>2</v></c>{extra_cells}</row><row r="2"><c r="A2"><v>3</v></c></row><row r="3"><c r="A3"><f>A1+A2</f><v>5</v></c></row>{extra_rows}</sheetData></worksheet>"#
+                ),
             ),
         ];
         let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
@@ -679,6 +941,93 @@ mod tests {
         ));
         std::fs::write(&path, bytes).unwrap();
         path
+    }
+
+    #[test]
+    fn defined_names_keep_their_sheet_scope_and_entities() {
+        let xml = r#"<definedName name="Total">Data!$A$3</definedName><definedName name="Total" localSheetId="0" hidden="1">Data!$A$1</definedName><definedName name="Joined" comment="a &amp; b">Data!$A$1&amp;"x"</definedName><definedName name="Orphan" localSheetId="7">Data!$A$1</definedName><definedName name="Empty"/><definedName name="Quoted">'P &amp; L'!$B$2</definedName>"#;
+        assert_eq!(
+            parse_defined_names(&format!(
+                r#"<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/><sheet name="P &amp; L" sheetId="2" r:id="rId2"/></sheets><definedNames>{xml}</definedNames></workbook>"#
+            )),
+            vec![
+                workbook_name("Total", "Data!$A$3"),
+                DefinedName {
+                    sheet: Some("Data".into()),
+                    name: "Total".into(),
+                    definition: "Data!$A$1".into(),
+                },
+                workbook_name("Joined", "Data!$A$1&\"x\""),
+                workbook_name("Empty", ""),
+                workbook_name("Quoted", "'P & L'!$B$2"),
+            ]
+        );
+        assert_eq!(unescape_xml("&lt;&#65;&#x42;&bogus;&amp"), "<AB&bogus;&amp");
+
+        // On the sheet, the scoped `Total` (A1 = 2) wins over the workbook
+        // `Total` (A3 = 5): B1 stores 20, as Excel computed it.
+        let path = temporary_xlsx(&package(
+            &[],
+            xml,
+            r#"<c r="B1"><f>Total*10</f><v>20</v></c><c r="C1" t="str"><f>Joined</f><v>2x</v></c>"#,
+            "",
+        ));
+        let imported = import_xlsx(&path, ImportLimits::default()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 0, 1)),
+            Value::Number(20.0)
+        );
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 0, 2)),
+            Value::Text("2x".into())
+        );
+        assert_eq!(imported.parity().stored_values_matched, 3);
+        assert_eq!(imported.parity().stored_values_mismatched, 0);
+    }
+
+    #[test]
+    fn shared_formulas_expand_from_their_anchor_cell() {
+        // The shared group is anchored at B5 with ref A5:B6; A5 carries its
+        // own formula. A6 is therefore B5's template shifted one row down
+        // and one column left (A5*2 = 140), not the ref corner's (B5*2 = 44).
+        let rows = r#"<row r="4"><c r="A4"><v>7</v></c><c r="B4"><v>11</v></c></row><row r="5"><c r="A5"><f>A4*10</f><v>70</v></c><c r="B5"><f t="shared" ref="A5:B6" si="0">B4*2</f><v>22</v></c></row><row r="6"><c r="A6"><f t="shared" si="0"/><v>140</v></c><c r="B6"><f t="shared" si="0"/><v>44</v></c></row>"#;
+        let path = temporary_xlsx(&package(
+            &[],
+            r#"<definedName name="Total">Data!$A$3</definedName>"#,
+            "",
+            rows,
+        ));
+        let imported = import_xlsx(&path, ImportLimits::default()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        for (cell, expected) in [
+            (CellId::new(0, 4, 0), 70.0),
+            (CellId::new(0, 4, 1), 22.0),
+            (CellId::new(0, 5, 0), 140.0),
+            (CellId::new(0, 5, 1), 44.0),
+        ] {
+            assert_eq!(imported.workbook.value(cell), Value::Number(expected));
+        }
+        assert_eq!(imported.parity().formula_cells_loaded, 5);
+        assert_eq!(imported.parity().stored_values_matched, 5);
+        assert_eq!(imported.parity().stored_values_mismatched, 0);
+    }
+
+    #[test]
+    fn chartsheets_import_as_empty_sheets() {
+        let path = temporary_xlsx(&package_with_chartsheet(
+            &[],
+            r#"<definedName name="Total">Data!$A$3</definedName>"#,
+            "",
+            "",
+            true,
+        ));
+        let imported = import_xlsx(&path, ImportLimits::default()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(imported.sheets.len(), 2);
+        assert_eq!(imported.sheets[1].name, "Chart");
+        assert_eq!(imported.parity().formula_cells_loaded, 1);
+        assert_eq!(imported.parity().stored_values_matched, 1);
     }
 
     #[test]
@@ -1045,8 +1394,8 @@ mod tests {
                 ]),
             )],
             vec![
-                ("Rates".into(), "Data!$A$1:$A$2".into()),
-                ("Broken".into(), "[2]External!A1".into()),
+                workbook_name("Rates", "Data!$A$1:$A$2"),
+                workbook_name("Broken", "[2]External!A1"),
             ],
             "j".repeat(64),
             ImportLimits::default(),

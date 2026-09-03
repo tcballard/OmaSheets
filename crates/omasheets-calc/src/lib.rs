@@ -14,6 +14,10 @@ use std::fmt;
 
 /// Defined names may refer to other names; deeper chains are rejected.
 const MAX_NAME_DEPTH: usize = 8;
+/// Excel's grid: `XFD1048576` is the last cell. A token past either bound
+/// (`TABLE1`, `PIPE2`) is a defined name, never a reference, as in Excel.
+const MAX_COLUMNS: u32 = 16_384;
+const MAX_ROWS: u32 = 1_048_576;
 
 const MAX_RANGE_CELLS: usize = 1_000_000;
 
@@ -347,7 +351,7 @@ impl ParsedFormula {
         // Stand-alone parsing has no workbook, so no defined names resolve;
         // a name reference fails with `UnknownName`, as it would in a
         // workbook without definitions.
-        let defined_names = HashMap::new();
+        let defined_names = DefinedNames::default();
         Parser::new(source, sheet, &lowered, &defined_names)
             .parse()
             .map(|expression| Self { expression })
@@ -518,7 +522,7 @@ pub struct Workbook {
     dirty_marks: Vec<u64>,
     pending: Vec<usize>,
     sheet_names: HashMap<String, u32>,
-    defined_names: HashMap<String, String>,
+    defined_names: DefinedNames,
     /// Shared range nodes by identity, so every formula over the same cells
     /// shares one node and one set of member edges.
     ranges: HashMap<RangeKey, usize>,
@@ -542,7 +546,7 @@ impl Default for Workbook {
             dirty_marks: Vec::new(),
             pending: Vec::new(),
             sheet_names: HashMap::new(),
-            defined_names: HashMap::new(),
+            defined_names: DefinedNames::default(),
             ranges: HashMap::new(),
             generation: 1,
             bulk: None,
@@ -562,6 +566,25 @@ impl Workbook {
     /// `UnsupportedName` failure. The first definition of a name wins.
     pub fn define_name(&mut self, name: impl Into<String>, definition: impl Into<String>) {
         self.defined_names
+            .workbook
+            .entry(name.into().to_lowercase())
+            .or_insert_with(|| definition.into());
+    }
+
+    /// Registers a defined name scoped to one sheet (a `localSheetId` name in
+    /// a workbook file). Formulas on that sheet resolve it before any
+    /// workbook-level name of the same spelling; formulas on other sheets
+    /// never see it. The first definition per sheet wins.
+    pub fn define_sheet_name(
+        &mut self,
+        sheet: u32,
+        name: impl Into<String>,
+        definition: impl Into<String>,
+    ) {
+        self.defined_names
+            .sheet
+            .entry(sheet)
+            .or_default()
             .entry(name.into().to_lowercase())
             .or_insert_with(|| definition.into());
     }
@@ -1120,9 +1143,9 @@ impl Workbook {
             Expr::Empty => Value::Blank,
             Expr::Reference(index) => self.cells[*index].value.clone(),
             Expr::UnaryMinus(inner) => match self.evaluate(inner) {
-                Value::Number(value) => Value::Number(-value),
-                Value::Blank => Value::Number(-0.0),
-                Value::Boolean(value) => Value::Number(if value { -1.0 } else { -0.0 }),
+                Value::Number(value) => number_value(-value),
+                Value::Blank => Value::Number(0.0),
+                Value::Boolean(value) => Value::Number(if value { -1.0 } else { 0.0 }),
                 Value::Text(_) => Value::Error(CalcError::InvalidValue),
                 other => other,
             },
@@ -1323,9 +1346,9 @@ impl Workbook {
             .collect();
 
         match function {
-            Function::Sum => Value::Number(numbers.iter().sum()),
+            Function::Sum => number_value(numbers.iter().sum()),
             Function::Average if !numbers.is_empty() => {
-                Value::Number(numbers.iter().sum::<f64>() / numbers.len() as f64)
+                number_value(numbers.iter().sum::<f64>() / numbers.len() as f64)
             }
             Function::Average => Value::Error(CalcError::DivisionByZero),
             Function::Min => Value::Number(numbers.into_iter().reduce(f64::min).unwrap_or(0.0)),
@@ -1958,10 +1981,9 @@ impl Workbook {
         for pair in criteria_arguments.chunks_exact(2) {
             let mut range = Vec::new();
             self.flatten_values(&pair[0], &mut range);
+            // An error criterion counts the cells holding that error, as in
+            // Excel (`COUNTIF(range, NA())`).
             let criterion = self.evaluate(&pair[1]);
-            if matches!(criterion, Value::Error(_)) {
-                return criterion;
-            }
             criteria.push((range, criterion));
         }
         let Some(length) = criteria.first().map(|(range, _)| range.len()) else {
@@ -2024,8 +2046,10 @@ impl Workbook {
                 let Some((node, rows, columns)) = range_parts(&arguments[0]) else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
-                let Ok(row) = positive_index(self.evaluate(&arguments[1])) else {
-                    return Value::Error(CalcError::InvalidArguments);
+                // An error row (a failed MATCH) is the result, as in Excel.
+                let row = match positive_index(self.evaluate(&arguments[1])) {
+                    Ok(row) => row,
+                    Err(error) => return Value::Error(error),
                 };
                 let column = if arguments.len() == 3 {
                     match positive_index(self.evaluate(&arguments[2])) {
@@ -2144,9 +2168,6 @@ impl Workbook {
                 }
                 for index in 0..length {
                     let candidate = self.range_value(lookup_node, index);
-                    if matches!(candidate, Value::Error(_)) {
-                        return candidate;
-                    }
                     if lookup_equal(&lookup, &candidate) {
                         return self.range_value(return_node, index);
                     }
@@ -2195,11 +2216,10 @@ fn match_position(
     if let Value::Error(error) = lookup {
         return Err(error.clone());
     }
+    // Error cells in the searched vector never match and never propagate,
+    // as in Excel: a `#REF!` among the keys leaves the lookup `#N/A`.
     if mode == MatchMode::Exact {
         for (index, candidate) in candidates.iter().enumerate() {
-            if let Value::Error(error) = candidate {
-                return Err(error.clone());
-            }
             if lookup_equal(lookup, candidate) {
                 return Ok(index);
             }
@@ -2209,7 +2229,7 @@ fn match_position(
     let populated: Vec<(usize, &Value)> = candidates
         .iter()
         .enumerate()
-        .filter(|(_, candidate)| !matches!(candidate, Value::Blank))
+        .filter(|(_, candidate)| !matches!(candidate, Value::Blank | Value::Error(_)))
         .collect();
     if populated.is_empty() {
         return Err(CalcError::NotAvailable);
@@ -2268,7 +2288,9 @@ fn typed_compare(left: &Value, right: &Value) -> Result<std::cmp::Ordering, Calc
         _ => (left.clone(), right.clone()),
     };
     Ok(match (&left, &right) {
-        (Value::Number(left), Value::Number(right)) => left.total_cmp(right),
+        (Value::Number(left), Value::Number(right)) => {
+            left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
+        }
         (Value::Text(left), Value::Text(right)) => left.to_lowercase().cmp(&right.to_lowercase()),
         (Value::Boolean(left), Value::Boolean(right)) => left.cmp(right),
         _ => rank(&left).cmp(&rank(&right)),
@@ -2295,11 +2317,23 @@ fn positive_index(value: Value) -> Result<usize, CalcError> {
     }
 }
 
+/// Exact-match lookup equality: text ignores case, and a blank cell never
+/// matches anything, so a blank lookup value against a column with blank
+/// cells is `#N/A`, as in Excel.
 fn lookup_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Text(left), Value::Text(right)) => left.eq_ignore_ascii_case(right),
+        (Value::Blank, _) | (_, Value::Blank) | (Value::Error(_), _) | (_, Value::Error(_)) => {
+            false
+        }
         _ => left == right,
     }
+}
+
+/// A numeric result with negative zero folded into zero, which is how Excel
+/// stores, prints and compares it (`-1*0` is `0`, not `-0`).
+fn number_value(value: f64) -> Value {
+    Value::Number(if value == 0.0 { 0.0 } else { value })
 }
 
 /// Date arguments accept numbers and blanks only. Booleans and text are
@@ -2394,11 +2428,11 @@ fn apply_binary(operator: BinaryOp, left: Value, right: Value) -> Value {
         (Err(error), _) | (_, Err(error)) => return Value::Error(error),
     };
     match operator {
-        BinaryOp::Add => Value::Number(left + right),
-        BinaryOp::Subtract => Value::Number(left - right),
-        BinaryOp::Multiply => Value::Number(left * right),
+        BinaryOp::Add => number_value(left + right),
+        BinaryOp::Subtract => number_value(left - right),
+        BinaryOp::Multiply => number_value(left * right),
         BinaryOp::Divide if right == 0.0 => Value::Error(CalcError::DivisionByZero),
-        BinaryOp::Divide => Value::Number(left / right),
+        BinaryOp::Divide => number_value(left / right),
         BinaryOp::Power => {
             let result = left.powf(right);
             if (left == 0.0 && right == 0.0) || !result.is_finite() {
@@ -2732,10 +2766,11 @@ fn unary_number(values: &[Value], operation: impl FnOnce(f64) -> f64) -> Value {
     match number(values[0].clone()) {
         Ok(value) => {
             let result = operation(value);
-            if result.is_nan() {
-                Value::Error(CalcError::InvalidValue)
-            } else {
+            // Outside the function's domain (`SQRT(-1)`, `LN(0)`) is `#NUM!`.
+            if result.is_finite() {
                 Value::Number(result)
+            } else {
+                Value::Error(CalcError::InvalidNumber)
             }
         }
         Err(error) => Value::Error(error),
@@ -2964,24 +2999,69 @@ fn exact_text(values: &[Value]) -> Value {
     }
 }
 
+/// Excel's criteria matching. Blank cells and errors in the criteria range
+/// never satisfy an equality or ordering test and satisfy every `<>` test
+/// (with `""` and `<>` themselves testing for blank), a criterion taken from
+/// an empty cell is the number 0, an error criterion matches that error.
 fn criterion_matches(candidate: Value, criterion: Value) -> Result<bool, CalcError> {
     let (operator, expected) = match criterion {
         Value::Text(text) => parse_criterion(&text),
+        Value::Blank => (BinaryOp::Equal, Value::Number(0.0)),
         value => (BinaryOp::Equal, value),
     };
-    if let (Value::Text(left), Value::Text(right)) = (&candidate, &expected) {
-        let left = left.to_lowercase();
-        let right = right.to_lowercase();
+    if expected == Value::Blank {
+        let empty =
+            matches!(&candidate, Value::Blank | Value::Text(_) if text_is_empty(&candidate));
         return Ok(match operator {
-            BinaryOp::Equal => left == right,
-            BinaryOp::NotEqual => left != right,
-            BinaryOp::Less => left < right,
-            BinaryOp::LessOrEqual => left <= right,
-            BinaryOp::Greater => left > right,
-            BinaryOp::GreaterOrEqual => left >= right,
-            _ => return Err(CalcError::InvalidArguments),
+            BinaryOp::Equal => empty,
+            BinaryOp::NotEqual => !empty,
+            _ => false,
         });
     }
+    match (&candidate, &expected) {
+        (Value::Blank, _) => {
+            return Ok(operator == BinaryOp::NotEqual);
+        }
+        (Value::Error(candidate), Value::Error(expected)) => {
+            return Ok(match operator {
+                BinaryOp::Equal => candidate == expected,
+                BinaryOp::NotEqual => candidate != expected,
+                _ => false,
+            });
+        }
+        (Value::Error(_), _) | (_, Value::Error(_)) => {
+            return Ok(operator == BinaryOp::NotEqual);
+        }
+        _ => {}
+    }
+    // Types never cross in a criterion, except that numeric text is a number
+    // against a numeric criterion (`"5"` counts for `">4"`); any other
+    // mismatch satisfies `<>` only.
+    let (candidate, expected) = match (candidate, expected) {
+        (Value::Text(left), Value::Text(right)) => {
+            let left = left.to_lowercase();
+            let right = right.to_lowercase();
+            return Ok(match operator {
+                BinaryOp::Equal => wildcard_matches(&right, &left),
+                BinaryOp::NotEqual => !wildcard_matches(&right, &left),
+                BinaryOp::Less => left < right,
+                BinaryOp::LessOrEqual => left <= right,
+                BinaryOp::Greater => left > right,
+                BinaryOp::GreaterOrEqual => left >= right,
+                _ => return Err(CalcError::InvalidArguments),
+            });
+        }
+        (Value::Text(text), Value::Number(number)) => match text.trim().parse::<f64>() {
+            Ok(parsed) => (Value::Number(parsed), Value::Number(number)),
+            Err(_) => return Ok(operator == BinaryOp::NotEqual),
+        },
+        (candidate, expected)
+            if std::mem::discriminant(&candidate) != std::mem::discriminant(&expected) =>
+        {
+            return Ok(operator == BinaryOp::NotEqual);
+        }
+        pair => pair,
+    };
     match apply_binary(operator, candidate, expected) {
         Value::Boolean(value) => Ok(value),
         Value::Error(CalcError::InvalidValue) => Ok(false),
@@ -2990,8 +3070,79 @@ fn criterion_matches(candidate: Value, criterion: Value) -> Result<bool, CalcErr
     }
 }
 
+fn text_is_empty(value: &Value) -> bool {
+    match value {
+        Value::Blank => true,
+        Value::Text(text) => text.is_empty(),
+        _ => false,
+    }
+}
+
+fn parse_error_name(text: &str) -> Option<CalcError> {
+    Some(match text.to_ascii_uppercase().as_str() {
+        "#DIV/0!" => CalcError::DivisionByZero,
+        "#REF!" => CalcError::InvalidReference,
+        "#VALUE!" => CalcError::InvalidValue,
+        "#NUM!" => CalcError::InvalidNumber,
+        "#N/A" => CalcError::NotAvailable,
+        "#NAME?" => CalcError::InvalidName,
+        "#NULL!" => CalcError::NullIntersection,
+        _ => return None,
+    })
+}
+
+/// Excel's criteria wildcards: `?` is one character, `*` any run, `~`
+/// escapes the next character. Both sides are already lower-cased.
+fn wildcard_matches(pattern: &str, text: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let text: Vec<char> = text.chars().collect();
+    let (mut p, mut t) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while t < text.len() {
+        match pattern.get(p) {
+            Some('*') => {
+                star = Some((p, t));
+                p += 1;
+            }
+            Some('?') => {
+                p += 1;
+                t += 1;
+            }
+            Some(&character) => {
+                let literal = if character == '~' {
+                    p += 1;
+                    pattern.get(p).copied()
+                } else {
+                    Some(character)
+                };
+                if literal == Some(text[t]) {
+                    p += 1;
+                    t += 1;
+                } else if let Some((star_p, star_t)) = star {
+                    p = star_p + 1;
+                    t = star_t + 1;
+                    star = Some((star_p, star_t + 1));
+                } else {
+                    return false;
+                }
+            }
+            None => {
+                let Some((star_p, star_t)) = star else {
+                    return false;
+                };
+                p = star_p + 1;
+                t = star_t + 1;
+                star = Some((star_p, star_t + 1));
+            }
+        }
+    }
+    pattern[p..].iter().all(|character| *character == '*')
+}
+
+/// Splits a criterion string into its comparison and operand. The operand
+/// keeps its spacing when it is text (Excel matches `"Ltd "` only against
+/// `"Ltd "`); numbers and booleans are recognised after trimming.
 fn parse_criterion(criterion: &str) -> (BinaryOp, Value) {
-    let criterion = criterion.trim();
     let (operator, operand) = if let Some(value) = criterion.strip_prefix("<=") {
         (BinaryOp::LessOrEqual, value)
     } else if let Some(value) = criterion.strip_prefix(">=") {
@@ -3007,15 +3158,17 @@ fn parse_criterion(criterion: &str) -> (BinaryOp, Value) {
     } else {
         (BinaryOp::Equal, criterion)
     };
-    let operand = operand.trim();
-    let value = if operand.is_empty() {
+    let trimmed = operand.trim();
+    let value = if trimmed.is_empty() {
         Value::Blank
-    } else if operand.eq_ignore_ascii_case("TRUE") {
+    } else if trimmed.eq_ignore_ascii_case("TRUE") {
         Value::Boolean(true)
-    } else if operand.eq_ignore_ascii_case("FALSE") {
+    } else if trimmed.eq_ignore_ascii_case("FALSE") {
         Value::Boolean(false)
-    } else if let Ok(value) = operand.parse::<f64>() {
+    } else if let Ok(value) = trimmed.parse::<f64>() {
         Value::Number(value)
+    } else if let Some(error) = parse_error_name(trimmed) {
+        Value::Error(error)
     } else {
         Value::Text(operand.into())
     };
@@ -3117,8 +3270,27 @@ struct Parser<'source, 'sheets> {
     offset: usize,
     sheet: u32,
     sheet_names: &'sheets HashMap<String, u32>,
-    defined_names: &'sheets HashMap<String, String>,
+    defined_names: &'sheets DefinedNames,
     name_depth: usize,
+}
+
+/// Defined names by scope. Lower-cased name to definition source; a
+/// sheet-scoped name shadows the workbook name of the same spelling for
+/// formulas on that sheet only.
+#[derive(Default)]
+struct DefinedNames {
+    workbook: HashMap<String, String>,
+    sheet: HashMap<u32, HashMap<String, String>>,
+}
+
+impl DefinedNames {
+    fn resolve(&self, sheet: u32, lowered: &str) -> Option<&str> {
+        self.sheet
+            .get(&sheet)
+            .and_then(|names| names.get(lowered))
+            .or_else(|| self.workbook.get(lowered))
+            .map(String::as_str)
+    }
 }
 
 impl<'source, 'sheets> Parser<'source, 'sheets> {
@@ -3126,7 +3298,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
         source: &'source str,
         sheet: u32,
         sheet_names: &'sheets HashMap<String, u32>,
-        defined_names: &'sheets HashMap<String, String>,
+        defined_names: &'sheets DefinedNames,
     ) -> Self {
         let source = source.strip_prefix('=').unwrap_or(source);
         Self {
@@ -3381,10 +3553,11 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
     }
 
     /// Expands a defined name by compiling its definition in place, with the
-    /// same sheet table and a bounded depth for names that use names.
+    /// same sheet table and a bounded depth for names that use names. A name
+    /// scoped to the formula's sheet wins over a workbook-level one.
     fn parse_defined_name(&mut self, token: &str) -> Result<Expr, FormulaError> {
         let name = token.trim_start_matches('$');
-        let Some(definition) = self.defined_names.get(&name.to_lowercase()) else {
+        let Some(definition) = self.defined_names.resolve(self.sheet, &name.to_lowercase()) else {
             return Err(FormulaError::UnknownName(name.into()));
         };
         if self.name_depth >= MAX_NAME_DEPTH {
@@ -3654,6 +3827,9 @@ fn parse_a1(reference: &str, sheet: u32) -> Result<CellId, FormulaError> {
         .ok()
         .filter(|value| *value > 0)
         .ok_or_else(|| FormulaError::InvalidReference(reference.into()))?;
+    if column > MAX_COLUMNS || row > MAX_ROWS {
+        return Err(FormulaError::InvalidReference(reference.into()));
+    }
     Ok(CellId::new(sheet, row - 1, column - 1))
 }
 
@@ -3928,6 +4104,196 @@ mod tests {
     }
 
     #[test]
+    fn text_criteria_keep_their_spacing_and_match_wildcards() {
+        let mut workbook = Workbook::default();
+        workbook.set_text(cell(0, 0), "ABQ Energy Group, Ltd ");
+        workbook.set_text(cell(1, 0), "AEP Energy Services ");
+        workbook.set_text(cell(2, 0), "abq energy group, ltd ");
+        workbook.set_text(cell(3, 0), "Total*");
+        workbook.set_number(cell(4, 0), 7.0);
+        for row in 0..5 {
+            workbook.set_number(cell(row, 1), f64::from(1 << row));
+        }
+        workbook.set_text(cell(0, 2), "ABQ Energy Group, Ltd ");
+        let cases = [
+            // A criterion taken from a cell keeps its trailing space, so it
+            // matches the two spellings of that customer and nothing else.
+            ("=SUMIF(A1:A5,C1,B1:B5)", 5.0),
+            ("=SUMIF(A1:A5,\"ABQ Energy Group, Ltd\",B1:B5)", 0.0),
+            ("=COUNTIF(A1:A5,\"<>ABQ Energy Group, Ltd \")", 3.0),
+            ("=SUMIF(A1:A5,\"*Energy*\",B1:B5)", 7.0),
+            ("=COUNTIF(A1:A5,\"A?Q*\")", 2.0),
+            ("=COUNTIF(A1:A5,\"*Ltd \")", 2.0),
+            ("=COUNTIF(A1:A5,\"Total~*\")", 1.0),
+            ("=COUNTIF(A1:A5,\"Total*\")", 1.0),
+            ("=COUNTIF(A1:A5,\"*\")", 4.0),
+            ("=COUNTIF(A1:A5,\"<>*Services*\")", 4.0),
+            ("=COUNTIF(A1:A5,\" 7 \")", 1.0),
+        ];
+        for (column, (formula, expected)) in cases.into_iter().enumerate() {
+            let target = cell(6, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            assert_eq!(workbook.value(target), Value::Number(expected), "{formula}");
+        }
+    }
+
+    #[test]
+    fn lookups_skip_error_cells_and_math_domain_errors_are_num() {
+        let mut workbook = Workbook::default();
+        // A1 = #REF!, A2 = "k", A3 = 3; B1..B3 = 10, #DIV/0!, 30.
+        workbook.set_error(cell(0, 0), CalcError::InvalidReference);
+        workbook.set_text(cell(1, 0), "k");
+        workbook.set_number(cell(2, 0), 3.0);
+        workbook.set_number(cell(0, 1), 10.0);
+        workbook.set_error(cell(1, 1), CalcError::DivisionByZero);
+        workbook.set_number(cell(2, 1), 30.0);
+        let cases = [
+            (
+                "=VLOOKUP(\"k\",A1:B3,2,FALSE)",
+                Value::Error(CalcError::DivisionByZero),
+            ),
+            ("=VLOOKUP(3,A1:B3,2,FALSE)", Value::Number(30.0)),
+            (
+                "=VLOOKUP(\"zz\",A1:B3,2,FALSE)",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            ("=VLOOKUP(3,A1:B3,2,TRUE)", Value::Number(30.0)),
+            ("=MATCH(3,A1:A3,0)", Value::Number(3.0)),
+            (
+                "=MATCH(\"zz\",A1:A3,0)",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            ("=XLOOKUP(3,A1:A3,B1:B3)", Value::Number(30.0)),
+            (
+                "=XLOOKUP(\"zz\",A1:A3,B1:B3)",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            (
+                "=VLOOKUP(A1,A1:B3,2,FALSE)",
+                Value::Error(CalcError::InvalidReference),
+            ),
+            ("=SQRT(-1)", Value::Error(CalcError::InvalidNumber)),
+            ("=LN(0)", Value::Error(CalcError::InvalidNumber)),
+            ("=SQRT(16)", Value::Number(4.0)),
+        ];
+        for (column, (formula, expected)) in cases.into_iter().enumerate() {
+            let target = cell(6, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            assert_eq!(workbook.value(target), expected, "{formula}");
+        }
+    }
+
+    #[test]
+    fn index_passes_through_the_error_of_a_failed_match() {
+        let mut workbook = Workbook::default();
+        workbook.set_text(cell(0, 0), "a");
+        workbook.set_text(cell(1, 0), "b");
+        let cases = [
+            (
+                "=INDEX(A1:A2,MATCH(\"zz\",A1:A2,0))",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            ("=INDEX(A1:A2,NA())", Value::Error(CalcError::NotAvailable)),
+            ("=INDEX(A1:A2,\"x\")", Value::Error(CalcError::InvalidValue)),
+            (
+                "=INDEX(A1:A2,MATCH(\"b\",A1:A2,0))",
+                Value::Text("b".into()),
+            ),
+        ];
+        for (column, (formula, expected)) in cases.into_iter().enumerate() {
+            let target = cell(6, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            assert_eq!(workbook.value(target), expected, "{formula}");
+        }
+    }
+
+    #[test]
+    fn negative_zero_is_zero_and_blank_lookups_never_match_blank_cells() {
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(0, 0), -1.0);
+        workbook.set_number(cell(1, 0), 0.0);
+        workbook.set_text(cell(2, 0), "b");
+        workbook.set_number(cell(2, 1), 9.0);
+        let cases = [
+            ("=A1*A2", Value::Number(0.0)),
+            ("=(A1*A2)=0", Value::Boolean(true)),
+            ("=(A1*A2)<0", Value::Boolean(false)),
+            ("=SUM(A1*A2,A1*A2)=0", Value::Boolean(true)),
+            ("=-A2&\"\"", Value::Text("0".into())),
+            ("=-B1", Value::Number(0.0)),
+            ("=SUM(D1:D3)", Value::Number(0.0)),
+            ("=MATCH(B1,A1:A3,0)", Value::Error(CalcError::NotAvailable)),
+            ("=MATCH(D1,D1:D3,0)", Value::Error(CalcError::NotAvailable)),
+            (
+                "=VLOOKUP(D1,D1:E3,2,FALSE)",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            ("=VLOOKUP(\"B\",A1:B3,2,FALSE)", Value::Number(9.0)),
+        ];
+        for (column, (formula, expected)) in cases.into_iter().enumerate() {
+            let target = cell(6, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            let value = workbook.value(target);
+            assert_eq!(value, expected, "{formula}");
+            if let Value::Number(number) = value {
+                assert!(number.is_sign_positive(), "{formula} keeps a negative zero");
+            }
+        }
+    }
+
+    #[test]
+    fn criteria_treat_blanks_and_errors_as_excel_does() {
+        let mut workbook = Workbook::default();
+        // A1 blank, A2 = 0, A3 = "", A4 = #N/A, A5 = "x", A6 = 5.
+        workbook.set_number(cell(1, 0), 0.0);
+        workbook.set_text(cell(2, 0), "");
+        workbook.set_error(cell(3, 0), CalcError::NotAvailable);
+        workbook.set_text(cell(4, 0), "x");
+        workbook.set_number(cell(5, 0), 5.0);
+        for row in 0..6 {
+            workbook.set_number(cell(row, 1), f64::from(1 << row));
+        }
+        // D1 = 5, D2 = "5" (text), D3 = "five", D4 = TRUE.
+        workbook.set_number(cell(0, 3), 5.0);
+        workbook.set_text(cell(1, 3), "5");
+        workbook.set_text(cell(2, 3), "five");
+        workbook.set_boolean(cell(3, 3), true);
+        let cases = [
+            // Text and booleans never satisfy a numeric ordering, but
+            // numeric text is a number against a numeric criterion.
+            ("=COUNTIF(D1:D4,\"5\")", 2.0),
+            ("=COUNTIF(D1:D4,\">4\")", 2.0),
+            ("=COUNTIF(D1:D4,\"<>5\")", 2.0),
+            ("=COUNTIF(D1:D4,TRUE)", 1.0),
+            ("=COUNTIF(D1:D4,\">=a\")", 1.0),
+            // A criterion read from an empty cell is 0: only A2 matches.
+            ("=COUNTIF(A1:A6,C1)", 1.0),
+            ("=SUMIF(A1:A6,C1,B1:B6)", 2.0),
+            // "" matches blank cells and empty text, never the number 0.
+            ("=COUNTIF(A1:A6,\"\")", 2.0),
+            ("=COUNTIF(A1:A6,\"<>\")", 4.0),
+            // Blanks and errors satisfy <> against anything else and
+            // nothing but their own error otherwise.
+            ("=COUNTIF(A1:A6,\"<>x\")", 5.0),
+            ("=COUNTIF(A1:A6,\"<>0\")", 5.0),
+            ("=COUNTIF(A1:A6,\"<10\")", 2.0),
+            // "*" counts every text cell, empty text included; "?*" needs a
+            // character.
+            ("=COUNTIF(A1:A6,\"*\")", 2.0),
+            ("=COUNTIF(A1:A6,\"?*\")", 1.0),
+            ("=COUNTIF(A1:A6,\"#N/A\")", 1.0),
+            ("=COUNTIF(A1:A6,A4)", 1.0),
+            ("=SUMIF(A1:A6,\"<>#N/A\",B1:B6)", 55.0),
+            ("=SUMIF(A1:A6,\">=0\",B1:B6)", 34.0),
+        ];
+        for (column, (formula, expected)) in cases.into_iter().enumerate() {
+            let target = cell(6, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            assert_eq!(workbook.value(target), Value::Number(expected), "{formula}");
+        }
+    }
+
+    #[test]
     fn evaluates_multi_criteria_and_average_aggregates() {
         let mut workbook = Workbook::default();
         for (row, group, active, value) in [
@@ -4199,6 +4565,72 @@ mod tests {
             workbook.set_formula(cell(1, 0), "=#BOGUS!"),
             Err(FormulaError::UnexpectedToken(0))
         );
+    }
+
+    #[test]
+    fn tokens_past_the_grid_are_names_not_references() {
+        let mut workbook = Workbook::default();
+        workbook.define_sheet(0, "Data");
+        workbook.set_number(cell(0, 0), 5.0);
+        workbook.set_number(cell(1, 0), 7.0);
+        workbook.define_name("Table1", "Data!$A$1:$A$2");
+        workbook.define_name("pipe1", "Data!$A$2");
+        workbook.set_formula(cell(0, 1), "=SUM(Table1)").unwrap();
+        workbook.set_formula(cell(0, 2), "=pipe1*2").unwrap();
+        assert_eq!(workbook.value(cell(0, 1)), Value::Number(12.0));
+        assert_eq!(workbook.value(cell(0, 2)), Value::Number(14.0));
+        assert_eq!(
+            workbook.set_formula(cell(0, 3), "=Curves1"),
+            Err(FormulaError::UnknownName("Curves1".into()))
+        );
+        // The last cell of the grid is still a reference; one column or one
+        // row past it is a name.
+        workbook.set_formula(cell(0, 3), "=XFD1048576+1").unwrap();
+        assert_eq!(workbook.value(cell(0, 3)), Value::Number(1.0));
+        assert_eq!(
+            workbook.set_formula(cell(0, 4), "=XFE1"),
+            Err(FormulaError::UnknownName("XFE1".into()))
+        );
+        assert_eq!(
+            workbook.set_formula(cell(0, 4), "=A1048577"),
+            Err(FormulaError::UnknownName("A1048577".into()))
+        );
+        assert!(matches!(
+            workbook.set_formula(cell(0, 4), "=Data!XFE1"),
+            Err(FormulaError::InvalidReference(_))
+        ));
+    }
+
+    #[test]
+    fn sheet_scoped_names_shadow_workbook_names_on_their_sheet() {
+        let mut workbook = Workbook::default();
+        workbook.define_sheet(0, "Buy");
+        workbook.define_sheet(1, "Sell");
+        workbook.define_sheet(2, "Summary");
+        workbook.set_number(CellId::new(0, 2, 0), 10.0);
+        workbook.set_number(CellId::new(1, 2, 0), 20.0);
+        workbook.define_sheet_name(0, "mthbeg", "Buy!$A$3");
+        workbook.define_sheet_name(1, "MthBeg", "Sell!$A$3");
+        workbook.define_name("mthbeg", "#REF!");
+        // A later definition in the same scope is ignored, as for workbook names.
+        workbook.define_sheet_name(0, "mthbeg", "Buy!$B$3");
+
+        for sheet in 0..3 {
+            workbook
+                .set_formula(CellId::new(sheet, 0, 0), "=mthbeg+1")
+                .unwrap();
+        }
+        assert_eq!(workbook.value(CellId::new(0, 0, 0)), Value::Number(11.0));
+        assert_eq!(workbook.value(CellId::new(1, 0, 0)), Value::Number(21.0));
+        // A sheet without its own definition sees the workbook name.
+        assert_eq!(
+            workbook.value(CellId::new(2, 0, 0)),
+            Value::Error(CalcError::InvalidReference)
+        );
+        let report = workbook.set_number(CellId::new(1, 2, 0), 30.0);
+        assert!(report.evaluated.contains(&CellId::new(1, 0, 0)));
+        assert_eq!(workbook.value(CellId::new(1, 0, 0)), Value::Number(31.0));
+        assert_eq!(workbook.value(CellId::new(0, 0, 0)), Value::Number(11.0));
     }
 
     #[test]
@@ -4945,7 +5377,7 @@ mod tests {
             Err(FormulaError::UnsupportedFunction("CUBEVALUE".into()))
         );
         assert_eq!(
-            workbook.set_formula(cell(0, 0), "=SUM(A1:ZZZ999999)"),
+            workbook.set_formula(cell(0, 0), "=SUM(A1:XFD999999)"),
             Err(FormulaError::RangeTooLarge)
         );
     }

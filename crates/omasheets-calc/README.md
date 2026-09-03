@@ -25,9 +25,15 @@ names are implemented across the initial head:
 invalid arity, invalid coercions and oversized ranges fail explicitly rather
 than silently producing a plausible number.
 
-The first `COUNTIF`/`SUMIF` criteria slice supports comparison prefixes and
-case-insensitive literal text. Wildcards and locale-specific number parsing are
-not yet accepted.
+`COUNTIF`/`SUMIF`-family criteria follow Excel: a comparison prefix (`>=`,
+`<>`, ...), case-insensitive text with its spacing kept (`"Ltd "` matches only
+`"Ltd "`), and the wildcards `?` and `*` with `~` as the escape. Types never
+cross except that numeric text counts as a number; blank cells and errors in
+the criteria range satisfy only `<>` tests, `""` and `<>` test for blank, a
+criterion read from an empty cell is 0, and an error criterion counts the cells
+holding that error. Negative zero is folded into zero everywhere arithmetic
+produces it, so `-1*0` compares equal to `0` and prints as `0`. Locale-specific
+number parsing is not attempted.
 
 Cross-sheet ranges qualify the first endpoint (`Inputs!A1:A10`). External
 workbook references, 3D references, and a separately qualified second range
@@ -49,6 +55,14 @@ rectangle rather than materialising blanks. A formula therefore costs its own
 expression plus one edge per range, however large the range. A rebinding that
 no longer forms a rectangle (a row inserted through a range bound to stable
 cells) keeps its original members as an explicit list with its own node.
+
+Defined names follow Excel's two rules that the corpus exercises most. A
+token is a cell reference only inside the grid (`XFD1048576` is the last
+cell): `Table1`, `pipe2` or `Curves1` are names, never the cells in columns
+TABLE, PIPE or CURVES. A name scoped to a sheet (`localSheetId` in a
+workbook file, `define_sheet_name` here) is seen only by formulas on that
+sheet and shadows a workbook-level name of the same spelling there; every
+other sheet sees the workbook name.
 
 Run its focused checks with:
 

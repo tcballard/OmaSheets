@@ -9,8 +9,9 @@ regenerate this list.
 Operators: `+ - * / ^ & %`, unary `+`/`-`, comparisons `= <> < <= > >=`,
 error literals (`#REF!`, `#N/A`, `#DIV/0!`, `#VALUE!`, `#NUM!`, `#NAME?`,
 `#NULL!`), omitted arguments, bounded rectangular ranges, absolute markers,
-cross-sheet references, workbook defined names and implicit intersection of a
-range in scalar position.
+cross-sheet references, workbook and sheet-scoped defined names (tokens past
+the grid such as `Table1` are names) and implicit intersection of a range in
+scalar position.
 
 Deliberately unsupported: `TODAY`, `NOW`, `RAND` and every other volatile
 function (until explicit tick events exist), external workbook references,
