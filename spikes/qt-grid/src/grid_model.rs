@@ -8,10 +8,10 @@ pub mod qobject {
     extern "RustQt" {
         #[qobject]
         #[qml_element]
-        #[qproperty(i32, row_count)]
-        #[qproperty(i32, column_count)]
-        #[qproperty(u64, revision)]
-        #[qproperty(bool, benchmark)]
+        #[qproperty(i32, row_count, cxx_name = "rowCount")]
+        #[qproperty(i32, column_count, cxx_name = "columnCount")]
+        #[qproperty(u64, revision, cxx_name = "revision")]
+        #[qproperty(bool, benchmark, cxx_name = "benchmark")]
         type GridModel = super::GridModelRust;
 
         #[qinvokable]

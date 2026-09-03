@@ -30,6 +30,8 @@ def check_static_contract() -> None:
     require('cxx-qt-build = { version = "=0.10.0"' in manifest, "CXX-Qt build must be pinned exactly")
     require("const ROWS: i32 = 1_000_000;" in model, "fixture must contain one million rows")
     require("const COLUMNS: i32 = 64;" in model, "fixture must contain 64 columns")
+    require('cxx_name = "rowCount"' in model and 'cxx_name = "columnCount"' in model,
+            "multiword Rust properties need explicit QML names")
     require("grid.visibleDelegates" in qml, "delegates must be bounded to the viewport")
     require("Accessible.role" in qml and "Accessible.name" in qml, "grid needs accessibility metadata")
     require("FrameAnimation" in qml and "measuredFrames: 180" in qml, "scroll smoke needs measured frames")
