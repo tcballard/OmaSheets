@@ -21,8 +21,8 @@ jobs:
       matrix:
         python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
       - run: python -m unittest discover -s tests -q
@@ -35,8 +35,8 @@ jobs:
     name: Wheel smoke test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14"
       - run: python -m pip install --disable-pip-version-check build
@@ -54,7 +54,7 @@ jobs:
     env:
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the declared minimum Rust toolchain
         run: |
           rustup toolchain install 1.88.0 --profile minimal --no-self-update
@@ -206,7 +206,7 @@ jobs:
           assert owned["stored_values_mismatched"] == 0
           assert owned["unsupported_formulas"] == 0
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ always() }}
         with:
           name: omasheets-m0-corpus-smoke-linux-x86_64
@@ -229,8 +229,8 @@ jobs:
     name: Omarchy plugin contract
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: omacom/omarchy
           ref: b686ed892d9c3020c3336203f6d34cc75b544e2b
@@ -248,7 +248,7 @@ jobs:
       image: archlinux:base-devel
     steps:
       - run: pacman -Syu --noconfirm --needed git cmake gtk3 libreoffice-fresh libreoffice-fresh-sdk
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Verify the release gate in Arch
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -269,7 +269,7 @@ jobs:
           (cd dist-native && sha256sum --check "$checksum")
           "$RUNNER_TEMP/native-smoke/bin/omasheets-window" --provenance
           "$RUNNER_TEMP/native-smoke/bin/omasheets-lok-render" --provenance
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: omasheets-native-linux-x86_64
           path: dist-native/
@@ -294,8 +294,8 @@ jobs:
       XDG_RUNTIME_DIR: /tmp/omasheets-runtime
     steps:
       - run: pacman -Syu --noconfirm --needed git gtk3 libreoffice-fresh bubblewrap jq ttf-dejavu xorg-server-xvfb
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: omasheets-native-linux-x86_64
           path: dist-native
@@ -559,7 +559,7 @@ jobs:
           sparse = next(item for item in fixtures if item["name"] == "sparse-ci")
           assert sparse["data_density"] < 0.01
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: omasheets-agent-performance-linux-x86_64

@@ -88,6 +88,9 @@ def main(argv: list[str] | None = None) -> int:
         assert (ROOT / required).is_file(), f"missing release document: {required}"
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
     assert "b686ed892d9c3020c3336203f6d34cc75b544e2b" in workflow, "Omarchy validator pin drifted"
+    for line in workflow.splitlines():
+        if re.match(r"^\s*(?:-\s+)?uses:", line):
+            assert _ACTION_PIN.match(line), f"CI action is not pinned to a full commit SHA: {line.strip()}"
     assert "Compiler-free Arch install and native acceptance" in workflow
     assert "archlinux:base\n" in workflow
     assert "libreoffice-fresh-sdk" in workflow
