@@ -11,6 +11,14 @@ visible viewport. It supports mouse selection, arrow/Page/Home/End navigation,
 editing with Enter or F2, and accessibility metadata for the grid and visible
 cells.
 
+On Omarchy, the window reads the active normalized palette from
+`~/.config/omarchy/current/theme/colors.toml`. Background, foreground, accent,
+muted and semantic colours feed Qt/QML theme properties; panel, grid and
+selection shades are derived from them. The window checks for a changed palette
+every 1.5 seconds, so an Omarchy theme switch is reflected without restarting.
+Missing files or individual invalid colours use the built-in OmaSheets palette,
+which also keeps the spike runnable away from Omarchy.
+
 ## Arch / Omarchy build
 
 ```sh
@@ -40,5 +48,8 @@ warm-up frames and reports 180 frame intervals. Its exact metrics are p95 and
 worst frame interval, elapsed time, startup-to-report time, visible delegate
 count, and model reads. A headless CI result proves wiring and boundedness only;
 it is not product performance evidence.
+
+The report also records `theme_source` as `omarchy` or `fallback`. For an
+on-Omarchy evidence run, add `--require-omarchy-theme` to the checker command.
 
 See `docs/M1-GRID-SPIKE.md` for the on-device review and acceptance record.

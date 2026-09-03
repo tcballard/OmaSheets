@@ -20,7 +20,8 @@ packaging, and the ongoing Qt dependency cost.
 - Viewport-only QML delegates backed by a Rust model.
 - Keyboard movement, page and edge jumps, mouse selection, and in-cell editing.
 - Accessible grid and visible-cell names, descriptions, focus, and selection.
-- Omarchy-oriented dark presentation using standard Qt Quick controls.
+- Live inheritance of Omarchy's active semantic palette, with a standalone
+  fallback, using standard Qt Quick controls.
 - Repeatable headless wiring smoke plus a manual on-device evidence run.
 
 The spike does not yet connect to `.omasheets` documents. The production path
@@ -52,8 +53,10 @@ Check all of the following with the keyboard and then a screen reader:
 3. Select and edit with the mouse without losing keyboard focus.
 4. Verify the grid name, current cell address/value/type, selection, and edit
    state are announced.
-5. Verify headers, selection, editing, scrollbars, scaling, and the dark palette
-   remain legible at the maintainer's normal display scale.
+5. Switch between the maintainer's normal dark, light and one customized
+   Omarchy theme while the window remains open; verify the palette updates.
+6. Verify headers, selection, formulas, status colours, editing, scrollbars and
+   scaling remain legible at the maintainer's normal display scale.
 
 ## Evidence record
 
@@ -62,6 +65,7 @@ Check all of the following with the keyboard and then a screen reader:
 | Baseline hardware / display | _not recorded_ |
 | Omarchy / Qt / renderer | _not recorded_ |
 | Customization review | _not run_ |
+| Active-theme review | _not run_ |
 | Keyboard-only review | _not run_ |
 | Screen-reader review | _not run_ |
 | Warm scroll, synthetic 1,000,000 × 64 | _not measured_ |

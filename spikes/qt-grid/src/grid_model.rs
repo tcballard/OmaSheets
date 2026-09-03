@@ -12,6 +12,16 @@ pub mod qobject {
         #[qproperty(i32, column_count, cxx_name = "columnCount")]
         #[qproperty(u64, revision, cxx_name = "revision")]
         #[qproperty(bool, benchmark, cxx_name = "benchmark")]
+        #[qproperty(QString, theme_name, cxx_name = "themeName")]
+        #[qproperty(QString, theme_background, cxx_name = "themeBackground")]
+        #[qproperty(QString, theme_foreground, cxx_name = "themeForeground")]
+        #[qproperty(QString, theme_accent, cxx_name = "themeAccent")]
+        #[qproperty(QString, theme_muted, cxx_name = "themeMuted")]
+        #[qproperty(QString, theme_red, cxx_name = "themeRed")]
+        #[qproperty(QString, theme_green, cxx_name = "themeGreen")]
+        #[qproperty(QString, theme_yellow, cxx_name = "themeYellow")]
+        #[qproperty(QString, theme_blue, cxx_name = "themeBlue")]
+        #[qproperty(QString, theme_magenta, cxx_name = "themeMagenta")]
         type GridModel = super::GridModelRust;
 
         #[qinvokable]
@@ -29,6 +39,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setCellText"]
         fn set_cell_text(self: Pin<&mut Self>, row: i32, column: i32, value: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "refreshTheme"]
+        fn refresh_theme(self: Pin<&mut Self>);
 
         #[qinvokable]
         #[cxx_name = "reportBenchmark"]
@@ -50,6 +64,8 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
+use crate::theme::load_active_theme;
+
 const ROWS: i32 = 1_000_000;
 const COLUMNS: i32 = 64;
 
@@ -58,6 +74,17 @@ pub struct GridModelRust {
     column_count: i32,
     revision: u64,
     benchmark: bool,
+    theme_name: QString,
+    theme_background: QString,
+    theme_foreground: QString,
+    theme_accent: QString,
+    theme_muted: QString,
+    theme_red: QString,
+    theme_green: QString,
+    theme_yellow: QString,
+    theme_blue: QString,
+    theme_magenta: QString,
+    theme_signature: u64,
     edits: BTreeMap<(i32, i32), String>,
     cell_reads: AtomicU64,
     created: Instant,
@@ -65,11 +92,23 @@ pub struct GridModelRust {
 
 impl Default for GridModelRust {
     fn default() -> Self {
+        let theme = load_active_theme();
         Self {
             row_count: ROWS,
             column_count: COLUMNS,
             revision: 0,
             benchmark: std::env::var_os("OMASHEETS_GRID_BENCHMARK").is_some(),
+            theme_name: theme.name.as_str().into(),
+            theme_background: theme.palette.background.as_str().into(),
+            theme_foreground: theme.palette.foreground.as_str().into(),
+            theme_accent: theme.palette.accent.as_str().into(),
+            theme_muted: theme.palette.muted.as_str().into(),
+            theme_red: theme.palette.red.as_str().into(),
+            theme_green: theme.palette.green.as_str().into(),
+            theme_yellow: theme.palette.yellow.as_str().into(),
+            theme_blue: theme.palette.blue.as_str().into(),
+            theme_magenta: theme.palette.magenta.as_str().into(),
+            theme_signature: theme.signature,
             edits: BTreeMap::new(),
             cell_reads: AtomicU64::new(0),
             created: Instant::now(),
@@ -122,6 +161,33 @@ impl qobject::GridModel {
         self.set_revision(revision.wrapping_add(1));
     }
 
+    pub fn refresh_theme(mut self: Pin<&mut Self>) {
+        let theme = load_active_theme();
+        if theme.signature == self.theme_signature {
+            return;
+        }
+        self.as_mut().set_theme_name(theme.name.as_str().into());
+        self.as_mut()
+            .set_theme_background(theme.palette.background.as_str().into());
+        self.as_mut()
+            .set_theme_foreground(theme.palette.foreground.as_str().into());
+        self.as_mut()
+            .set_theme_accent(theme.palette.accent.as_str().into());
+        self.as_mut()
+            .set_theme_muted(theme.palette.muted.as_str().into());
+        self.as_mut()
+            .set_theme_red(theme.palette.red.as_str().into());
+        self.as_mut()
+            .set_theme_green(theme.palette.green.as_str().into());
+        self.as_mut()
+            .set_theme_yellow(theme.palette.yellow.as_str().into());
+        self.as_mut()
+            .set_theme_blue(theme.palette.blue.as_str().into());
+        self.as_mut()
+            .set_theme_magenta(theme.palette.magenta.as_str().into());
+        self.as_mut().rust_mut().theme_signature = theme.signature;
+    }
+
     pub fn report_benchmark(
         &self,
         frames: i32,
@@ -137,7 +203,8 @@ impl qobject::GridModel {
                 "\"rows\":{},\"columns\":{},\"frames\":{},",
                 "\"elapsed_seconds\":{:.6},\"p95_frame_ms\":{:.6},",
                 "\"worst_frame_ms\":{:.6},\"visible_delegates\":{},",
-                "\"cell_reads\":{},\"startup_to_report_ms\":{:.3}}}"
+                "\"cell_reads\":{},\"startup_to_report_ms\":{:.3},",
+                "\"theme_source\":\"{}\"}}}"
             ),
             self.row_count,
             self.column_count,
@@ -148,6 +215,11 @@ impl qobject::GridModel {
             visible_delegates,
             self.cell_reads.load(Ordering::Relaxed),
             self.created.elapsed().as_secs_f64() * 1_000.0,
+            if self.theme_signature == 0 {
+                "fallback"
+            } else {
+                "omarchy"
+            },
         );
     }
 }

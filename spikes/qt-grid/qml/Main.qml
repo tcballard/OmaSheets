@@ -15,13 +15,27 @@ ApplicationWindow {
     title: "OmaSheets — Native grid spike"
     color: palette.window
 
-    readonly property color canvasColor: "#111318"
-    readonly property color panelColor: "#191c23"
-    readonly property color gridLineColor: "#2a2e38"
-    readonly property color mutedColor: "#8d94a3"
-    readonly property color textColor: "#e7e9ee"
-    readonly property color accentColor: "#7aa2f7"
-    readonly property color formulaColor: "#bb9af7"
+    function blend(from, to, amount) {
+        return Qt.rgba(from.r + (to.r - from.r) * amount,
+            from.g + (to.g - from.g) * amount,
+            from.b + (to.b - from.b) * amount,
+            from.a + (to.a - from.a) * amount);
+    }
+
+    readonly property color canvasColor: backend.themeBackground
+    readonly property color textColor: backend.themeForeground
+    readonly property color accentColor: backend.themeAccent
+    readonly property color mutedColor: backend.themeMuted
+    readonly property color formulaColor: backend.themeMagenta
+    readonly property color successColor: backend.themeGreen
+    readonly property color warningColor: backend.themeYellow
+    readonly property color errorColor: backend.themeRed
+    readonly property color panelColor: blend(canvasColor, textColor, 0.055)
+    readonly property color gridLineColor: blend(canvasColor, textColor, 0.14)
+    readonly property color headerColor: blend(canvasColor, textColor, 0.025)
+    readonly property color selectedHeaderColor: blend(canvasColor, accentColor, 0.20)
+    readonly property color selectedCellColor: blend(canvasColor, accentColor, 0.12)
+    readonly property color alternateRowColor: blend(canvasColor, textColor, 0.018)
     readonly property int rowHeight: 27
     readonly property int cellWidth: 132
     readonly property int rowHeaderWidth: 62
@@ -37,6 +51,13 @@ ApplicationWindow {
         id: backend
     }
 
+    Timer {
+        interval: 1500
+        repeat: true
+        running: !backend.benchmark
+        onTriggered: backend.refreshTheme()
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -44,7 +65,7 @@ ApplicationWindow {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 46
-            color: "#0d0f13"
+            color: window.headerColor
 
             RowLayout {
                 anchors.fill: parent
@@ -83,7 +104,7 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
 
                 Label {
-                    text: "NATIVE GRID SPIKE"
+                    text: "NATIVE GRID  ·  " + backend.themeName.toUpperCase()
                     color: window.mutedColor
                     font.family: "monospace"
                     font.pixelSize: 10
@@ -219,7 +240,7 @@ ApplicationWindow {
             Rectangle {
                 width: window.rowHeaderWidth
                 height: window.columnHeaderHeight
-                color: "#151820"
+                color: window.headerColor
                 border.color: window.gridLineColor
 
                 Label {
@@ -248,7 +269,8 @@ ApplicationWindow {
                         x: logicalColumn * window.cellWidth - body.contentX
                         width: window.cellWidth
                         height: window.columnHeaderHeight
-                        color: logicalColumn === grid.currentColumn ? "#202b43" : "#151820"
+                        color: logicalColumn === grid.currentColumn
+                            ? window.selectedHeaderColor : window.headerColor
                         border.color: window.gridLineColor
 
                         Label {
@@ -280,7 +302,8 @@ ApplicationWindow {
                         y: logicalRow * window.rowHeight - body.contentY
                         width: window.rowHeaderWidth
                         height: window.rowHeight
-                        color: logicalRow === grid.currentRow ? "#202b43" : "#151820"
+                        color: logicalRow === grid.currentRow
+                            ? window.selectedHeaderColor : window.headerColor
                         border.color: window.gridLineColor
 
                         Label {
@@ -341,7 +364,8 @@ ApplicationWindow {
                             y: logicalRow * window.rowHeight
                             width: window.cellWidth
                             height: window.rowHeight
-                            color: selectedCell ? "#1d2940" : (logicalRow % 2 === 0 ? window.canvasColor : "#13161c")
+                            color: selectedCell ? window.selectedCellColor
+                                : (logicalRow % 2 === 0 ? window.canvasColor : window.alternateRowColor)
                             border.width: 1
                             border.color: selectedCell ? window.accentColor : window.gridLineColor
 
@@ -367,7 +391,9 @@ ApplicationWindow {
                                     return backend.cellText(parent.logicalRow, parent.logicalColumn);
                                 }
                                 color: backend.cellKind(parent.logicalRow, parent.logicalColumn) === "formula"
-                                    ? window.formulaColor : window.textColor
+                                    ? window.formulaColor
+                                    : (parent.logicalColumn % 6 === 5 && text === "Reviewed"
+                                        ? window.successColor : window.textColor)
                                 font.family: "monospace"
                                 font.pixelSize: 11
                             }

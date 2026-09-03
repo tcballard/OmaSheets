@@ -27,11 +27,17 @@ class QtGridSpikeTests(unittest.TestCase):
             "visible_delegates": 540,
             "cell_reads": 4_200,
             "startup_to_report_ms": 3_500.0,
+            "theme_source": "omarchy",
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "report.txt"
             path.write_text("OMASHEETS_GRID_BENCHMARK " + json.dumps(report) + "\n")
             subprocess.run([sys.executable, CHECKER, "--report", path], cwd=ROOT, check=True)
+            subprocess.run(
+                [sys.executable, CHECKER, "--report", path, "--require-omarchy-theme"],
+                cwd=ROOT,
+                check=True,
+            )
 
 
 if __name__ == "__main__":

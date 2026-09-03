@@ -1,4 +1,5 @@
 mod grid_model;
+mod theme;
 
 use cxx_qt::casting::Upcast;
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QQmlEngine, QUrl};

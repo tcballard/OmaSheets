@@ -22,6 +22,7 @@ def check_static_contract() -> None:
     manifest = (ROOT / "spikes/qt-grid/Cargo.toml").read_text()
     qml = (ROOT / "spikes/qt-grid/qml/Main.qml").read_text()
     model = (ROOT / "spikes/qt-grid/src/grid_model.rs").read_text()
+    theme = (ROOT / "spikes/qt-grid/src/theme.rs").read_text()
 
     require('"spikes/qt-grid"' in workspace, "Qt spike must remain outside the release workspace")
     require((ROOT / "spikes/qt-grid/Cargo.lock").is_file(), "isolated Qt spike needs a lockfile")
@@ -35,6 +36,13 @@ def check_static_contract() -> None:
     require("grid.visibleDelegates" in qml, "delegates must be bounded to the viewport")
     require("Accessible.role" in qml and "Accessible.name" in qml, "grid needs accessibility metadata")
     require("FrameAnimation" in qml and "measuredFrames: 180" in qml, "scroll smoke needs measured frames")
+    require("omarchy/current/theme/colors.toml" in theme, "theme must use Omarchy's semantic palette")
+    for key in ("background", "foreground", "accent", "red", "green", "yellow", "blue", "magenta"):
+        require(f'"{key}"' in theme, f"Omarchy theme mapping missing {key}")
+    require("backend.themeBackground" in qml and "backend.themeAccent" in qml,
+            "QML palette must be supplied by the Rust theme adapter")
+    require("onTriggered: backend.refreshTheme()" in qml and 'cxx_name = "refreshTheme"' in model,
+            "active theme changes must refresh while the window is open")
     for key in ("Key_Left", "Key_Right", "Key_Up", "Key_Down", "Key_PageUp", "Key_PageDown"):
         require(key in qml, f"keyboard contract missing {key}")
     for rejected in ("Electron", "React", "Glide Data Grid"):
@@ -52,7 +60,7 @@ def read_report(path: Path) -> dict[str, object]:
     return report
 
 
-def check_report(report: dict[str, object]) -> None:
+def check_report(report: dict[str, object], require_omarchy_theme: bool = False) -> None:
     require(report.get("schema") == 1, "unexpected benchmark schema")
     require(report.get("fixture") == "synthetic-1000000x64", "unexpected benchmark fixture")
     require(report.get("rows") == 1_000_000, "benchmark did not exercise one million rows")
@@ -63,16 +71,21 @@ def check_report(report: dict[str, object]) -> None:
     delegates = report.get("visible_delegates")
     require(isinstance(delegates, int) and 0 < delegates <= 1_000, "visible delegates must remain bounded")
     require(isinstance(report.get("cell_reads"), int) and report["cell_reads"] > 0, "benchmark must read cells")
+    require(report.get("theme_source") in ("omarchy", "fallback"), "benchmark must identify its theme source")
+    if require_omarchy_theme:
+        require(report["theme_source"] == "omarchy", "benchmark did not load the injected Omarchy theme")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", type=Path, help="stdout captured from the headless grid smoke")
+    parser.add_argument("--require-omarchy-theme", action="store_true",
+                        help="require the benchmark to have loaded an Omarchy colors.toml")
     args = parser.parse_args()
 
     check_static_contract()
     if args.report:
-        check_report(read_report(args.report))
+        check_report(read_report(args.report), args.require_omarchy_theme)
 
 
 if __name__ == "__main__":
