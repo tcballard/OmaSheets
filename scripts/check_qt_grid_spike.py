@@ -24,6 +24,7 @@ def check_static_contract() -> None:
     model = (ROOT / "spikes/qt-grid/src/grid_model.rs").read_text()
 
     require('"spikes/qt-grid"' in workspace, "Qt spike must remain outside the release workspace")
+    require('cxx = "=1.0.199"' in manifest, "CXX runtime must match the bridge generator ABI")
     require('cxx-qt = "=0.10.0"' in manifest, "CXX-Qt must be pinned exactly")
     require('cxx-qt-build = { version = "=0.10.0"' in manifest, "CXX-Qt build must be pinned exactly")
     require("const ROWS: i32 = 1_000_000;" in model, "fixture must contain one million rows")

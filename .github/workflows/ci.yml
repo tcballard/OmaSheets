@@ -264,6 +264,9 @@ jobs:
             qml6-module-qtquick-templates qml6-module-qtquick-window
       - name: Check the grid contract and Rust model
         run: |
+          evidence="$RUNNER_TEMP/omasheets-qt-grid"
+          mkdir -p "$evidence"
+          trap 'test ! -f spikes/qt-grid/Cargo.lock || cp spikes/qt-grid/Cargo.lock "$evidence/Cargo.lock"' EXIT
           python scripts/check_qt_grid_spike.py
           cargo test --manifest-path spikes/qt-grid/Cargo.toml
           cargo build --release --manifest-path spikes/qt-grid/Cargo.toml
@@ -281,7 +284,6 @@ jobs:
             spikes/qt-grid/target/release/omasheets-qt-grid-spike \
             > "$evidence/report.txt" 2> "$evidence/stderr.txt"
           python scripts/check_qt_grid_spike.py --report "$evidence/report.txt"
-          cp spikes/qt-grid/Cargo.lock "$evidence/Cargo.lock"
           lscpu > "$evidence/hardware.txt"
           qmake6 -query QT_VERSION > "$evidence/qt-version.txt"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
