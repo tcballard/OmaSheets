@@ -8,7 +8,7 @@ regenerate this list.
 
 Operators: `+ - * / ^ & %`, unary `+`/`-`, comparisons `= <> < <= > >=`,
 error literals (`#REF!`, `#N/A`, `#DIV/0!`, `#VALUE!`, `#NUM!`, `#NAME?`,
-`#NULL!`), omitted arguments, bounded rectangular ranges, absolute markers,
+`#NULL!`, and `Sheet!#REF!` for a deleted cell on another sheet), omitted arguments, bounded rectangular ranges, absolute markers,
 cross-sheet references, workbook and sheet-scoped defined names (tokens past
 the grid such as `Table1` are names), implicit intersection of a range in
 scalar position, and elementwise evaluation of range expressions inside
