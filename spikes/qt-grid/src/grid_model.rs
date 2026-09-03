@@ -204,7 +204,7 @@ impl qobject::GridModel {
                 "\"elapsed_seconds\":{:.6},\"p95_frame_ms\":{:.6},",
                 "\"worst_frame_ms\":{:.6},\"visible_delegates\":{},",
                 "\"cell_reads\":{},\"startup_to_report_ms\":{:.3},",
-                "\"theme_source\":\"{}\"}}}"
+                "\"theme_source\":\"{}\"}}"
             ),
             self.row_count,
             self.column_count,

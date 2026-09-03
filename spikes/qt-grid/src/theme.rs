@@ -142,14 +142,14 @@ mod tests {
     #[test]
     fn parses_normalized_omarchy_colors_with_safe_fallbacks() {
         let palette = parse_palette(
-            r#"
+            r##"
                 background = "#101216"
                 foreground = '#F0F1F2'
                 accent = "#ffaa00" # inline comments are allowed
                 bright_black = "#667788"
                 green = "not-a-color"
                 ignored = "#ffffff"
-            "#,
+            "##,
         );
         assert_eq!(palette.background, "#101216");
         assert_eq!(palette.foreground, "#f0f1f2");
