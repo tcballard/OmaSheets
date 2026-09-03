@@ -8,8 +8,8 @@ fn main() {
     let mut app = QGuiApplication::new();
     let mut engine = QQmlApplicationEngine::new();
 
-    if let Some(engine) = engine.as_mut() {
-        engine.load(&QUrl::from(
+    if let Some(mut engine) = engine.as_mut() {
+        engine.as_mut().load(&QUrl::from(
             "qrc:/qt/qml/io/omasheets/grid/qml/Main.qml",
         ));
         let engine: Pin<&mut QQmlEngine> = engine.upcast_pin();
