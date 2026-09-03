@@ -10,8 +10,9 @@ Operators: `+ - * / ^ & %`, unary `+`/`-`, comparisons `= <> < <= > >=`,
 error literals (`#REF!`, `#N/A`, `#DIV/0!`, `#VALUE!`, `#NUM!`, `#NAME?`,
 `#NULL!`), omitted arguments, bounded rectangular ranges, absolute markers,
 cross-sheet references, workbook and sheet-scoped defined names (tokens past
-the grid such as `Table1` are names) and implicit intersection of a range in
-scalar position.
+the grid such as `Table1` are names), implicit intersection of a range in
+scalar position, and elementwise evaluation of range expressions inside
+aggregate arguments (`SUM(IF(A1:A5=0,0,B1:B5))`, `SUMPRODUCT((A1:A5>2)*B1:B5)`).
 
 Deliberately unsupported: `TODAY`, `NOW`, `RAND` and every other volatile
 function (until explicit tick events exist), external workbook references,

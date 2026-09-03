@@ -1612,24 +1612,28 @@ impl Workbook {
 
     /// `SUMPRODUCT(range, ...)`: every argument must have the same shape;
     /// non-numeric entries count as zero and errors propagate.
+    /// `SUMPRODUCT` multiplies equally shaped arrays elementwise; each
+    /// argument may be a range or an array expression (`(A1:A5>2)*B1:B5`).
+    /// Non-numbers count as 0, an error is the result, unequal shapes are
+    /// `#VALUE!`.
     fn evaluate_sumproduct(&self, arguments: &[Expr<usize>]) -> Value {
         if arguments.is_empty() {
             return Value::Error(CalcError::InvalidArguments);
         }
-        let shape = |expression: &Expr<usize>| match expression {
-            Expr::RangeNode { rows, columns, .. } => (*rows, *columns),
-            _ => (1, 1),
-        };
-        let expected = shape(&arguments[0]);
-        if arguments.iter().any(|argument| shape(argument) != expected) {
+        let mut arrays = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            match self.evaluate_array(argument) {
+                Ok(array) => arrays.push(array),
+                Err(error) => return Value::Error(error),
+            }
+        }
+        let expected = arrays[0].shape();
+        if arrays.iter().any(|array| array.shape() != expected) {
             return Value::Error(CalcError::InvalidValue);
         }
         let mut products = vec![1.0; expected.0 * expected.1];
-        let mut values = Vec::with_capacity(products.len());
-        for argument in arguments {
-            values.clear();
-            self.flatten_values(argument, &mut values);
-            for (product, value) in products.iter_mut().zip(&values) {
+        for array in &arrays {
+            for (product, value) in products.iter_mut().zip(&array.values) {
                 *product *= match value {
                     Value::Number(number) => *number,
                     Value::Error(error) => return Value::Error(error.clone()),
@@ -1637,7 +1641,7 @@ impl Workbook {
                 };
             }
         }
-        Value::Number(products.iter().sum())
+        number_value(products.iter().sum())
     }
 
     /// Date functions take scalar serial arguments and return serials; every
@@ -1951,11 +1955,111 @@ impl Workbook {
         }
     }
 
+    /// Flattens an aggregate argument. A range contributes its cells; an
+    /// expression that combines ranges with operators or elementwise
+    /// functions (`IF(A1:A5=0,0,B1:B5-A1:A5)`, `A1:A5*B1:B5`) contributes
+    /// its array evaluation, as Excel evaluates it inside an aggregate;
+    /// anything else contributes one value.
     fn flatten_values(&self, expression: &Expr<usize>, output: &mut Vec<Value>) {
         match expression {
             Expr::RangeNode { node, .. } => output.extend(self.range_values(*node)),
             Expr::Empty => {}
+            other if contains_array_operand(other) => match self.evaluate_array(other) {
+                Ok(array) => output.extend(array.values),
+                Err(error) => output.push(Value::Error(error)),
+            },
             other => output.push(self.evaluate(other)),
+        }
+    }
+
+    /// Evaluates an expression elementwise over the ranges it contains, with
+    /// Excel's broadcasting: a scalar or a single row/column stretches to
+    /// the other operand's shape, and cells outside a shorter operand are
+    /// `#N/A`. Bounded by [`MAX_RANGE_CELLS`].
+    fn evaluate_array(&self, expression: &Expr<usize>) -> Result<ArrayValue, CalcError> {
+        match expression {
+            Expr::RangeNode {
+                node,
+                rows,
+                columns,
+            } => {
+                let values = self.range_values(*node);
+                let (rows, columns) = if values.len() == rows * columns {
+                    (*rows, *columns)
+                } else {
+                    (values.len(), 1)
+                };
+                Ok(ArrayValue {
+                    rows,
+                    columns,
+                    values,
+                })
+            }
+            Expr::UnaryMinus(inner) | Expr::Percent(inner) if contains_array_operand(inner) => {
+                let inner = self.evaluate_array(inner)?;
+                let rebuild = |value: Value| match expression {
+                    Expr::UnaryMinus(_) => Expr::UnaryMinus(Box::new(literal(value))),
+                    _ => Expr::Percent(Box::new(literal(value))),
+                };
+                let values = inner
+                    .values
+                    .into_iter()
+                    .map(|value| self.evaluate(&rebuild(value)))
+                    .collect();
+                Ok(ArrayValue {
+                    rows: inner.rows,
+                    columns: inner.columns,
+                    values,
+                })
+            }
+            Expr::Binary(operator, left, right)
+                if contains_array_operand(left) || contains_array_operand(right) =>
+            {
+                let left = self.evaluate_array(left)?;
+                let right = self.evaluate_array(right)?;
+                let (rows, columns) = broadcast_shape(&[left.shape(), right.shape()])?;
+                let mut values = Vec::with_capacity(rows * columns);
+                for row in 0..rows {
+                    for column in 0..columns {
+                        values.push(apply_binary(
+                            *operator,
+                            left.at(row, column),
+                            right.at(row, column),
+                        ));
+                    }
+                }
+                Ok(ArrayValue {
+                    rows,
+                    columns,
+                    values,
+                })
+            }
+            Expr::Function(function, arguments)
+                if (*function == Function::If || is_elementwise(*function))
+                    && arguments.iter().any(contains_array_operand) =>
+            {
+                let arrays = arguments
+                    .iter()
+                    .map(|argument| self.evaluate_array(argument))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let shapes: Vec<(usize, usize)> = arrays.iter().map(ArrayValue::shape).collect();
+                let (rows, columns) = broadcast_shape(&shapes)?;
+                let mut values = Vec::with_capacity(rows * columns);
+                let mut literals = Vec::with_capacity(arrays.len());
+                for row in 0..rows {
+                    for column in 0..columns {
+                        literals.clear();
+                        literals.extend(arrays.iter().map(|array| literal(array.at(row, column))));
+                        values.push(self.evaluate_function(*function, &literals));
+                    }
+                }
+                Ok(ArrayValue {
+                    rows,
+                    columns,
+                    values,
+                })
+            }
+            other => Ok(ArrayValue::scalar(self.evaluate(other))),
         }
     }
 
@@ -2288,13 +2392,142 @@ fn typed_compare(left: &Value, right: &Value) -> Result<std::cmp::Ordering, Calc
         _ => (left.clone(), right.clone()),
     };
     Ok(match (&left, &right) {
-        (Value::Number(left), Value::Number(right)) => {
-            left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
-        }
+        (Value::Number(left), Value::Number(right)) => compare_numbers(*left, *right),
         (Value::Text(left), Value::Text(right)) => left.to_lowercase().cmp(&right.to_lowercase()),
         (Value::Boolean(left), Value::Boolean(right)) => left.cmp(right),
         _ => rank(&left).cmp(&rank(&right)),
     })
+}
+
+/// An intermediate array inside an aggregate argument, row-major.
+struct ArrayValue {
+    rows: usize,
+    columns: usize,
+    values: Vec<Value>,
+}
+
+impl ArrayValue {
+    fn scalar(value: Value) -> Self {
+        Self {
+            rows: 1,
+            columns: 1,
+            values: vec![value],
+        }
+    }
+
+    fn shape(&self) -> (usize, usize) {
+        (self.rows, self.columns)
+    }
+
+    /// The element at a broadcast position: a single row or column repeats,
+    /// and a position past a shorter operand is `#N/A`, as in Excel.
+    fn at(&self, row: usize, column: usize) -> Value {
+        let row = if self.rows == 1 { 0 } else { row };
+        let column = if self.columns == 1 { 0 } else { column };
+        if row >= self.rows || column >= self.columns {
+            return Value::Error(CalcError::NotAvailable);
+        }
+        self.values[row * self.columns + column].clone()
+    }
+}
+
+/// The shape operands broadcast to: each dimension is the largest non-1
+/// extent among them. Over [`MAX_RANGE_CELLS`] cells is `#VALUE!`.
+fn broadcast_shape(shapes: &[(usize, usize)]) -> Result<(usize, usize), CalcError> {
+    let rows = shapes.iter().map(|shape| shape.0).max().unwrap_or(1);
+    let columns = shapes.iter().map(|shape| shape.1).max().unwrap_or(1);
+    match rows.checked_mul(columns) {
+        Some(cells) if cells <= MAX_RANGE_CELLS => Ok((rows, columns)),
+        _ => Err(CalcError::InvalidValue),
+    }
+}
+
+/// Whether an expression holds a range in a position that an aggregate
+/// evaluates elementwise. Functions that consume ranges themselves (`SUM`,
+/// lookups, criteria functions) produce one value and stop the search.
+fn contains_array_operand(expression: &Expr<usize>) -> bool {
+    match expression {
+        Expr::RangeNode { .. } => true,
+        Expr::UnaryMinus(inner) | Expr::Percent(inner) => contains_array_operand(inner),
+        Expr::Binary(_, left, right) => {
+            contains_array_operand(left) || contains_array_operand(right)
+        }
+        Expr::Function(function, arguments)
+            if *function == Function::If || is_elementwise(*function) =>
+        {
+            arguments.iter().any(contains_array_operand)
+        }
+        _ => false,
+    }
+}
+
+/// Functions of scalar arguments only, which an array argument maps over
+/// element by element; every other function takes its ranges whole.
+fn is_elementwise(function: Function) -> bool {
+    matches!(
+        function,
+        Function::Abs
+            | Function::Round
+            | Function::RoundUp
+            | Function::RoundDown
+            | Function::Int
+            | Function::Mod
+            | Function::Power
+            | Function::Sqrt
+            | Function::Not
+            | Function::IfError
+            | Function::Sign
+            | Function::Ceiling
+            | Function::Floor
+            | Function::Trunc
+            | Function::Exp
+            | Function::Ln
+            | Function::Log
+            | Function::Log10
+            | Function::Len
+            | Function::Left
+            | Function::Right
+            | Function::Mid
+            | Function::Trim
+            | Function::Upper
+            | Function::Lower
+            | Function::Concat
+            | Function::Value
+            | Function::Exact
+            | Function::Date
+            | Function::Year
+            | Function::Month
+            | Function::Day
+            | Function::EDate
+            | Function::EoMonth
+            | Function::Weekday
+            | Function::YearFrac
+            | Function::Days360
+            | Function::Pmt
+            | Function::NormDist
+            | Function::IsBlank
+            | Function::IsNumber
+            | Function::IsText
+            | Function::IsLogical
+            | Function::IsError
+            | Function::IsNa
+            | Function::N
+            | Function::T
+            | Function::Find
+            | Function::Rept
+    )
+}
+
+/// A value as a literal expression, for evaluating a scalar function once
+/// per array element.
+fn literal(value: Value) -> Expr<usize> {
+    match value {
+        Value::Blank => Expr::Empty,
+        Value::Number(number) => Expr::Number(number),
+        Value::Boolean(boolean) => Expr::Boolean(boolean),
+        Value::Text(text) => Expr::Text(text),
+        Value::Error(error) => Expr::Error(error),
+    }
 }
 
 fn range_parts(expression: &Expr<usize>) -> Option<(usize, usize, usize)> {
@@ -2323,11 +2556,37 @@ fn positive_index(value: Value) -> Result<usize, CalcError> {
 fn lookup_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Text(left), Value::Text(right)) => left.eq_ignore_ascii_case(right),
+        (Value::Number(left), Value::Number(right)) => {
+            compare_numbers(*left, *right) == std::cmp::Ordering::Equal
+        }
         (Value::Blank, _) | (_, Value::Blank) | (Value::Error(_), _) | (_, Value::Error(_)) => {
             false
         }
         _ => left == right,
     }
+}
+
+/// Excel compares numbers at its 15 significant digits of precision, so
+/// `0.1+0.2=0.3` is TRUE and a threshold reached through a different
+/// rounding path (`30.666666666666664 < 0.6666666666666666+30`) is FALSE.
+/// Arithmetic keeps full precision; only comparisons snap.
+fn compare_numbers(left: f64, right: f64) -> std::cmp::Ordering {
+    significant_15(left)
+        .partial_cmp(&significant_15(right))
+        .unwrap_or(std::cmp::Ordering::Equal)
+}
+
+fn significant_15(value: f64) -> f64 {
+    if value == 0.0 || !value.is_finite() {
+        return value;
+    }
+    let magnitude = value.abs().log10().floor() as i32;
+    let scale = 10_f64.powi(14 - magnitude);
+    if !scale.is_finite() || scale == 0.0 {
+        return value;
+    }
+    let rounded = (value * scale).round() / scale;
+    if rounded.is_finite() { rounded } else { value }
 }
 
 /// A numeric result with negative zero folded into zero, which is how Excel
@@ -4134,6 +4393,81 @@ mod tests {
             let target = cell(6, column as u32);
             workbook.set_formula(target, formula).unwrap();
             assert_eq!(workbook.value(target), Value::Number(expected), "{formula}");
+        }
+    }
+
+    #[test]
+    fn array_expressions_inside_aggregates_evaluate_elementwise() {
+        let mut workbook = Workbook::default();
+        for row in 0..5 {
+            workbook.set_number(cell(row, 0), f64::from(row + 1));
+            workbook.set_number(cell(row, 2), 100.0);
+        }
+        for (row, value) in [10.0, 0.0, 30.0, 0.0, 50.0].into_iter().enumerate() {
+            workbook.set_number(cell(row as u32, 1), value);
+        }
+        workbook.set_number(cell(0, 3), 1.0);
+        workbook.set_number(cell(1, 3), 2.0);
+        workbook.set_number(cell(0, 4), 2.0);
+        workbook.set_text(cell(0, 6), "ab");
+        workbook.set_text(cell(1, 6), "cde");
+        workbook.set_text(cell(2, 6), "f");
+        let cases = [
+            ("=SUM(IF(B1:B5=0,0,C1:C5-B1:B5))", Value::Number(210.0)),
+            ("=SUM(A1:A5*B1:B5)", Value::Number(350.0)),
+            ("=SUM((A1:A5>2)*(B1:B5>0))", Value::Number(2.0)),
+            ("=SUMPRODUCT((A1:A5>2)*B1:B5)", Value::Number(80.0)),
+            ("=MAX(ABS(A1:A5-3))", Value::Number(2.0)),
+            ("=SUM(IF(A1:A5>2,A1:A5))", Value::Number(12.0)),
+            ("=AVERAGE(IF(A1:A5>3,A1:A5))", Value::Number(4.5)),
+            ("=SUM(A1:A5*E1)", Value::Number(30.0)),
+            ("=SUM(-A1:A5)", Value::Number(-15.0)),
+            ("=SUM(LEN(G1:G3))", Value::Number(6.0)),
+            ("=SUM(IF(ISNUMBER(A1:A5),1,0))", Value::Number(5.0)),
+            ("=COUNT(IF(B1:B5>0,B1:B5))", Value::Number(3.0)),
+            // A shorter operand runs out: those cells are #N/A, so the sum is.
+            ("=SUM(A1:A5*D1:D2)", Value::Error(CalcError::NotAvailable)),
+            ("=SUM(A1:A5)*2", Value::Number(30.0)),
+        ];
+        // A range alone in scalar position still intersects implicitly.
+        workbook.set_formula(cell(2, 20), "=A1:A5*2").unwrap();
+        assert_eq!(workbook.value(cell(2, 20)), Value::Number(6.0));
+        for (column, (formula, expected)) in cases.into_iter().enumerate() {
+            let target = cell(6, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            assert_eq!(workbook.value(target), expected, "{formula}");
+        }
+        // Edits inside the ranges still reach the array formulas.
+        let report = workbook.set_number(cell(1, 1), 20.0);
+        assert!(report.evaluated.contains(&cell(6, 0)));
+        assert_eq!(workbook.value(cell(6, 0)), Value::Number(290.0));
+        assert_eq!(workbook.value(cell(6, 1)), Value::Number(390.0));
+    }
+
+    #[test]
+    fn comparisons_snap_to_fifteen_significant_digits() {
+        let mut workbook = Workbook::default();
+        workbook.set_formula(cell(0, 0), "=0.1+0.2").unwrap();
+        workbook.set_number(cell(1, 0), 30.666666666666664);
+        workbook.set_number(cell(2, 0), 0.6666666666666666);
+        workbook.set_number(cell(3, 0), 30.0);
+        let cases = [
+            ("=A1=0.3", Value::Boolean(true)),
+            ("=A1-0.3=0", Value::Boolean(false)),
+            ("=A2<A3+A4", Value::Boolean(false)),
+            ("=A2>=A3+A4", Value::Boolean(true)),
+            ("=A2=A3+A4", Value::Boolean(true)),
+            // The 15th significant digit still counts; the 16th does not.
+            ("=1<1.00000000000002", Value::Boolean(true)),
+            ("=1<1.000000000000002", Value::Boolean(false)),
+            ("=MATCH(0.3,A1:A1,0)", Value::Number(1.0)),
+            ("=COUNTIF(A1:A1,0.3)", Value::Number(1.0)),
+            ("=COUNTIF(A1:A1,\">0.3\")", Value::Number(0.0)),
+        ];
+        for (column, (formula, expected)) in cases.into_iter().enumerate() {
+            let target = cell(6, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            assert_eq!(workbook.value(target), expected, "{formula}");
         }
     }
 
