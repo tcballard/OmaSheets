@@ -659,7 +659,8 @@ impl From<FormulaError> for ApplyError {
 /// What a person, import or agent asks for, in input syntax. `a1` addresses
 /// name a cell in a sheet's current view; they are resolved to stable
 /// identities when the event is created.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case")]
 pub enum Command {
     AddSheet {
         name: String,
@@ -1216,6 +1217,11 @@ impl Document {
 
     pub fn sheet_name(&self, sheet: SheetId) -> Option<&str> {
         self.sheets.get(&sheet).map(|sheet| sheet.name.as_str())
+    }
+
+    /// Number of cells with an input on `sheet`; zero for an unknown sheet.
+    pub fn cell_count(&self, sheet: SheetId) -> usize {
+        self.sheets.get(&sheet).map_or(0, |sheet| sheet.cells.len())
     }
 
     pub fn rows(&self, sheet: SheetId) -> Option<&[RowId]> {

@@ -1002,6 +1002,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "omasheets-service"
+version = "0.0.0"
+dependencies = [
+ "omasheets-core",
+ "omasheets-store",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "omasheets-store"
 version = "0.0.0"
 dependencies = [

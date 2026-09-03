@@ -3,6 +3,7 @@ members = [
   "crates/omasheets-calc",
   "crates/omasheets-core",
   "crates/omasheets-corpus",
+  "crates/omasheets-service",
   "crates/omasheets-store",
   "crates/omasheets-xlsx",
 ]
