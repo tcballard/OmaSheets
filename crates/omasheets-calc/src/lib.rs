@@ -34,6 +34,38 @@ impl CellId {
     }
 }
 
+/// One table column exposed to formula parsing. The calculation engine keeps
+/// only grid ordinals; callers that own stable identities resolve them before
+/// constructing this projection.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StructuredColumn {
+    pub name: String,
+    pub column: u32,
+}
+
+/// A table projection used while parsing structured references.
+///
+/// `rows` contains data rows only. `header_row`, when present, is selected by
+/// `#Headers` and prepended by `#All`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StructuredTable {
+    pub name: String,
+    pub sheet: u32,
+    pub header_row: Option<u32>,
+    pub rows: Vec<u32>,
+    pub columns: Vec<StructuredColumn>,
+}
+
+/// Formula-local structured-reference context. `current_table` and
+/// `current_row` make computed-column templates such as `[@Amount]`
+/// deterministic without teaching the calculation engine about table IDs.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct StructuredContext<'a> {
+    pub tables: &'a [StructuredTable],
+    pub current_table: Option<&'a str>,
+    pub current_row: Option<u32>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Blank,
@@ -104,6 +136,13 @@ pub enum FormulaError {
     ExternalReference(String),
     /// A bare identifier that is neither a cell reference nor a defined name.
     UnknownName(String),
+    /// A structured reference named a table absent from the parse context.
+    UnknownTable(String),
+    /// A structured reference named a column absent from its table.
+    UnknownTableColumn { table: String, column: String },
+    /// A structured reference is well-delimited but outside the supported
+    /// `Column`, `@Column`, `#Headers`, `#Data`, `#All`, or column-span forms.
+    InvalidStructuredReference(String),
     /// A defined name whose definition the engine cannot compile.
     UnsupportedName(String),
     RangeTooLarge,
@@ -124,6 +163,13 @@ impl fmt::Display for FormulaError {
                 write!(formatter, "external workbook reference {reference}")
             }
             Self::UnknownName(name) => write!(formatter, "unknown name {name}"),
+            Self::UnknownTable(name) => write!(formatter, "unknown table {name}"),
+            Self::UnknownTableColumn { table, column } => {
+                write!(formatter, "unknown column {column} in table {table}")
+            }
+            Self::InvalidStructuredReference(reference) => {
+                write!(formatter, "invalid structured reference {reference}")
+            }
             Self::UnsupportedName(name) => write!(formatter, "unsupported defined name {name}"),
             Self::RangeTooLarge => write!(formatter, "formula range exceeds the M0 safety bound"),
             Self::Cycle(path) => write!(formatter, "formula introduces a cycle: {path:?}"),
@@ -333,6 +379,7 @@ enum Function {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ParsedFormula {
     expression: Expr<CellId>,
+    structured_tables: Vec<String>,
 }
 
 impl ParsedFormula {
@@ -354,7 +401,38 @@ impl ParsedFormula {
         let defined_names = DefinedNames::default();
         Parser::new(source, sheet, &lowered, &defined_names)
             .parse()
-            .map(|expression| Self { expression })
+            .map(|expression| Self {
+                expression,
+                structured_tables: Vec::new(),
+            })
+    }
+
+    /// Parses a formula with a caller-provided table projection. Structured
+    /// references are lowered to the same reference/range nodes as A1 input,
+    /// so dependency tracking and stable-ID rebinding need no parallel path.
+    pub fn parse_with_structured_references(
+        source: &str,
+        sheet: u32,
+        sheet_names: &HashMap<String, u32>,
+        context: StructuredContext<'_>,
+    ) -> Result<Self, FormulaError> {
+        let lowered: HashMap<String, u32> = sheet_names
+            .iter()
+            .map(|(name, index)| (name.to_lowercase(), *index))
+            .collect();
+        let defined_names = DefinedNames::default();
+        Parser::new_structured(source, sheet, &lowered, &defined_names, context)
+            .parse_with_metadata()
+            .map(|(expression, structured_tables)| Self {
+                expression,
+                structured_tables,
+            })
+    }
+
+    /// Table names used by structured references, in case-insensitive sorted
+    /// order. Callers can bind those names to their stable table identities.
+    pub fn structured_tables(&self) -> &[String] {
+        &self.structured_tables
     }
 
     /// Every cell reference in deterministic traversal order, including each
@@ -510,6 +588,7 @@ pub struct RecalcReport {
     pub evaluated: Vec<CellId>,
 }
 
+#[derive(Clone)]
 pub struct Workbook {
     indices: HashMap<CellId, usize>,
     /// Cells of each sheet keyed by position, so a rectangle can be scanned
@@ -623,7 +702,13 @@ impl Workbook {
     ) -> Result<RecalcReport, FormulaError> {
         let expression =
             Parser::new(formula, cell.sheet, &self.sheet_names, &self.defined_names).parse()?;
-        self.set_parsed_formula(cell, ParsedFormula { expression })
+        self.set_parsed_formula(
+            cell,
+            ParsedFormula {
+                expression,
+                structured_tables: Vec::new(),
+            },
+        )
     }
 
     /// Installs an already parsed (and possibly rebound) formula with the same
@@ -3530,6 +3615,8 @@ struct Parser<'source, 'sheets> {
     sheet: u32,
     sheet_names: &'sheets HashMap<String, u32>,
     defined_names: &'sheets DefinedNames,
+    structured: StructuredContext<'sheets>,
+    used_tables: BTreeSet<String>,
     name_depth: usize,
 }
 
@@ -3566,11 +3653,34 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
             sheet,
             sheet_names,
             defined_names,
+            structured: StructuredContext::default(),
+            used_tables: BTreeSet::new(),
             name_depth: 0,
         }
     }
 
+    fn new_structured(
+        source: &'source str,
+        sheet: u32,
+        sheet_names: &'sheets HashMap<String, u32>,
+        defined_names: &'sheets DefinedNames,
+        structured: StructuredContext<'sheets>,
+    ) -> Self {
+        let mut parser = Self::new(source, sheet, sheet_names, defined_names);
+        parser.structured = structured;
+        parser
+    }
+
     fn parse(mut self) -> Result<Expr, FormulaError> {
+        self.parse_inner()
+    }
+
+    fn parse_with_metadata(mut self) -> Result<(Expr, Vec<String>), FormulaError> {
+        let expression = self.parse_inner()?;
+        Ok((expression, self.used_tables.into_iter().collect()))
+    }
+
+    fn parse_inner(&mut self) -> Result<Expr, FormulaError> {
         self.skip_space();
         if self.offset == self.source.len() {
             return Err(FormulaError::Empty);
@@ -3710,6 +3820,13 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
             Some(b'"') => self.parse_string(),
             Some(b'\'') => self.parse_quoted_sheet_reference(),
             Some(b'#') => self.parse_error_literal(),
+            Some(b'[')
+                if self.structured.current_table.is_some()
+                    && (self.remaining().starts_with("[@")
+                        || self.remaining().starts_with("[[")) =>
+            {
+                self.parse_structured_reference(None)
+            }
             Some(b'[') => Err(FormulaError::ExternalReference(self.bounded_remainder())),
             Some(byte) if byte.is_ascii_digit() || byte == b'.' => self.parse_number(),
             Some(byte) if byte.is_ascii_alphabetic() || byte == b'$' || byte == b'_' => {
@@ -3799,6 +3916,9 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
         if self.peek() == Some(b'(') {
             return self.parse_function(token);
         }
+        if self.peek() == Some(b'[') {
+            return self.parse_structured_reference(Some(token));
+        }
         if token.eq_ignore_ascii_case("TRUE") {
             return Ok(Expr::Boolean(true));
         }
@@ -3822,11 +3942,58 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
         if self.name_depth >= MAX_NAME_DEPTH {
             return Err(FormulaError::UnsupportedName(name.into()));
         }
-        let mut inner = Parser::new(definition, self.sheet, self.sheet_names, self.defined_names);
+        let mut inner = Parser::new_structured(
+            definition,
+            self.sheet,
+            self.sheet_names,
+            self.defined_names,
+            self.structured,
+        );
         inner.name_depth = self.name_depth + 1;
         inner
             .parse()
             .map_err(|_| FormulaError::UnsupportedName(name.into()))
+    }
+
+    fn parse_structured_reference(
+        &mut self,
+        table_name: Option<&str>,
+    ) -> Result<Expr, FormulaError> {
+        let table_name = table_name
+            .or(self.structured.current_table)
+            .ok_or_else(|| FormulaError::InvalidStructuredReference(self.bounded_remainder()))?
+            .to_string();
+        let start = self.offset;
+        let mut depth = 0_usize;
+        while let Some(byte) = self.peek() {
+            match byte {
+                b'[' => depth += 1,
+                b']' => {
+                    depth = depth.saturating_sub(1);
+                    self.offset += 1;
+                    if depth == 0 {
+                        break;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            self.offset += 1;
+        }
+        if depth != 0 || self.offset == start {
+            return Err(FormulaError::InvalidStructuredReference(
+                self.source[start..].chars().take(64).collect(),
+            ));
+        }
+        let selector = &self.source[start..self.offset];
+        let table = self
+            .structured
+            .tables
+            .iter()
+            .find(|table| table.name.eq_ignore_ascii_case(&table_name))
+            .ok_or_else(|| FormulaError::UnknownTable(table_name.clone()))?;
+        self.used_tables.insert(table.name.to_lowercase());
+        structured_expression(table, selector, self.structured.current_row)
     }
 
     fn parse_quoted_sheet_reference(&mut self) -> Result<Expr, FormulaError> {
@@ -4065,6 +4232,111 @@ fn parse_function_name(name: &str) -> Result<Function, FormulaError> {
         .find(|(candidate, _)| *candidate == upper)
         .map(|(_, function)| *function)
         .ok_or(FormulaError::UnsupportedFunction(upper))
+}
+
+fn structured_expression(
+    table: &StructuredTable,
+    selector: &str,
+    current_row: Option<u32>,
+) -> Result<Expr, FormulaError> {
+    #[derive(Clone, Copy)]
+    enum Rows {
+        Data,
+        Headers,
+        All,
+        Current,
+    }
+
+    let invalid = || FormulaError::InvalidStructuredReference(selector.into());
+    let inner = selector
+        .strip_prefix('[')
+        .and_then(|text| text.strip_suffix(']'))
+        .ok_or_else(invalid)?;
+    let (rows, first_name, last_name) = if let Some(current) = inner.strip_prefix('@') {
+        (Rows::Current, current, current)
+    } else if let Some(compound) = inner
+        .strip_prefix('[')
+        .and_then(|text| text.strip_suffix(']'))
+    {
+        if let Some((kind, columns)) = compound.split_once("],[") {
+            let rows = match kind.to_ascii_lowercase().as_str() {
+                "#headers" => Rows::Headers,
+                "#data" => Rows::Data,
+                "#all" => Rows::All,
+                _ => return Err(invalid()),
+            };
+            let (first, last) = columns
+                .split_once("]:[")
+                .map_or((columns, columns), |(first, last)| (first, last));
+            (rows, first, last)
+        } else {
+            let (first, last) = compound
+                .split_once("]:[")
+                .ok_or_else(invalid)?;
+            (Rows::Data, first, last)
+        }
+    } else {
+        (Rows::Data, inner, inner)
+    };
+
+    if first_name.is_empty() || last_name.is_empty() {
+        return Err(invalid());
+    }
+    let find_column = |name: &str| {
+        table
+            .columns
+            .iter()
+            .position(|column| column.name.eq_ignore_ascii_case(name))
+            .ok_or_else(|| FormulaError::UnknownTableColumn {
+                table: table.name.clone(),
+                column: name.into(),
+            })
+    };
+    let first = find_column(first_name)?;
+    let last = find_column(last_name)?;
+    if first > last {
+        return Err(invalid());
+    }
+    let columns = &table.columns[first..=last];
+    let selected_rows: Vec<u32> = match rows {
+        Rows::Data => table.rows.clone(),
+        Rows::Headers => vec![table.header_row.ok_or_else(invalid)?],
+        Rows::All => table
+            .header_row
+            .into_iter()
+            .chain(table.rows.iter().copied())
+            .collect(),
+        Rows::Current => {
+            let row = current_row.ok_or_else(invalid)?;
+            if !table.rows.contains(&row) {
+                return Err(invalid());
+            }
+            vec![row]
+        }
+    };
+    if selected_rows.is_empty() {
+        return Ok(Expr::Empty);
+    }
+    let members: Vec<CellId> = selected_rows
+        .iter()
+        .flat_map(|row| {
+            columns
+                .iter()
+                .map(move |column| CellId::new(table.sheet, *row, column.column))
+        })
+        .collect();
+    if members.len() == 1 {
+        return Ok(Expr::Reference(members[0]));
+    }
+    if members.len() > MAX_RANGE_CELLS {
+        return Err(FormulaError::RangeTooLarge);
+    }
+    Ok(Expr::Range {
+        anchor: members[0],
+        members: Some(members),
+        rows: selected_rows.len(),
+        columns: columns.len(),
+    })
 }
 
 fn parse_a1(reference: &str, sheet: u32) -> Result<CellId, FormulaError> {
@@ -5739,6 +6011,119 @@ mod tests {
             workbook.set_formula(cell(0, 0), "=NOW()"),
             Err(FormulaError::UnsupportedFunction("NOW".into()))
         );
+    }
+
+    #[test]
+    fn structured_references_lower_to_ranges_and_this_row_cells() {
+        let table = StructuredTable {
+            name: "Lines".into(),
+            sheet: 0,
+            header_row: Some(0),
+            rows: vec![1, 2],
+            columns: vec![
+                StructuredColumn {
+                    name: "Quantity".into(),
+                    column: 0,
+                },
+                StructuredColumn {
+                    name: "Price".into(),
+                    column: 1,
+                },
+                StructuredColumn {
+                    name: "Total".into(),
+                    column: 2,
+                },
+            ],
+        };
+        let names = HashMap::new();
+        let parse = |source, row| {
+            ParsedFormula::parse_with_structured_references(
+                source,
+                0,
+                &names,
+                StructuredContext {
+                    tables: std::slice::from_ref(&table),
+                    current_table: Some("Lines"),
+                    current_row: row,
+                },
+            )
+            .unwrap()
+        };
+
+        assert_eq!(
+            parse("=SUM(Lines[Price])", None).references(),
+            vec![cell(1, 1), cell(2, 1)]
+        );
+        assert_eq!(
+            parse("=Lines[@Quantity]*[@Price]", Some(2)).references(),
+            vec![cell(2, 0), cell(2, 1)]
+        );
+        assert_eq!(
+            parse("=Lines[[#Headers],[Price]]", None).references(),
+            vec![cell(0, 1)]
+        );
+        assert_eq!(
+            parse("=SUM(Lines[[Quantity]:[Price]])", None).references(),
+            vec![cell(1, 0), cell(1, 1), cell(2, 0), cell(2, 1)]
+        );
+        assert_eq!(
+            parse("=SUM(Lines[[#All],[Total]])", None).references(),
+            vec![cell(0, 2), cell(1, 2), cell(2, 2)]
+        );
+
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(1, 0), 2.0);
+        workbook.set_number(cell(1, 1), 4.0);
+        workbook.set_number(cell(2, 0), 3.0);
+        workbook.set_number(cell(2, 1), 5.0);
+        workbook
+            .set_parsed_formula(cell(1, 2), parse("=[@Quantity]*[@Price]", Some(1)))
+            .unwrap();
+        workbook
+            .set_parsed_formula(cell(2, 2), parse("=[@Quantity]*[@Price]", Some(2)))
+            .unwrap();
+        workbook
+            .set_parsed_formula(cell(3, 2), parse("=SUM(Lines[Total])", None))
+            .unwrap();
+        assert_eq!(workbook.value(cell(1, 2)), Value::Number(8.0));
+        assert_eq!(workbook.value(cell(2, 2)), Value::Number(15.0));
+        assert_eq!(workbook.value(cell(3, 2)), Value::Number(23.0));
+    }
+
+    #[test]
+    fn structured_references_reject_unknown_and_out_of_row_names() {
+        let table = StructuredTable {
+            name: "Lines".into(),
+            sheet: 0,
+            header_row: None,
+            rows: vec![1],
+            columns: vec![StructuredColumn {
+                name: "Price".into(),
+                column: 0,
+            }],
+        };
+        let names = HashMap::new();
+        let context = StructuredContext {
+            tables: std::slice::from_ref(&table),
+            current_table: Some("Lines"),
+            current_row: Some(3),
+        };
+        assert!(matches!(
+            ParsedFormula::parse_with_structured_references("=Missing[Price]", 0, &names, context),
+            Err(FormulaError::UnknownTable(_))
+        ));
+        assert!(matches!(
+            ParsedFormula::parse_with_structured_references("=Lines[Cost]", 0, &names, context),
+            Err(FormulaError::UnknownTableColumn { .. })
+        ));
+        assert!(matches!(
+            ParsedFormula::parse_with_structured_references("=[@Price]", 0, &names, context),
+            Err(FormulaError::InvalidStructuredReference(_))
+        ));
+        assert!(matches!(
+            ParsedFormula::parse_with_structured_references("=[1]Data!A1", 0, &names, context),
+            Err(FormulaError::ExternalReference(_))
+        ));
     }
 
     #[test]

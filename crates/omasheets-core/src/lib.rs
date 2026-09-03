@@ -13,7 +13,10 @@
 //! unchanged. There is no other mutation path. Calculation is delegated to
 //! `omasheets-calc`; the event core never reads a clock.
 
-use omasheets_calc::{CalcError, CellId, FormulaError, ParsedFormula, Value, Workbook};
+use omasheets_calc::{
+    CalcError, CellId, FormulaError, ParsedFormula, StructuredColumn, StructuredContext,
+    StructuredTable, Value, Workbook,
+};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
@@ -292,7 +295,18 @@ pub struct CellRef {
 pub struct CompiledFormula {
     pub source: String,
     pub sheet_bindings: Vec<(String, SheetId)>,
+    #[serde(default)]
+    pub table_bindings: Vec<(String, TableId)>,
+    #[serde(default)]
+    pub current_table: Option<TableId>,
     pub references: Vec<CellRef>,
+}
+
+/// One computed-column formula materialised for a stable table row.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ComputedCell {
+    pub cell: CellRef,
+    pub formula: CompiledFormula,
 }
 
 // ---------------------------------------------------------------------------
@@ -330,6 +344,10 @@ pub enum Operation {
         rows: Vec<RowId>,
         at: usize,
         table: Option<TableId>,
+        #[serde(default)]
+        computed: Vec<ComputedCell>,
+        #[serde(default)]
+        rebound: Vec<ComputedCell>,
     },
     DeleteRows {
         sheet: SheetId,
@@ -344,6 +362,10 @@ pub enum Operation {
         sheet: SheetId,
         name: String,
         columns: Vec<ColumnId>,
+        #[serde(default)]
+        column_names: Vec<String>,
+        #[serde(default)]
+        header_row: Option<RowId>,
         rows: Vec<RowId>,
     },
     RenameTable {
@@ -354,6 +376,12 @@ pub enum Operation {
         sheet: SheetId,
         column: ColumnId,
         column_type: ColumnType,
+    },
+    SetComputedColumn {
+        table: TableId,
+        column: ColumnId,
+        source: String,
+        formulas: Vec<ComputedCell>,
     },
     SetValue {
         cell: CellRef,
@@ -468,7 +496,37 @@ impl Operation {
                     column: *column,
                 })
                 .collect(),
-            Operation::AddRows { sheet, rows, .. } | Operation::DeleteRows { sheet, rows } => rows
+            Operation::AddRows {
+                sheet,
+                rows,
+                table,
+                computed,
+                rebound,
+                ..
+            } => {
+                let mut touches: Vec<Touch> = rows
+                    .iter()
+                    .map(|row| Touch::Row {
+                        sheet: *sheet,
+                        row: *row,
+                    })
+                    .collect();
+                if let Some(table) = table {
+                    touches.push(Touch::Table { table: *table });
+                }
+                touches.extend(
+                    computed
+                        .iter()
+                        .map(|formula| Touch::Cell { cell: formula.cell }),
+                );
+                touches.extend(
+                    rebound
+                        .iter()
+                        .map(|formula| Touch::Cell { cell: formula.cell }),
+                );
+                touches
+            }
+            Operation::DeleteRows { sheet, rows } => rows
                 .iter()
                 .map(|row| Touch::Row {
                     sheet: *sheet,
@@ -482,6 +540,19 @@ impl Operation {
                 sheet: *sheet,
                 column: *column,
             }],
+            Operation::SetComputedColumn {
+                table,
+                formulas,
+                ..
+            } => {
+                let mut touches = vec![Touch::Table { table: *table }];
+                touches.extend(
+                    formulas
+                        .iter()
+                        .map(|formula| Touch::Cell { cell: formula.cell }),
+                );
+                touches
+            }
             Operation::SetValue { cell, .. }
             | Operation::SetFormula { cell, .. }
             | Operation::ClearCell { cell } => vec![Touch::Cell { cell: *cell }],
@@ -695,6 +766,10 @@ pub enum Command {
         sheet: SheetId,
         name: String,
         columns: Vec<ColumnId>,
+        #[serde(default)]
+        column_names: Vec<String>,
+        #[serde(default)]
+        header_row: Option<RowId>,
         rows: Vec<RowId>,
     },
     RenameTable {
@@ -705,6 +780,11 @@ pub enum Command {
         sheet: SheetId,
         column: ColumnId,
         column_type: ColumnType,
+    },
+    SetComputedColumn {
+        table: TableId,
+        column: ColumnId,
+        source: String,
     },
     SetValue {
         sheet: SheetId,
@@ -800,7 +880,13 @@ pub struct Table {
     pub name: String,
     pub sheet: SheetId,
     pub columns: Vec<ColumnId>,
+    #[serde(default)]
+    pub column_names: BTreeMap<ColumnId, String>,
+    #[serde(default)]
+    pub header_row: Option<RowId>,
     pub rows: Vec<RowId>,
+    #[serde(default)]
+    pub computed_columns: BTreeMap<ColumnId, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -893,6 +979,7 @@ pub struct Lineage {
 }
 
 /// The replayed state of one branch of one document.
+#[derive(Clone)]
 pub struct Document {
     id: DocumentId,
     name: String,
@@ -1093,16 +1180,16 @@ impl Document {
                     .insert((cell.row, cell.column), cell.state.clone());
             }
         }
+        document.tables = snapshot.tables.clone();
         for (reference, state) in formulas {
             let CellInput::Formula { formula } = &state.input else {
                 unreachable!("collected formulas only")
             };
-            let bound = document.bind_formula(reference.sheet, formula)?;
+            let bound = document.bind_formula(reference, formula)?;
             let engine = document.engine_cell(reference).expect("checked");
             document.calc.set_parsed_formula(engine, bound)?;
             document.attach_dependencies(reference, formula);
         }
-        document.tables = snapshot.tables.clone();
         document.imports = snapshot.imports.clone();
         document.proposals = snapshot.proposals.clone();
         document.last_tick = snapshot.last_tick;
@@ -1397,14 +1484,10 @@ impl Document {
                 table,
             } => {
                 check_batch(count)?;
-                Operation::AddRows {
-                    sheet,
-                    rows: (0..count as u64)
-                        .map(|ordinal| RowId::derive(&seed, ordinal))
-                        .collect(),
-                    at,
-                    table,
-                }
+                let rows: Vec<RowId> = (0..count as u64)
+                    .map(|ordinal| RowId::derive(&seed, ordinal))
+                    .collect();
+                self.resolve_add_rows(sheet, rows, at, table)?
             }
             Command::DeleteRows { sheet, rows } => Operation::DeleteRows { sheet, rows },
             Command::DeleteColumns { sheet, columns } => {
@@ -1414,12 +1497,16 @@ impl Document {
                 sheet,
                 name,
                 columns,
+                column_names,
+                header_row,
                 rows,
             } => Operation::AddTable {
                 table: TableId::derive(&seed, 0),
                 sheet,
                 name,
                 columns,
+                column_names,
+                header_row,
                 rows,
             },
             Command::RenameTable { table, name } => Operation::RenameTable { table, name },
@@ -1432,14 +1519,35 @@ impl Document {
                 column,
                 column_type,
             },
+            Command::SetComputedColumn {
+                table,
+                column,
+                source,
+            } => Operation::SetComputedColumn {
+                table,
+                column,
+                formulas: self.compile_computed_column(table, column, &source)?,
+                source,
+            },
             Command::SetValue { sheet, a1, value } => Operation::SetValue {
                 cell: self.resolve_a1(sheet, &a1)?,
                 value,
             },
-            Command::SetFormula { sheet, a1, source } => Operation::SetFormula {
-                cell: self.resolve_a1(sheet, &a1)?,
-                formula: self.compile_formula(sheet, &source)?,
-            },
+            Command::SetFormula { sheet, a1, source } => {
+                let cell = self.resolve_a1(sheet, &a1)?;
+                let containing: Vec<TableId> = self
+                    .tables
+                    .iter()
+                    .filter(|(_, table)| table.sheet == sheet && table.rows.contains(&cell.row))
+                    .map(|(id, _)| *id)
+                    .collect();
+                let current_table = (source.contains('[') && containing.len() == 1)
+                    .then_some(containing[0]);
+                Operation::SetFormula {
+                    cell,
+                    formula: self.compile_formula_at(cell, current_table, &source)?,
+                }
+            }
             Command::ClearCell { sheet, a1 } => Operation::ClearCell {
                 cell: self.resolve_a1(sheet, &a1)?,
             },
@@ -1505,9 +1613,146 @@ impl Document {
 
     /// Parses A1 source against the current view and records every reference
     /// as stable identities, in the engine's traversal order.
+    fn resolve_add_rows(
+        &self,
+        sheet: SheetId,
+        rows: Vec<RowId>,
+        at: usize,
+        table: Option<TableId>,
+    ) -> Result<Operation, ApplyError> {
+        let state = self.sheet(sheet)?;
+        if at > state.rows.len() {
+            return Err(ApplyError::PositionOutOfRange);
+        }
+        self.check_fresh_batch(rows.iter().map(|id| id.0))?;
+        if let Some(table_id) = table {
+            let record = self
+                .tables
+                .get(&table_id)
+                .ok_or(ApplyError::UnknownTable(table_id))?;
+            if record.sheet != sheet {
+                return Err(ApplyError::UnknownTable(table_id));
+            }
+        }
+
+        let mut staged = self.clone();
+        let state = staged.sheets.get_mut(&sheet).expect("checked");
+        for (offset, row) in rows.iter().enumerate() {
+            state.rows.insert(at + offset, *row);
+            state.row_ordinals.insert(*row, state.next_row_ordinal);
+            state.next_row_ordinal += 1;
+        }
+        let mut computed = Vec::new();
+        let mut rebound = Vec::new();
+        if let Some(table_id) = table {
+            staged
+                .tables
+                .get_mut(&table_id)
+                .expect("checked")
+                .rows
+                .extend(rows.iter().copied());
+            let definitions = staged.tables[&table_id].computed_columns.clone();
+            for (formula_sheet, sheet_state) in &staged.sheets {
+                for ((row, column), state) in &sheet_state.cells {
+                    let CellInput::Formula { formula } = &state.input else {
+                        continue;
+                    };
+                    if formula
+                        .table_bindings
+                        .iter()
+                        .any(|(_, bound)| *bound == table_id)
+                    {
+                        let cell = CellRef {
+                            sheet: *formula_sheet,
+                            row: *row,
+                            column: *column,
+                        };
+                        rebound.push(ComputedCell {
+                            cell,
+                            formula: staged.recompile_formula(cell, formula)?,
+                        });
+                    }
+                }
+            }
+            for row in &rows {
+                for (column, source) in &definitions {
+                    let cell = CellRef {
+                        sheet,
+                        row: *row,
+                        column: *column,
+                    };
+                    computed.push(ComputedCell {
+                        cell,
+                        formula: staged.compile_formula_at(cell, Some(table_id), source)?,
+                    });
+                }
+            }
+            if computed.len() > MAX_BATCH || rebound.len() > MAX_BATCH {
+                return Err(ApplyError::BatchTooLarge);
+            }
+        }
+        Ok(Operation::AddRows {
+            sheet,
+            rows,
+            at,
+            table,
+            computed,
+            rebound,
+        })
+    }
+
+    fn compile_computed_column(
+        &self,
+        table: TableId,
+        column: ColumnId,
+        source: &str,
+    ) -> Result<Vec<ComputedCell>, ApplyError> {
+        let record = self
+            .tables
+            .get(&table)
+            .ok_or(ApplyError::UnknownTable(table))?;
+        if !record.columns.contains(&column) {
+            return Err(ApplyError::UnknownColumn(column));
+        }
+        record
+            .rows
+            .iter()
+            .map(|row| {
+                let cell = CellRef {
+                    sheet: record.sheet,
+                    row: *row,
+                    column,
+                };
+                Ok(ComputedCell {
+                    cell,
+                    formula: self.compile_formula_at(cell, Some(table), source)?,
+                })
+            })
+            .collect()
+    }
+
     pub fn compile_formula(
         &self,
         sheet: SheetId,
+        source: &str,
+    ) -> Result<CompiledFormula, ApplyError> {
+        self.compile_formula_context(sheet, None, None, source)
+    }
+
+    fn compile_formula_at(
+        &self,
+        cell: CellRef,
+        current_table: Option<TableId>,
+        source: &str,
+    ) -> Result<CompiledFormula, ApplyError> {
+        self.compile_formula_context(cell.sheet, Some(cell.row), current_table, source)
+    }
+
+    fn compile_formula_context(
+        &self,
+        sheet: SheetId,
+        current_row: Option<RowId>,
+        current_table: Option<TableId>,
         source: &str,
     ) -> Result<CompiledFormula, ApplyError> {
         if source.chars().count() > MAX_FORMULA_CHARS {
@@ -1527,7 +1772,35 @@ impl Document {
             .iter()
             .map(|(id, ordinal)| (*ordinal, *id))
             .collect();
-        let parsed = ParsedFormula::parse(source, origin, &names)?;
+        let structured = self.structured_tables(None, false)?;
+        let current_table_name = current_table
+            .map(|id| {
+                self.tables
+                    .get(&id)
+                    .map(|table| table.name.as_str())
+                    .ok_or(ApplyError::UnknownTable(id))
+            })
+            .transpose()?;
+        let current_row = current_row
+            .map(|row| {
+                self.sheets[&sheet]
+                    .rows
+                    .iter()
+                    .position(|candidate| *candidate == row)
+                    .map(|position| position as u32)
+                    .ok_or(ApplyError::UnknownRow(row))
+            })
+            .transpose()?;
+        let parsed = ParsedFormula::parse_with_structured_references(
+            source,
+            origin,
+            &names,
+            StructuredContext {
+                tables: &structured,
+                current_table: current_table_name,
+                current_row,
+            },
+        )?;
         let view_references = parsed.references();
         if view_references.len() > MAX_FORMULA_REFERENCES {
             return Err(ApplyError::TooManyReferences);
@@ -1559,11 +1832,165 @@ impl Document {
             .into_iter()
             .map(|id| (self.sheets[&id].name.clone(), id))
             .collect();
+        let mut table_bindings = parsed
+            .structured_tables()
+            .iter()
+            .map(|name| {
+                self.tables
+                    .iter()
+                    .find(|(_, table)| table.name.eq_ignore_ascii_case(name))
+                    .map(|(id, table)| (table.name.clone(), *id))
+                    .ok_or_else(|| ApplyError::Formula(FormulaError::UnknownTable(name.clone())))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if let Some(current) = current_table
+            && !table_bindings.iter().any(|(_, id)| *id == current)
+        {
+            table_bindings.push((self.tables[&current].name.clone(), current));
+            table_bindings.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
+        }
         Ok(CompiledFormula {
             source: source.to_string(),
             sheet_bindings,
+            table_bindings,
+            current_table,
             references,
         })
+    }
+
+    fn structured_tables(
+        &self,
+        bindings: Option<&[(String, TableId)]>,
+        engine_ordinals: bool,
+    ) -> Result<Vec<StructuredTable>, ApplyError> {
+        let selected: Vec<(String, TableId)> = bindings.map_or_else(
+            || {
+                self.tables
+                    .iter()
+                    .map(|(id, table)| (table.name.clone(), *id))
+                    .collect()
+            },
+            |bindings| bindings.to_vec(),
+        );
+        selected
+            .into_iter()
+            .map(|(name, id)| {
+                let table = self.tables.get(&id).ok_or(ApplyError::UnknownTable(id))?;
+                let sheet = self.sheet(table.sheet)?;
+                let row_ordinal = |row: &RowId| {
+                    if engine_ordinals {
+                        sheet.row_ordinals.get(row).copied()
+                    } else {
+                        sheet
+                            .rows
+                            .iter()
+                            .position(|candidate| candidate == row)
+                            .map(|position| position as u32)
+                    }
+                };
+                let column_ordinal = |column: &ColumnId| {
+                    if engine_ordinals {
+                        sheet.column_ordinals.get(column).copied()
+                    } else {
+                        sheet
+                            .columns
+                            .iter()
+                            .position(|candidate| candidate == column)
+                            .map(|position| position as u32)
+                    }
+                };
+                Ok(StructuredTable {
+                    name,
+                    sheet: self.sheet_ordinals[&table.sheet],
+                    header_row: table.header_row.and_then(|row| row_ordinal(&row)),
+                    rows: table.rows.iter().filter_map(row_ordinal).collect(),
+                    columns: table
+                        .columns
+                        .iter()
+                        .filter_map(|column| {
+                            Some(StructuredColumn {
+                                name: table.column_names.get(column)?.clone(),
+                                column: column_ordinal(column)?,
+                            })
+                        })
+                        .collect(),
+                })
+            })
+            .collect()
+    }
+
+    /// Re-resolves only the cell membership of a structured formula after a
+    /// table shape change. Recorded sheet/table aliases and the source remain
+    /// untouched, so a later rename cannot retarget the formula.
+    fn recompile_formula(
+        &self,
+        cell: CellRef,
+        formula: &CompiledFormula,
+    ) -> Result<CompiledFormula, ApplyError> {
+        let mut names = HashMap::new();
+        for (name, sheet) in &formula.sheet_bindings {
+            names.insert(name.clone(), self.sheet_ordinals[sheet]);
+        }
+        let structured = self.structured_tables(Some(&formula.table_bindings), false)?;
+        let current_table_name = formula
+            .current_table
+            .map(|id| {
+                formula
+                    .table_bindings
+                    .iter()
+                    .find(|(_, bound)| *bound == id)
+                    .map(|(name, _)| name.as_str())
+                    .ok_or(ApplyError::UnknownTable(id))
+            })
+            .transpose()?;
+        let sheet = self.sheet(cell.sheet)?;
+        let current_row = sheet
+            .rows
+            .iter()
+            .position(|row| *row == cell.row)
+            .map(|position| position as u32);
+        let parsed = ParsedFormula::parse_with_structured_references(
+            &formula.source,
+            self.sheet_ordinals[&cell.sheet],
+            &names,
+            StructuredContext {
+                tables: &structured,
+                current_table: current_table_name,
+                current_row,
+            },
+        )?;
+        let view_references = parsed.references();
+        if view_references.len() > MAX_FORMULA_REFERENCES {
+            return Err(ApplyError::TooManyReferences);
+        }
+        let by_ordinal: BTreeMap<u32, SheetId> = self
+            .sheet_ordinals
+            .iter()
+            .map(|(id, ordinal)| (*ordinal, *id))
+            .collect();
+        let references = view_references
+            .into_iter()
+            .map(|view| {
+                let target = by_ordinal[&view.sheet];
+                let state = &self.sheets[&target];
+                let row = *state
+                    .rows
+                    .get(view.row as usize)
+                    .ok_or_else(|| ApplyError::ReferenceOutOfView((view.row + 1).to_string()))?;
+                let column = *state
+                    .columns
+                    .get(view.column as usize)
+                    .ok_or_else(|| ApplyError::ReferenceOutOfView((view.column + 1).to_string()))?;
+                Ok(CellRef {
+                    sheet: target,
+                    row,
+                    column,
+                })
+            })
+            .collect::<Result<Vec<_>, ApplyError>>()?;
+        let mut rebound = formula.clone();
+        rebound.references = references;
+        Ok(rebound)
     }
 
     // -- apply path -------------------------------------------------------
@@ -1809,34 +2236,110 @@ impl Document {
                 rows,
                 at,
                 table,
+                computed,
+                rebound,
             } => {
-                check_batch(rows.len())?;
-                let state = self.sheet(*sheet)?;
-                if *at > state.rows.len() {
-                    return Err(ApplyError::PositionOutOfRange);
-                }
-                if let Some(table) = table {
-                    let record = self
-                        .tables
-                        .get(table)
-                        .ok_or(ApplyError::UnknownTable(*table))?;
-                    if record.sheet != *sheet {
-                        return Err(ApplyError::UnknownTable(*table));
+                let before = self.clone();
+                let result = (|| {
+                    check_batch(rows.len())?;
+                    let state = self.sheet(*sheet)?;
+                    if *at > state.rows.len() {
+                        return Err(ApplyError::PositionOutOfRange);
                     }
-                }
-                self.check_fresh_batch(rows.iter().map(|id| id.0))?;
-                let state = self.sheets.get_mut(sheet).expect("checked");
-                for (offset, row) in rows.iter().enumerate() {
-                    state.rows.insert(at + offset, *row);
-                    state.row_ordinals.insert(*row, state.next_row_ordinal);
-                    state.next_row_ordinal += 1;
-                }
-                if let Some(table) = table {
-                    self.tables
-                        .get_mut(table)
-                        .expect("checked")
-                        .rows
-                        .extend(rows.iter().copied());
+                    if let Some(table) = table {
+                        let record = self
+                            .tables
+                            .get(table)
+                            .ok_or(ApplyError::UnknownTable(*table))?;
+                        if record.sheet != *sheet {
+                            return Err(ApplyError::UnknownTable(*table));
+                        }
+                    }
+                    self.check_fresh_batch(rows.iter().map(|id| id.0))?;
+                    let state = self.sheets.get_mut(sheet).expect("checked");
+                    for (offset, row) in rows.iter().enumerate() {
+                        state.rows.insert(at + offset, *row);
+                        state.row_ordinals.insert(*row, state.next_row_ordinal);
+                        state.next_row_ordinal += 1;
+                    }
+                    if let Some(table) = table {
+                        self.tables
+                            .get_mut(table)
+                            .expect("checked")
+                            .rows
+                            .extend(rows.iter().copied());
+                    }
+                    if table.is_none() && (!computed.is_empty() || !rebound.is_empty()) {
+                        return Err(ApplyError::FormulaShapeMismatch);
+                    }
+                    if computed.len() > MAX_BATCH || rebound.len() > MAX_BATCH {
+                        return Err(ApplyError::BatchTooLarge);
+                    }
+                    if let Some(table_id) = table {
+                        let mut expected_rebound = Vec::new();
+                        for (formula_sheet, sheet_state) in &self.sheets {
+                            for ((row, column), state) in &sheet_state.cells {
+                                let CellInput::Formula { formula } = &state.input else {
+                                    continue;
+                                };
+                                if formula
+                                    .table_bindings
+                                    .iter()
+                                    .any(|(_, bound)| bound == table_id)
+                                {
+                                    let cell = CellRef {
+                                        sheet: *formula_sheet,
+                                        row: *row,
+                                        column: *column,
+                                    };
+                                    expected_rebound.push(ComputedCell {
+                                        cell,
+                                        formula: self.recompile_formula(cell, formula)?,
+                                    });
+                                }
+                            }
+                        }
+                        if &expected_rebound != rebound {
+                            return Err(ApplyError::FormulaShapeMismatch);
+                        }
+                        for item in rebound {
+                            self.set_formula_state(item.cell, &item.formula, provenance.clone())?;
+                        }
+
+                        let record = self.tables.get(table_id).expect("checked").clone();
+                        let expected_cells: Vec<CellRef> = rows
+                            .iter()
+                            .flat_map(|row| {
+                                record.computed_columns.keys().map(move |column| CellRef {
+                                    sheet: *sheet,
+                                    row: *row,
+                                    column: *column,
+                                })
+                            })
+                            .collect();
+                        if computed.iter().map(|item| item.cell).collect::<Vec<_>>()
+                            != expected_cells
+                        {
+                            return Err(ApplyError::FormulaShapeMismatch);
+                        }
+                        for item in computed {
+                            let source = record
+                                .computed_columns
+                                .get(&item.cell.column)
+                                .ok_or(ApplyError::FormulaShapeMismatch)?;
+                            let expected =
+                                self.compile_formula_at(item.cell, Some(*table_id), source)?;
+                            if expected != item.formula {
+                                return Err(ApplyError::FormulaShapeMismatch);
+                            }
+                            self.set_formula_state(item.cell, &item.formula, provenance.clone())?;
+                        }
+                    }
+                    Ok(())
+                })();
+                if let Err(error) = result {
+                    *self = before;
+                    return Err(error);
                 }
             }
             Operation::DeleteRows { sheet, rows } => {
@@ -1871,6 +2374,9 @@ impl Document {
                 }
                 for table in self.tables.values_mut() {
                     table.rows.retain(|row| !doomed.contains(row));
+                    if table.header_row.is_some_and(|row| doomed.contains(&row)) {
+                        table.header_row = None;
+                    }
                 }
             }
             Operation::DeleteColumns { sheet, columns } => {
@@ -1908,6 +2414,12 @@ impl Document {
                 }
                 for table in self.tables.values_mut() {
                     table.columns.retain(|column| !doomed.contains(column));
+                    table
+                        .column_names
+                        .retain(|column, _| !doomed.contains(column));
+                    table
+                        .computed_columns
+                        .retain(|column, _| !doomed.contains(column));
                 }
             }
             Operation::AddTable {
@@ -1915,6 +2427,8 @@ impl Document {
                 sheet,
                 name,
                 columns,
+                column_names,
+                header_row,
                 rows,
             } => {
                 check_name(name)?;
@@ -1923,6 +2437,11 @@ impl Document {
                 check_batch(columns.len())?;
                 if rows.len() > MAX_BATCH {
                     return Err(ApplyError::BatchTooLarge);
+                }
+                if columns.iter().copied().collect::<BTreeSet<_>>().len() != columns.len()
+                    || rows.iter().copied().collect::<BTreeSet<_>>().len() != rows.len()
+                {
+                    return Err(ApplyError::InvalidValue);
                 }
                 for column in columns {
                     if !state.column_ordinals.contains_key(column) {
@@ -1934,7 +2453,29 @@ impl Document {
                         return Err(ApplyError::UnknownRow(*row));
                     }
                 }
-                if self.tables.values().any(|record| record.name == *name) {
+                if let Some(header) = header_row {
+                    if !state.row_ordinals.contains_key(header) {
+                        return Err(ApplyError::UnknownRow(*header));
+                    }
+                    if rows.contains(header) {
+                        return Err(ApplyError::InvalidValue);
+                    }
+                }
+                if !column_names.is_empty() && column_names.len() != columns.len() {
+                    return Err(ApplyError::InvalidValue);
+                }
+                let mut seen_names = BTreeSet::new();
+                for column_name in column_names {
+                    check_name(column_name)?;
+                    if !seen_names.insert(column_name.to_lowercase()) {
+                        return Err(ApplyError::DuplicateName(column_name.clone()));
+                    }
+                }
+                if self
+                    .tables
+                    .values()
+                    .any(|record| record.name.eq_ignore_ascii_case(name))
+                {
                     return Err(ApplyError::DuplicateName(name.clone()));
                 }
                 self.tables.insert(
@@ -1943,7 +2484,14 @@ impl Document {
                         name: name.clone(),
                         sheet: *sheet,
                         columns: columns.clone(),
+                        column_names: columns
+                            .iter()
+                            .copied()
+                            .zip(column_names.iter().cloned())
+                            .collect(),
+                        header_row: *header_row,
                         rows: rows.clone(),
+                        computed_columns: BTreeMap::new(),
                     },
                 );
             }
@@ -1955,7 +2503,7 @@ impl Document {
                 if self
                     .tables
                     .iter()
-                    .any(|(id, record)| id != table && record.name == *name)
+                    .any(|(id, record)| id != table && record.name.eq_ignore_ascii_case(name))
                 {
                     return Err(ApplyError::DuplicateName(name.clone()));
                 }
@@ -1986,6 +2534,56 @@ impl Document {
                     .expect("checked")
                     .column_types
                     .insert(*column, *column_type);
+            }
+            Operation::SetComputedColumn {
+                table,
+                column,
+                source,
+                formulas,
+            } => {
+                let before = self.clone();
+                let result = (|| {
+                    if formulas.len() > MAX_BATCH {
+                        return Err(ApplyError::BatchTooLarge);
+                    }
+                    let record = self
+                        .tables
+                        .get(table)
+                        .ok_or(ApplyError::UnknownTable(*table))?
+                        .clone();
+                    if !record.columns.contains(column) {
+                        return Err(ApplyError::UnknownColumn(*column));
+                    }
+                    let expected_cells: Vec<CellRef> = record
+                        .rows
+                        .iter()
+                        .map(|row| CellRef {
+                            sheet: record.sheet,
+                            row: *row,
+                            column: *column,
+                        })
+                        .collect();
+                    if formulas.iter().map(|item| item.cell).collect::<Vec<_>>() != expected_cells {
+                        return Err(ApplyError::FormulaShapeMismatch);
+                    }
+                    for item in formulas {
+                        let expected = self.compile_formula_at(item.cell, Some(*table), source)?;
+                        if expected != item.formula {
+                            return Err(ApplyError::FormulaShapeMismatch);
+                        }
+                        self.set_formula_state(item.cell, &item.formula, provenance.clone())?;
+                    }
+                    self.tables
+                        .get_mut(table)
+                        .expect("checked")
+                        .computed_columns
+                        .insert(*column, source.clone());
+                    Ok(())
+                })();
+                if let Err(error) = result {
+                    *self = before;
+                    return Err(error);
+                }
             }
             Operation::SetValue { cell, value } => {
                 check_literal(value)?;
@@ -2025,44 +2623,7 @@ impl Document {
                     );
             }
             Operation::SetFormula { cell, formula } => {
-                let state = self.sheet(cell.sheet)?;
-                self.check_cell_exists(state, cell)?;
-                if formula.source.chars().count() > MAX_FORMULA_CHARS {
-                    return Err(ApplyError::FormulaTooLong);
-                }
-                if formula.references.len() > MAX_FORMULA_REFERENCES {
-                    return Err(ApplyError::TooManyReferences);
-                }
-                let bound = self.bind_formula(cell.sheet, formula)?;
-                let engine = self.engine_cell(*cell).expect("checked");
-                let previous = self.cell(*cell).cloned();
-                self.detach_dependencies(*cell);
-                if let Err(error) = self.calc.set_parsed_formula(engine, bound) {
-                    // The engine rejected the formula without changing; restore
-                    // the dependency index for whatever the cell held before.
-                    if let Some(CellState {
-                        input: CellInput::Formula { formula: earlier },
-                        ..
-                    }) = &previous
-                    {
-                        self.attach_dependencies(*cell, earlier);
-                    }
-                    return Err(ApplyError::Formula(error));
-                }
-                self.attach_dependencies(*cell, formula);
-                self.sheets
-                    .get_mut(&cell.sheet)
-                    .expect("checked")
-                    .cells
-                    .insert(
-                        (cell.row, cell.column),
-                        CellState {
-                            input: CellInput::Formula {
-                                formula: formula.clone(),
-                            },
-                            provenance,
-                        },
-                    );
+                self.set_formula_state(*cell, formula, provenance)?;
             }
             Operation::ClearCell { cell } => {
                 let state = self.sheet(cell.sheet)?;
@@ -2211,10 +2772,10 @@ impl Document {
     /// reference, by position, to the recorded stable identities.
     fn bind_formula(
         &self,
-        origin: SheetId,
+        cell: CellRef,
         formula: &CompiledFormula,
     ) -> Result<ParsedFormula, ApplyError> {
-        let origin_ordinal = self.sheet_ordinals[&origin];
+        let origin_ordinal = self.sheet_ordinals[&cell.sheet];
         let mut names: HashMap<String, u32> = HashMap::new();
         for (name, sheet) in &formula.sheet_bindings {
             let ordinal = *self
@@ -2223,7 +2784,33 @@ impl Document {
                 .ok_or(ApplyError::UnknownSheet(*sheet))?;
             names.insert(name.clone(), ordinal);
         }
-        let parsed = ParsedFormula::parse(&formula.source, origin_ordinal, &names)?;
+        let structured = self.structured_tables(Some(&formula.table_bindings), true)?;
+        let current_table_name = formula
+            .current_table
+            .map(|id| {
+                formula
+                    .table_bindings
+                    .iter()
+                    .find(|(_, bound)| *bound == id)
+                    .map(|(name, _)| name.as_str())
+                    .ok_or(ApplyError::UnknownTable(id))
+            })
+            .transpose()?;
+        let current_row = self
+            .sheets
+            .get(&cell.sheet)
+            .and_then(|sheet| sheet.row_ordinals.get(&cell.row))
+            .copied();
+        let parsed = ParsedFormula::parse_with_structured_references(
+            &formula.source,
+            origin_ordinal,
+            &names,
+            StructuredContext {
+                tables: &structured,
+                current_table: current_table_name,
+                current_row,
+            },
+        )?;
         if parsed.references().len() != formula.references.len() {
             return Err(ApplyError::FormulaShapeMismatch);
         }
@@ -2286,6 +2873,51 @@ impl Document {
         if let Some(sheet) = self.sheets.get_mut(&cell.sheet) {
             sheet.cells.remove(&(cell.row, cell.column));
         }
+    }
+
+    fn set_formula_state(
+        &mut self,
+        cell: CellRef,
+        formula: &CompiledFormula,
+        provenance: Provenance,
+    ) -> Result<(), ApplyError> {
+        let state = self.sheet(cell.sheet)?;
+        self.check_cell_exists(state, &cell)?;
+        if formula.source.chars().count() > MAX_FORMULA_CHARS {
+            return Err(ApplyError::FormulaTooLong);
+        }
+        if formula.references.len() > MAX_FORMULA_REFERENCES {
+            return Err(ApplyError::TooManyReferences);
+        }
+        let bound = self.bind_formula(cell, formula)?;
+        let engine = self.engine_cell(cell).expect("checked");
+        let previous = self.cell(cell).cloned();
+        self.detach_dependencies(cell);
+        if let Err(error) = self.calc.set_parsed_formula(engine, bound) {
+            if let Some(CellState {
+                input: CellInput::Formula { formula: earlier },
+                ..
+            }) = &previous
+            {
+                self.attach_dependencies(cell, earlier);
+            }
+            return Err(ApplyError::Formula(error));
+        }
+        self.attach_dependencies(cell, formula);
+        self.sheets
+            .get_mut(&cell.sheet)
+            .expect("checked")
+            .cells
+            .insert(
+                (cell.row, cell.column),
+                CellState {
+                    input: CellInput::Formula {
+                        formula: formula.clone(),
+                    },
+                    provenance,
+                },
+            );
+        Ok(())
     }
 }
 
@@ -2878,6 +3510,8 @@ mod tests {
                 sheet,
                 name: "Lines".into(),
                 columns: columns[..2].to_vec(),
+                column_names: vec!["Quantity".into(), "Price".into()],
+                header_row: Some(rows[0]),
                 rows: rows[1..].to_vec(),
             },
         );
@@ -2920,6 +3554,8 @@ mod tests {
                     sheet,
                     name: "Order lines".into(),
                     columns: vec![columns[1]],
+                    column_names: vec!["Price".into()],
+                    header_row: None,
                     rows: vec![],
                 },
             ),
@@ -2928,6 +3564,89 @@ mod tests {
         assert_eq!(
             Document::replay(&fixture.events).unwrap().digest(),
             fixture.document.digest()
+        );
+    }
+
+    #[test]
+    fn structured_references_and_computed_columns_follow_table_rows() {
+        let mut fixture = Fixture::new();
+        let sheet = fixture.sheet;
+        let columns = fixture.document.columns(sheet).unwrap().to_vec();
+        let rows = fixture.document.rows(sheet).unwrap().to_vec();
+        fixture.run(
+            human(),
+            Command::AddColumns {
+                sheet,
+                count: 1,
+                at: columns.len(),
+            },
+        );
+        fixture.set("A2", 2.0);
+        fixture.set("B2", 4.0);
+        fixture.set("A3", 3.0);
+        fixture.set("B3", 5.0);
+        let event = fixture.run(
+            human(),
+            Command::AddTable {
+                sheet,
+                name: "Lines".into(),
+                columns: columns.clone(),
+                column_names: vec!["Quantity".into(), "Price".into(), "Total".into()],
+                header_row: Some(rows[0]),
+                rows: rows[1..].to_vec(),
+            },
+        );
+        let Operation::AddTable { table, .. } = event.operation else {
+            unreachable!()
+        };
+        fixture.run(
+            human(),
+            Command::SetComputedColumn {
+                table,
+                column: columns[2],
+                source: "=[@Quantity]*[@Price]".into(),
+            },
+        );
+        assert_eq!(fixture.value("C2"), CellValue::Number(8.0));
+        assert_eq!(fixture.value("C3"), CellValue::Number(15.0));
+        fixture.formula("D1", "=SUM(Lines[Total])");
+        assert_eq!(fixture.value("D1"), CellValue::Number(23.0));
+
+        let added = fixture.run(
+            human(),
+            Command::AddRows {
+                sheet,
+                count: 1,
+                at: 3,
+                table: Some(table),
+            },
+        );
+        let Operation::AddRows {
+            computed, rebound, ..
+        } = &added.operation
+        else {
+            unreachable!()
+        };
+        assert_eq!(computed.len(), 1);
+        assert_eq!(rebound.len(), 3);
+        fixture.set("A4", 6.0);
+        fixture.set("B4", 7.0);
+        assert_eq!(fixture.value("C4"), CellValue::Number(42.0));
+        assert_eq!(fixture.value("D1"), CellValue::Number(65.0));
+
+        fixture.run(
+            human(),
+            Command::RenameTable {
+                table,
+                name: "Order lines".into(),
+            },
+        );
+        assert_eq!(fixture.value("D1"), CellValue::Number(65.0));
+        let replayed = Document::replay(&fixture.events).unwrap();
+        assert_eq!(replayed.digest(), fixture.document.digest());
+        assert_eq!(
+            replayed.value(replayed.resolve_a1(sheet, "D1").unwrap()),
+            CellValue::Number(65.0)
         );
     }
 

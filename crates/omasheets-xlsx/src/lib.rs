@@ -68,6 +68,9 @@ pub fn formula_error_kind(error: &FormulaError) -> &'static str {
         FormulaError::UnknownSheet(_) => "unknown_sheet",
         FormulaError::ExternalReference(_) => "external_reference",
         FormulaError::UnknownName(_) => "unknown_name",
+        FormulaError::UnknownTable(_)
+        | FormulaError::UnknownTableColumn { .. }
+        | FormulaError::InvalidStructuredReference(_) => "structured_reference",
         FormulaError::UnsupportedName(_) => "unsupported_name",
         FormulaError::RangeTooLarge => "range_too_large",
         FormulaError::Cycle(_) => "cycle",

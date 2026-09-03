@@ -64,6 +64,17 @@ workbook file, `define_sheet_name` here) is seen only by formulas on that
 sheet and shadows a workbook-level name of the same spelling there; every
 other sheet sees the workbook name.
 
+Callers with a table model can parse structured references through
+`ParsedFormula::parse_with_structured_references`. The supported slice is
+`Table[Column]`, `Table[@Column]`, unqualified `[@Column]` in a computed-column
+context, `Table[[#Headers],[Column]]`, `Table[[#Data],[Column]]`,
+`Table[[#All],[Column]]`, and inclusive column spans such as
+`Table[[Quantity]:[Price]]`. These lower to the existing reference and shared
+range nodes; the engine does not acquire a second dependency model for
+tables. Table names, column names, row membership and the current row are
+provided explicitly by the caller, so parsing never reads mutable product
+state or guesses a table from coordinates.
+
 Inside an aggregate argument, an expression that combines ranges with
 operators or scalar functions is evaluated elementwise, as Excel evaluates a
 CSE or dynamic-array formula: `SUM(IF(B1:B5=0,0,C1:C5-B1:B5))`,
