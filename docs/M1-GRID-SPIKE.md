@@ -27,6 +27,18 @@ The spike does not yet connect to `.omasheets` documents. The production path
 would add a paged model adapter over the existing local service API; it must not
 make a Unix-socket round trip for every painted cell.
 
+## Non-gating CI observation
+
+CI run 167 exercised the synthetic 1,000,000-row by 64-column fixture in a cold
+process on a GitHub-hosted Ubuntu 24.04 VM (4 vCPU, Intel Xeon Platinum 8573C),
+Qt 6.4.2, Xvfb and forced Mesa software OpenGL. After 30 warm-up frames, the
+exact 180-frame interval metrics were 24.119257 ms p95 and 24.967170 ms worst;
+286 delegates were live at report time and the Rust model served 106,149 cell
+reads. Process peak RSS was 211,672 KiB. These figures prove the headless harness
+is wired and the live delegate count is bounded. They are not the declared
+eight-core Omarchy baseline, not a hardware-composited run, and not an M1 target
+result.
+
 ## Review method
 
 Build and run the commands in `spikes/qt-grid/README.md` on the declared
