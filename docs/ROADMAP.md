@@ -112,8 +112,9 @@ public compatibility claims.
   CLI over the same API.
 - Spike a keyboard-first virtualised grid, including provenance indicators,
   formula-range overlays, half-tile layouts and full mouse-optional operation.
-  React, TypeScript and Glide Data Grid are the first candidate, not an
-  accepted dependency until the customization and accessibility spike passes.
+  Qt 6, Qt Quick and CXX-Qt are the selected spike candidate, not accepted
+  dependencies until the customization and accessibility review in
+  `docs/M1-GRID-SPIKE.md` passes.
 - Keep the current LibreOfficeKit window available for compatibility documents
   while the native grid is incomplete.
 

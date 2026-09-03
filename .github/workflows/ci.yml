@@ -241,6 +241,56 @@ jobs:
           rm -rf .omarchy-contract
           bash "$RUNNER_TEMP/omarchy-plugin-validate" .
 
+  qt-grid-spike:
+    name: Qt native grid spike
+    runs-on: ubuntu-latest
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the declared minimum Rust toolchain
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --no-self-update
+          rustup default 1.88.0
+      - name: Install the isolated Qt build and runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            build-essential cmake ninja-build pkg-config time xauth xvfb \
+            libgl1-mesa-dri qt6-base-dev qt6-declarative-dev \
+            qml6-module-qtqml qml6-module-qtqml-models \
+            qml6-module-qtqml-workerscript qml6-module-qtquick \
+            qml6-module-qtquick-controls qml6-module-qtquick-layouts \
+            qml6-module-qtquick-templates qml6-module-qtquick-window
+      - name: Check the grid contract and Rust model
+        run: |
+          python scripts/check_qt_grid_spike.py
+          cargo test --manifest-path spikes/qt-grid/Cargo.toml
+          cargo build --release --manifest-path spikes/qt-grid/Cargo.toml
+      - name: Exercise bounded viewport rendering headlessly
+        run: |
+          evidence="$RUNNER_TEMP/omasheets-qt-grid"
+          mkdir -p "$evidence"
+          env \
+            LIBGL_ALWAYS_SOFTWARE=1 \
+            QSG_RHI_BACKEND=software \
+            OMASHEETS_GRID_BENCHMARK=1 \
+            xvfb-run -a \
+            /usr/bin/time -v -o "$evidence/resource.txt" \
+            timeout 90 \
+            spikes/qt-grid/target/release/omasheets-qt-grid-spike \
+            > "$evidence/report.txt" 2> "$evidence/stderr.txt"
+          python scripts/check_qt_grid_spike.py --report "$evidence/report.txt"
+          cp spikes/qt-grid/Cargo.lock "$evidence/Cargo.lock"
+          lscpu > "$evidence/hardware.txt"
+          qmake6 -query QT_VERSION > "$evidence/qt-version.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: ${{ always() }}
+        with:
+          name: omasheets-qt-grid-smoke-linux-x86_64
+          path: ${{ runner.temp }}/omasheets-qt-grid/
+          if-no-files-found: warn
+
   native-package:
     name: Build native release bundle
     runs-on: ubuntu-latest

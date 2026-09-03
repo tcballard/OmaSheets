@@ -7,7 +7,7 @@ members = [
   "crates/omasheets-store",
   "crates/omasheets-xlsx",
 ]
-exclude = ["spikes/fastcore"]
+exclude = ["spikes/fastcore", "spikes/qt-grid"]
 resolver = "3"
 
 [workspace.package]
