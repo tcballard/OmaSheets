@@ -1541,8 +1541,11 @@ impl Document {
                     .filter(|(_, table)| table.sheet == sheet && table.rows.contains(&cell.row))
                     .map(|(id, _)| *id)
                     .collect();
-                let current_table = (source.contains('[') && containing.len() == 1)
-                    .then_some(containing[0]);
+                let current_table = if source.contains('[') && containing.len() == 1 {
+                    Some(containing[0])
+                } else {
+                    None
+                };
                 Operation::SetFormula {
                     cell,
                     formula: self.compile_formula_at(cell, current_table, &source)?,
