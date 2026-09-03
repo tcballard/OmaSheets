@@ -167,12 +167,16 @@ ApplicationWindow {
 
             property int currentRow: 0
             property int currentColumn: 0
-            readonly property int firstVisibleRow: Math.max(0, Math.floor(body.contentY / window.rowHeight))
-            readonly property int firstVisibleColumn: Math.max(0, Math.floor(body.contentX / window.cellWidth))
-            readonly property int visibleRowCount: Math.min(backend.rowCount - firstVisibleRow,
-                Math.ceil(body.height / window.rowHeight) + 2)
-            readonly property int visibleColumnCount: Math.min(backend.columnCount - firstVisibleColumn,
-                Math.ceil(body.width / window.cellWidth) + 2)
+            readonly property int rowCapacity: Math.min(backend.rowCount,
+                Math.ceil(Math.max(1, body.height) / window.rowHeight) + 2)
+            readonly property int columnCapacity: Math.min(backend.columnCount,
+                Math.ceil(Math.max(1, body.width) / window.cellWidth) + 2)
+            readonly property int firstVisibleRow: Math.min(backend.rowCount - rowCapacity,
+                Math.max(0, Math.floor(body.contentY / window.rowHeight)))
+            readonly property int firstVisibleColumn: Math.min(backend.columnCount - columnCapacity,
+                Math.max(0, Math.floor(body.contentX / window.cellWidth)))
+            readonly property int visibleRowCount: rowCapacity
+            readonly property int visibleColumnCount: columnCapacity
             readonly property int visibleDelegates: Math.max(0, visibleRowCount * visibleColumnCount)
 
             function selectCell(row, column) {

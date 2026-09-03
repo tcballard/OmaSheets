@@ -276,7 +276,7 @@ jobs:
           mkdir -p "$evidence"
           env \
             LIBGL_ALWAYS_SOFTWARE=1 \
-            QSG_RHI_BACKEND=software \
+            QSG_RHI_BACKEND=opengl \
             OMASHEETS_GRID_BENCHMARK=1 \
             xvfb-run -a \
             /usr/bin/time -v -o "$evidence/resource.txt" \
