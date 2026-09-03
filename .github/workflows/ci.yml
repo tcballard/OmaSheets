@@ -268,8 +268,8 @@ jobs:
           mkdir -p "$evidence"
           trap 'test ! -f spikes/qt-grid/Cargo.lock || cp spikes/qt-grid/Cargo.lock "$evidence/Cargo.lock"' EXIT
           python scripts/check_qt_grid_spike.py
-          cargo test --manifest-path spikes/qt-grid/Cargo.toml
-          cargo build --release --manifest-path spikes/qt-grid/Cargo.toml
+          cargo test --locked --release --manifest-path spikes/qt-grid/Cargo.toml
+          cargo build --locked --release --manifest-path spikes/qt-grid/Cargo.toml
       - name: Exercise bounded viewport rendering headlessly
         run: |
           evidence="$RUNNER_TEMP/omasheets-qt-grid"

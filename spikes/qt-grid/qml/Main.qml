@@ -344,7 +344,7 @@ ApplicationWindow {
                             Accessible.role: Accessible.StaticText
                             Accessible.name: backend.columnLabel(logicalColumn) + (logicalRow + 1)
                             Accessible.description: "Spreadsheet cell, " + backend.cellKind(logicalRow, logicalColumn)
-                            Accessible.value: valueLabel.text
+                                + ", value " + valueLabel.text
                             Accessible.focusable: true
                             Accessible.focused: selectedCell && body.activeFocus
                             Accessible.selected: selectedCell
