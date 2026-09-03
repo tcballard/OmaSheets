@@ -12,6 +12,10 @@ pub mod qobject {
         #[qproperty(i32, column_count, cxx_name = "columnCount")]
         #[qproperty(u64, revision, cxx_name = "revision")]
         #[qproperty(bool, benchmark, cxx_name = "benchmark")]
+        #[qproperty(bool, document_mode, cxx_name = "documentMode")]
+        #[qproperty(QString, document_name, cxx_name = "documentName")]
+        #[qproperty(QString, sheet_name, cxx_name = "sheetName")]
+        #[qproperty(QString, source_status, cxx_name = "sourceStatus")]
         #[qproperty(QString, theme_name, cxx_name = "themeName")]
         #[qproperty(QString, theme_background, cxx_name = "themeBackground")]
         #[qproperty(QString, theme_foreground, cxx_name = "themeForeground")]
@@ -27,6 +31,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "cellText"]
         fn cell_text(&self, row: i32, column: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "cellInput"]
+        fn cell_input(&self, row: i32, column: i32) -> QString;
 
         #[qinvokable]
         #[cxx_name = "cellKind"]
@@ -61,9 +69,11 @@ use core::pin::Pin;
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::QString;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
+use crate::service_client::GridDocument;
 use crate::theme::load_active_theme;
 
 const ROWS: i32 = 1_000_000;
@@ -74,6 +84,10 @@ pub struct GridModelRust {
     column_count: i32,
     revision: u64,
     benchmark: bool,
+    document_mode: bool,
+    document_name: QString,
+    sheet_name: QString,
+    source_status: QString,
     theme_name: QString,
     theme_background: QString,
     theme_foreground: QString,
@@ -85,6 +99,7 @@ pub struct GridModelRust {
     theme_blue: QString,
     theme_magenta: QString,
     theme_signature: u64,
+    document: Option<GridDocument>,
     edits: BTreeMap<(i32, i32), String>,
     cell_reads: AtomicU64,
     created: Instant,
@@ -93,11 +108,51 @@ pub struct GridModelRust {
 impl Default for GridModelRust {
     fn default() -> Self {
         let theme = load_active_theme();
+        let requested = requested_document_path();
+        let (document, row_count, column_count, document_name, sheet_name, source_status) =
+            match requested.as_deref().map(|path| {
+                GridDocument::open(path, std::env::var("OMASHEETS_BRANCH").ok())
+            }) {
+                Some(Ok(document)) => {
+                    let rows = document.rows.min(i32::MAX as usize) as i32;
+                    let columns = document.columns.min(i32::MAX as usize) as i32;
+                    let name = document.name.clone();
+                    let sheet = document.sheet_name.clone();
+                    (
+                        Some(document),
+                        rows.max(1),
+                        columns.max(1),
+                        name,
+                        sheet,
+                        "Connected to the local service".to_string(),
+                    )
+                }
+                Some(Err(error)) => (
+                    None,
+                    1,
+                    1,
+                    "Document unavailable".into(),
+                    String::new(),
+                    error,
+                ),
+                None => (
+                    None,
+                    ROWS,
+                    COLUMNS,
+                    "Synthetic operations".into(),
+                    "Fixture".into(),
+                    "Synthetic fixture".into(),
+                ),
+            };
         Self {
-            row_count: ROWS,
-            column_count: COLUMNS,
+            row_count,
+            column_count,
             revision: 0,
             benchmark: std::env::var_os("OMASHEETS_GRID_BENCHMARK").is_some(),
+            document_mode: requested.is_some(),
+            document_name: document_name.as_str().into(),
+            sheet_name: sheet_name.as_str().into(),
+            source_status: source_status.as_str().into(),
             theme_name: theme.name.as_str().into(),
             theme_background: theme.palette.background.as_str().into(),
             theme_foreground: theme.palette.foreground.as_str().into(),
@@ -109,6 +164,7 @@ impl Default for GridModelRust {
             theme_blue: theme.palette.blue.as_str().into(),
             theme_magenta: theme.palette.magenta.as_str().into(),
             theme_signature: theme.signature,
+            document,
             edits: BTreeMap::new(),
             cell_reads: AtomicU64::new(0),
             created: Instant::now(),
@@ -122,15 +178,46 @@ impl qobject::GridModel {
         if row < 0 || row >= self.row_count || column < 0 || column >= self.column_count {
             return QString::default();
         }
+        if let Some(document) = &self.document {
+            return document
+                .cell(row as usize, column as usize)
+                .map(|cell| cell.display.into())
+                .unwrap_or_else(|_| "#SERVICE!".into());
+        }
+        if self.document_mode {
+            return "#SERVICE!".into();
+        }
         if let Some(value) = self.edits.get(&(row, column)) {
             return value.as_str().into();
         }
         synthetic_cell(row, column).into()
     }
 
+    pub fn cell_input(&self, row: i32, column: i32) -> QString {
+        if row < 0 || row >= self.row_count || column < 0 || column >= self.column_count {
+            return QString::default();
+        }
+        if let Some(document) = &self.document {
+            return document
+                .cell(row as usize, column as usize)
+                .map(|cell| cell.input.into())
+                .unwrap_or_else(|_| "#SERVICE!".into());
+        }
+        self.cell_text(row, column)
+    }
+
     pub fn cell_kind(&self, row: i32, column: i32) -> QString {
         if row < 0 || row >= self.row_count || column < 0 || column >= self.column_count {
             return "blank".into();
+        }
+        if let Some(document) = &self.document {
+            return document
+                .cell(row as usize, column as usize)
+                .map(|cell| cell.kind.into())
+                .unwrap_or_else(|_| "error".into());
+        }
+        if self.document_mode {
+            return "error".into();
         }
         match column % 6 {
             0 | 3 => "number".into(),
@@ -151,6 +238,22 @@ impl qobject::GridModel {
         value: &QString,
     ) {
         if row < 0 || row >= self.row_count || column < 0 || column >= self.column_count {
+            return;
+        }
+        if let Some(document) = &self.document {
+            let result = document.set_text(row as usize, column as usize, &value.to_string());
+            match result {
+                Ok(()) => {
+                    let revision = *self.revision();
+                    self.as_mut().set_revision(revision.wrapping_add(1));
+                    self.as_mut()
+                        .set_source_status("Saved through the local service".into());
+                }
+                Err(error) => self.as_mut().set_source_status(error.as_str().into()),
+            }
+            return;
+        }
+        if self.document_mode {
             return;
         }
         self.as_mut()
@@ -196,16 +299,29 @@ impl qobject::GridModel {
         worst_frame_ms: f64,
         visible_delegates: i32,
     ) {
+        let source = if self.document.is_some() {
+            "native-document"
+        } else if self.document_mode {
+            "document-error"
+        } else {
+            "synthetic"
+        };
         println!(
             concat!(
                 "OMASHEETS_GRID_BENCHMARK ",
-                "{{\"schema\":1,\"fixture\":\"synthetic-1000000x64\",",
+                "{{\"schema\":1,\"fixture\":\"{}\",",
                 "\"rows\":{},\"columns\":{},\"frames\":{},",
                 "\"elapsed_seconds\":{:.6},\"p95_frame_ms\":{:.6},",
                 "\"worst_frame_ms\":{:.6},\"visible_delegates\":{},",
                 "\"cell_reads\":{},\"startup_to_report_ms\":{:.3},",
-                "\"theme_source\":\"{}\"}}"
+                "\"theme_source\":\"{}\",\"source\":\"{}\",",
+                "\"service_requests\":{}}}"
             ),
+            if source == "synthetic" {
+                "synthetic-1000000x64"
+            } else {
+                "native-document-grid"
+            },
             self.row_count,
             self.column_count,
             frames,
@@ -220,8 +336,26 @@ impl qobject::GridModel {
             } else {
                 "omarchy"
             },
+            source,
+            self.document
+                .as_ref()
+                .map_or(0, GridDocument::request_count),
         );
     }
+}
+
+fn requested_document_path() -> Option<PathBuf> {
+    std::env::var_os("OMASHEETS_DOCUMENT")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::args_os()
+                .skip(1)
+                .map(PathBuf::from)
+                .find(|path| {
+                    path.extension()
+                        .is_some_and(|extension| extension == std::ffi::OsStr::new("omasheets"))
+                })
+        })
 }
 
 fn synthetic_cell(row: i32, column: i32) -> String {

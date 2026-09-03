@@ -11,6 +11,13 @@ visible viewport. It supports mouse selection, arrow/Page/Home/End navigation,
 editing with Enter or F2, and accessibility metadata for the grid and visible
 cells.
 
+When given a native `.omasheets` path, the grid connects to the authenticated
+local service, opens the document's first sheet and requests 64-row by 16-column
+sparse tiles. At most eight tiles (8,192 coordinates) stay cached. Displayed
+formula results and editable formula source remain separate, and edits append
+through the same service API used by the CLI. The service never receives one
+request per painted cell.
+
 On Omarchy, the window reads the active normalized palette from
 `~/.config/omarchy/current/theme/colors.toml`. Background, foreground, accent,
 muted and semantic colours feed Qt/QML theme properties; panel, grid and
@@ -28,6 +35,18 @@ cargo build --locked --release --manifest-path spikes/qt-grid/Cargo.toml
 spikes/qt-grid/target/release/omasheets-qt-grid-spike
 ```
 
+To open a real native document, start the service in another terminal and pass
+the document path:
+
+```sh
+cargo run --release -p omasheets-service -- serve
+OMASHEETS_ACTOR="$USER" \
+  spikes/qt-grid/target/release/omasheets-qt-grid-spike document.omasheets
+```
+
+The document must already contain at least one sheet, row and column. The first
+sheet is shown in this slice; sheet switching is deferred to the next UI slice.
+
 ## Evidence smoke
 
 Run this on an otherwise idle machine. The first run is cold; run the command
@@ -43,13 +62,15 @@ mkdir -p out/qt-grid
 python scripts/check_qt_grid_spike.py --report out/qt-grid/report.txt
 ```
 
-The smoke scrolls a synthetic 1,000,000-row by 64-column fixture after 30
-warm-up frames and reports 180 frame intervals. Its exact metrics are p95 and
+With no document path, the smoke scrolls the synthetic 1,000,000-row by
+64-column fixture after 30 warm-up frames and reports 180 frame intervals. Its exact metrics are p95 and
 worst frame interval, elapsed time, startup-to-report time, visible delegate
 count, and model reads. A headless CI result proves wiring and boundedness only;
 it is not product performance evidence.
 
 The report also records `theme_source` as `omarchy` or `fallback`. For an
 on-Omarchy evidence run, add `--require-omarchy-theme` to the checker command.
+For a native-document run, add `--require-native-document`; this also proves
+that service requests are bounded below the number of model cell reads.
 
 See `docs/M1-GRID-SPIKE.md` for the on-device review and acceptance record.

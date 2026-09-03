@@ -1,4 +1,5 @@
 mod grid_model;
+mod service_client;
 mod theme;
 
 use cxx_qt::casting::Upcast;

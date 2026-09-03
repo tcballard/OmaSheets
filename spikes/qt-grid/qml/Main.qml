@@ -12,7 +12,7 @@ ApplicationWindow {
     minimumWidth: 760
     minimumHeight: 480
     visible: true
-    title: "OmaSheets — Native grid spike"
+    title: backend.documentName + " — OmaSheets"
     color: palette.window
 
     function blend(from, to, amount) {
@@ -88,14 +88,15 @@ ApplicationWindow {
                 }
 
                 Label {
-                    text: "Operations"
+                    text: backend.documentName
                     color: window.textColor
                     font.pixelSize: 14
                     font.weight: Font.DemiBold
                 }
 
                 Label {
-                    text: "1,000,000 rows  ·  64 columns"
+                    text: backend.rowCount.toLocaleString(Qt.locale("en_US"), "f", 0)
+                        + " rows  ·  " + backend.columnCount + " columns  ·  " + backend.sheetName
                     color: window.mutedColor
                     font.family: "monospace"
                     font.pixelSize: 11
@@ -104,7 +105,8 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
 
                 Label {
-                    text: "NATIVE GRID  ·  " + backend.themeName.toUpperCase()
+                    text: (backend.documentMode ? "LOCAL SERVICE" : "GRID SPIKE")
+                        + "  ·  " + backend.themeName.toUpperCase()
                     color: window.mutedColor
                     font.family: "monospace"
                     font.pixelSize: 10
@@ -159,7 +161,7 @@ ApplicationWindow {
                     elide: Text.ElideRight
                     text: {
                         backend.revision;
-                        return backend.cellText(grid.currentRow, grid.currentColumn);
+                        return backend.cellInput(grid.currentRow, grid.currentColumn);
                     }
                     color: window.textColor
                     font.family: "monospace"
@@ -172,7 +174,7 @@ ApplicationWindow {
                     rightPadding: 12
                     horizontalAlignment: Text.AlignRight
                     verticalAlignment: Text.AlignVCenter
-                    text: "Arrows move  ·  Enter edits  ·  Ctrl+Home/End jumps"
+                    text: backend.sourceStatus
                     color: window.mutedColor
                     font.pixelSize: 10
                 }
@@ -223,7 +225,7 @@ ApplicationWindow {
             }
 
             function beginEdit() {
-                editor.text = backend.cellText(currentRow, currentColumn);
+                editor.text = backend.cellInput(currentRow, currentColumn);
                 editor.visible = true;
                 editor.forceActiveFocus();
                 editor.selectAll();
@@ -477,6 +479,10 @@ ApplicationWindow {
 
                 onTriggered: {
                     frameNumber += 1;
+                    if (frameNumber === 1 && backend.documentMode) {
+                        backend.setCellText(0, 0, "7");
+                        backend.setCellText(0, 1, "=A1*3");
+                    }
                     const progress = Math.min(1, frameNumber / (warmupFrames + measuredFrames));
                     body.contentY = progress * Math.max(0, body.contentHeight - body.height);
                     body.contentX = (0.5 - 0.5 * Math.cos(progress * Math.PI * 4))
