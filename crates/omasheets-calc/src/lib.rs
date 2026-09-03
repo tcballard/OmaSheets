@@ -3623,7 +3623,7 @@ struct Parser<'source, 'sheets> {
 /// Defined names by scope. Lower-cased name to definition source; a
 /// sheet-scoped name shadows the workbook name of the same spelling for
 /// formulas on that sheet only.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct DefinedNames {
     workbook: HashMap<String, String>,
     sheet: HashMap<u32, HashMap<String, String>>,
