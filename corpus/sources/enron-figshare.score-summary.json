@@ -5,10 +5,10 @@
   "manifest_sha256": "2f5ea94c02ae3779206d6ca1b1da9e77002450bc070fa968ca566cfd526ff80d",
   "scored": "2026-09-02",
   "command": "omasheets-corpus score corpus/sources/enron-figshare.jsonl <root> <out> --timeout-seconds 30",
-  "engine_commit": "3d32520f91d51b63d327202cca82920125e7d36d",
+  "engine_commit": "71f21c5e285c7ec98543b498088c17ee648ef858",
   "runner": "linux x86_64 container, 4 vCPU",
-  "wall_seconds": 139.0,
-  "process_tree_peak_rss_bytes": 1539121152,
+  "wall_seconds": 208.0,
+  "process_tree_peak_rss_bytes": 1544372224,
   "candidate_engine": "formualizer-calamine-0.8.4",
   "candidate_summary": {
     "files": 1000,
@@ -19,7 +19,7 @@
     "formula_cells_observed": 419854,
     "formula_cells_loaded": 419854,
     "formula_parse_rate": 1.0,
-    "peak_rss_bytes_max": 160743424
+    "peak_rss_bytes_max": 160321536
   },
   "owned_engine": "omasheets-owned-m0",
   "owned_summary": {
@@ -28,18 +28,18 @@
     "failed": 4,
     "timed_out": 0,
     "formula_cells_observed": 924235,
-    "formula_cells_loaded": 817225,
-    "formula_cells_compared": 817225,
-    "stored_values_matched": 816141,
+    "formula_cells_loaded": 825016,
+    "formula_cells_compared": 825016,
+    "stored_values_matched": 823932,
     "stored_values_mismatched": 1084,
-    "unsupported_formulas": 107010,
-    "formula_parse_rate": 0.8842177584705189,
-    "comparison_coverage": 0.8842177584705189,
-    "stored_value_match_rate": 0.9986735599131206,
+    "unsupported_formulas": 99219,
+    "formula_parse_rate": 0.8926474327416728,
+    "comparison_coverage": 0.8926474327416728,
+    "stored_value_match_rate": 0.9986860860880273,
     "unsupported_reasons": {
       "cycle": 2286,
       "external_reference": 47007,
-      "invalid_reference": 12051,
+      "invalid_reference": 4260,
       "syntax": 10791,
       "unknown_name": 122,
       "unsupported_function": 26617,
@@ -47,7 +47,7 @@
     },
     "workbooks_with_skipped_sheets": 23,
     "skipped_sheets": 48,
-    "peak_rss_bytes_max": 116269056
+    "peak_rss_bytes_max": 116408320
   },
   "owned_unsupported_functions": {
     "_XLL.HPVAL": {
@@ -215,6 +215,8 @@
     "Twelve functions the corpus used most without support (YEARFRAC, DAYS360, NETWORKDAYS, WORKDAY, LOOKUP, PMT, NPV, XNPV, XIRR, NORMDIST, AVERAGEA, CORREL) now evaluate; two workbooks whose defined names are literally #REF! now report #REF! where Excel had kept a stale cached value.",
     "Mismatch round 1: tokens past the grid resolve as names, sheet-scoped names keep their scope, criteria follow Excel for spacing, wildcards, blanks, errors and mixed types, blank lookups never match blank cells, negative zero folds to zero, INDEX passes a failed MATCH through, lookups skip error cells, math domain errors are #NUM!, and shared formulas expand from their anchor cell; the eight worst-mismatch workbooks of the previous score now match Excel cell for cell apart from three macro-backed cells.",
     "Mismatch round 2: numbers compare at 15 significant digits as in Excel, and range expressions inside aggregate arguments (SUM(IF(...)), SUM(A:A*B:B), SUMPRODUCT((...)*...)) evaluate elementwise with Excel's broadcasting.",
+    "Sheet-qualified #REF! tokens compile to the #REF! error value, which is what Excel stores for a deleted cell on another sheet.",
+    "Timing evidence in this entry comes from a restarted container that is about 35% slower than the one the previous entries ran on: the candidate lane, which this engine change does not touch, went from 44 s to 60 s of summed import time. Per-cell results are identical across two runs on the new container; compare cell counts across entries, not wall seconds.",
     "See enron-figshare.score-delta.json for the change against the previous engine."
   ]
 }

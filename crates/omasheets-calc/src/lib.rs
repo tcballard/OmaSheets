@@ -3861,6 +3861,12 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
 
     fn parse_qualified_reference(&mut self, sheet: u32) -> Result<Expr, FormulaError> {
         self.skip_space();
+        // A deleted cell on another sheet is stored as `Sheet!#REF!`; it is
+        // the `#REF!` error, not a parse failure.
+        if self.remaining().starts_with("#REF!") {
+            self.offset += "#REF!".len();
+            return Ok(Expr::Error(CalcError::InvalidReference));
+        }
         let start = self.offset;
         while matches!(self.peek(), Some(byte) if byte.is_ascii_alphanumeric() || byte == b'$') {
             self.offset += 1;
@@ -4442,6 +4448,38 @@ mod tests {
         assert!(report.evaluated.contains(&cell(6, 0)));
         assert_eq!(workbook.value(cell(6, 0)), Value::Number(290.0));
         assert_eq!(workbook.value(cell(6, 1)), Value::Number(390.0));
+    }
+
+    #[test]
+    fn sheet_qualified_ref_errors_are_error_values_not_parse_failures() {
+        let mut workbook = Workbook::default();
+        workbook.define_sheet(0, "Data");
+        workbook.define_sheet(1, "Detail by Turbine");
+        workbook.set_number(cell(0, 0), 2.0);
+        let cases = [
+            "='Detail by Turbine'!#REF!",
+            "=+'Detail by Turbine'!#REF!",
+            "=Data!#REF!*A1",
+            "=SUM(A1,Data!#REF!)",
+            "=IF(A1>1,'Detail by Turbine'!#REF!,0)",
+        ];
+        for (column, formula) in cases.into_iter().enumerate() {
+            let target = cell(3, column as u32);
+            workbook.set_formula(target, formula).unwrap();
+            assert_eq!(
+                workbook.value(target),
+                Value::Error(CalcError::InvalidReference),
+                "{formula}"
+            );
+        }
+        workbook
+            .set_formula(cell(4, 0), "=IFERROR(Data!#REF!,-1)")
+            .unwrap();
+        assert_eq!(workbook.value(cell(4, 0)), Value::Number(-1.0));
+        assert!(matches!(
+            workbook.set_formula(cell(4, 1), "=Data!#NAME?"),
+            Err(FormulaError::InvalidReference(_))
+        ));
     }
 
     #[test]
