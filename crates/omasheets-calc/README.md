@@ -56,6 +56,13 @@ The command emits bounded JSON with construction time and edit-to-recalculation
 p50, p95 and maximum durations. It deliberately reports measurements without
 turning the roadmap target into a hardware-independent test assertion.
 
+`--fixture` selects the dependency shape: `linear` (default) chains every
+formula on the previous one so one root edit re-evaluates the whole document,
+`fan_out` points every formula at the root, and `sparse` builds independent
+chains of 1000 and edits one chain's root so one edit re-evaluates about 1000
+cells. `docs/M0-REVIEW.md` records the measurements taken with these fixtures
+against the M0 exit gate.
+
 This owned implementation exists for comparison against candidate libraries;
 passing its unit tests is not evidence of `.xlsx` compatibility or the M0
 performance exit gate.
