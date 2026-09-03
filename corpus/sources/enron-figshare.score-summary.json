@@ -5,10 +5,10 @@
   "manifest_sha256": "2f5ea94c02ae3779206d6ca1b1da9e77002450bc070fa968ca566cfd526ff80d",
   "scored": "2026-09-02",
   "command": "omasheets-corpus score corpus/sources/enron-figshare.jsonl <root> <out> --timeout-seconds 30",
-  "engine_commit": "ed1cc1dd69a0a9b09061d1513656f3e9e5bc8441",
+  "engine_commit": "7fd2c3c338de7700357530791018b821445c882e",
   "runner": "linux x86_64 container, 4 vCPU",
-  "wall_seconds": 144.9,
-  "process_tree_peak_rss_bytes": 1533501440,
+  "wall_seconds": 142.2,
+  "process_tree_peak_rss_bytes": 1543200768,
   "candidate_engine": "formualizer-calamine-0.8.4",
   "candidate_summary": {
     "files": 1000,
@@ -19,7 +19,7 @@
     "formula_cells_observed": 419854,
     "formula_cells_loaded": 419854,
     "formula_parse_rate": 1.0,
-    "peak_rss_bytes_max": 154771456
+    "peak_rss_bytes_max": 160833536
   },
   "owned_engine": "omasheets-owned-m0",
   "owned_summary": {
@@ -28,26 +28,26 @@
     "failed": 4,
     "timed_out": 0,
     "formula_cells_observed": 924235,
-    "formula_cells_loaded": 816260,
-    "formula_cells_compared": 816260,
-    "stored_values_matched": 796076,
-    "stored_values_mismatched": 20184,
-    "unsupported_formulas": 107975,
-    "formula_parse_rate": 0.8831736517227762,
-    "comparison_coverage": 0.8831736517227762,
-    "stored_value_match_rate": 0.9752725847156544,
+    "formula_cells_loaded": 817197,
+    "formula_cells_compared": 817197,
+    "stored_values_matched": 796872,
+    "stored_values_mismatched": 20325,
+    "unsupported_formulas": 107038,
+    "formula_parse_rate": 0.8841874631451958,
+    "comparison_coverage": 0.8841874631451958,
+    "stored_value_match_rate": 0.9751283962129083,
     "unsupported_reasons": {
       "cycle": 2314,
-      "external_reference": 46967,
+      "external_reference": 47007,
       "invalid_reference": 12051,
       "syntax": 10791,
       "unknown_name": 122,
-      "unsupported_function": 27594,
+      "unsupported_function": 26617,
       "unsupported_name": 8136
     },
     "workbooks_with_skipped_sheets": 23,
     "skipped_sheets": 48,
-    "peak_rss_bytes_max": 115863552
+    "peak_rss_bytes_max": 115830784
   },
   "owned_unsupported_functions": {
     "_XLL.HPVAL": {
@@ -94,13 +94,9 @@
       "formula_cells": 482,
       "workbooks": 1
     },
-    "YEARFRAC": {
-      "formula_cells": 359,
-      "workbooks": 1
-    },
-    "NETWORKDAYS": {
-      "formula_cells": 358,
-      "workbooks": 2
+    "TODAY": {
+      "formula_cells": 420,
+      "workbooks": 37
     },
     "NOW": {
       "formula_cells": 238,
@@ -110,10 +106,6 @@
       "formula_cells": 227,
       "workbooks": 3
     },
-    "DAYS360": {
-      "formula_cells": 216,
-      "workbooks": 1
-    },
     "_XLL.ASN": {
       "formula_cells": 150,
       "workbooks": 1
@@ -121,10 +113,6 @@
     "AVERAGEPRICES": {
       "formula_cells": 139,
       "workbooks": 1
-    },
-    "LOOKUP": {
-      "formula_cells": 95,
-      "workbooks": 5
     },
     "LINEST": {
       "formula_cells": 85,
@@ -134,22 +122,6 @@
       "formula_cells": 84,
       "workbooks": 7
     },
-    "WORKDAY": {
-      "formula_cells": 82,
-      "workbooks": 4
-    },
-    "NORMDIST": {
-      "formula_cells": 63,
-      "workbooks": 1
-    },
-    "TODAY": {
-      "formula_cells": 61,
-      "workbooks": 36
-    },
-    "XNPV": {
-      "formula_cells": 52,
-      "workbooks": 4
-    },
     "CELL": {
       "formula_cells": 48,
       "workbooks": 15
@@ -157,10 +129,6 @@
     "TRANSPOSE": {
       "formula_cells": 48,
       "workbooks": 3
-    },
-    "PMT": {
-      "formula_cells": 47,
-      "workbooks": 4
     },
     "DAVERAGE": {
       "formula_cells": 45,
@@ -178,10 +146,6 @@
       "formula_cells": 45,
       "workbooks": 1
     },
-    "AVERAGEA": {
-      "formula_cells": 36,
-      "workbooks": 3
-    },
     "_XLL.AMER": {
       "formula_cells": 30,
       "workbooks": 2
@@ -190,10 +154,6 @@
       "formula_cells": 22,
       "workbooks": 1
     },
-    "XIRR": {
-      "formula_cells": 14,
-      "workbooks": 5
-    },
     "TEXT": {
       "formula_cells": 13,
       "workbooks": 7
@@ -201,14 +161,6 @@
     "GETPOSITIONOFNUMBER": {
       "formula_cells": 10,
       "workbooks": 1
-    },
-    "NPV": {
-      "formula_cells": 8,
-      "workbooks": 2
-    },
-    "CORREL": {
-      "formula_cells": 6,
-      "workbooks": 2
     },
     "IRR": {
       "formula_cells": 6,
@@ -260,6 +212,7 @@
     "The four remaining owned-lane failures are two 1904-date-system workbooks, refused by decision (ADR-0004), and two workbooks over the 2,000,000-cell import bound.",
     "external_reference counts formulas that reach into another workbook; the engine never evaluates them.",
     "Ranges are shared graph nodes with membership decided by position, and imports load in bulk with one recalculation; the worst-workbook peak resident set fell from about 1 GB to about 110 MB and the two former 30 s timeouts import in well under 10 s.",
+    "Twelve functions the corpus used most without support (YEARFRAC, DAYS360, NETWORKDAYS, WORKDAY, LOOKUP, PMT, NPV, XNPV, XIRR, NORMDIST, AVERAGEA, CORREL) now evaluate; two workbooks whose defined names are literally #REF! now report #REF! where Excel had kept a stale cached value.",
     "See enron-figshare.score-delta.json for the change against the previous engine."
   ]
 }

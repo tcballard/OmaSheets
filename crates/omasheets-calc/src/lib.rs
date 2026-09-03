@@ -287,6 +287,18 @@ enum Function {
     EDate,
     EoMonth,
     Weekday,
+    YearFrac,
+    Days360,
+    NetworkDays,
+    WorkDay,
+    Lookup,
+    Pmt,
+    Npv,
+    Xnpv,
+    Xirr,
+    NormDist,
+    AverageA,
+    Correl,
     IsBlank,
     IsNumber,
     IsText,
@@ -1273,6 +1285,24 @@ impl Workbook {
         if function == Function::SumProduct {
             return self.evaluate_sumproduct(arguments);
         }
+        if matches!(
+            function,
+            Function::YearFrac | Function::Days360 | Function::NetworkDays | Function::WorkDay
+        ) {
+            return self.evaluate_calendar_function(function, arguments);
+        }
+        if function == Function::Lookup {
+            return self.evaluate_lookup_vector(arguments);
+        }
+        if matches!(
+            function,
+            Function::Pmt | Function::Npv | Function::Xnpv | Function::Xirr
+        ) {
+            return self.evaluate_financial_function(function, arguments);
+        }
+        if function == Function::Correl {
+            return self.evaluate_correl(arguments);
+        }
 
         let mut values = Vec::new();
         for argument in arguments {
@@ -1309,6 +1339,8 @@ impl Workbook {
             ),
             Function::Product => Value::Number(numbers.into_iter().product()),
             Function::Median if !numbers.is_empty() => median(numbers),
+            Function::NormDist => normal_distribution(&values),
+            Function::AverageA => average_a(&values),
             Function::StDev => deviation(&numbers, true, true),
             Function::StDevP => deviation(&numbers, false, true),
             Function::Var => deviation(&numbers, true, false),
@@ -1393,6 +1425,16 @@ impl Workbook {
             | Function::Match
             | Function::VLookup
             | Function::XLookup
+            | Function::Lookup
+            | Function::YearFrac
+            | Function::Days360
+            | Function::NetworkDays
+            | Function::WorkDay
+            | Function::Pmt
+            | Function::Npv
+            | Function::Xnpv
+            | Function::Xirr
+            | Function::Correl
             | Function::Date
             | Function::Year
             | Function::Month
@@ -1631,6 +1673,257 @@ impl Workbook {
         };
         match result {
             Ok(value) => Value::Number(value as f64),
+            Err(error) => Value::Error(error),
+        }
+    }
+
+    /// Serials from a holiday argument: numbers truncate, blanks are skipped,
+    /// anything else is `#VALUE!`.
+    fn holiday_serials(&self, argument: &Expr<usize>) -> Result<HashSet<i64>, CalcError> {
+        let mut values = Vec::new();
+        self.flatten_values(argument, &mut values);
+        let mut serials = HashSet::new();
+        for value in values {
+            match value {
+                Value::Blank => {}
+                Value::Number(number) => {
+                    serials.insert(serial_date::serial_from_number(number)?);
+                }
+                Value::Error(error) => return Err(error),
+                Value::Text(_) | Value::Boolean(_) => return Err(CalcError::InvalidValue),
+            }
+        }
+        Ok(serials)
+    }
+
+    /// `YEARFRAC`, `DAYS360`, `NETWORKDAYS` and `WORKDAY`: day-count and
+    /// working-day arithmetic on the 1900 serial system.
+    fn evaluate_calendar_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+        let expected_arity: &[usize] = match function {
+            Function::YearFrac | Function::Days360 | Function::NetworkDays | Function::WorkDay => {
+                &[2, 3]
+            }
+            _ => unreachable!("dispatched above"),
+        };
+        if !expected_arity.contains(&arguments.len()) {
+            return Value::Error(CalcError::InvalidArguments);
+        }
+        let first = match date_number(self.evaluate(&arguments[0]))
+            .and_then(serial_date::serial_from_number)
+        {
+            Ok(serial) => serial,
+            Err(error) => return Value::Error(error),
+        };
+        let second = match number(self.evaluate(&arguments[1])) {
+            Ok(value) => value,
+            Err(error) => return Value::Error(error),
+        };
+        let result = match function {
+            Function::YearFrac => {
+                let basis = arguments.get(2).map_or(Ok(0), |argument| {
+                    number(self.evaluate(argument)).and_then(serial_offset)
+                });
+                serial_date::serial_from_number(second)
+                    .and_then(|end| {
+                        basis.and_then(|basis| serial_date::year_fraction(first, end, basis))
+                    })
+                    .map(Value::Number)
+            }
+            Function::Days360 => {
+                let european = arguments
+                    .get(2)
+                    .map_or(Ok(false), |argument| truthy(self.evaluate(argument)));
+                serial_date::serial_from_number(second)
+                    .and_then(|end| {
+                        european.and_then(|european| serial_date::days_360(first, end, european))
+                    })
+                    .map(|days| Value::Number(days as f64))
+            }
+            Function::NetworkDays => {
+                let holidays = arguments.get(2).map_or(Ok(HashSet::new()), |argument| {
+                    self.holiday_serials(argument)
+                });
+                serial_date::serial_from_number(second).and_then(|end| {
+                    holidays.map(|holidays| {
+                        Value::Number(serial_date::network_days(first, end, &holidays) as f64)
+                    })
+                })
+            }
+            Function::WorkDay => {
+                let holidays = arguments.get(2).map_or(Ok(HashSet::new()), |argument| {
+                    self.holiday_serials(argument)
+                });
+                serial_offset(second)
+                    .and_then(|days| {
+                        holidays.and_then(|holidays| serial_date::work_day(first, days, &holidays))
+                    })
+                    .map(|serial| Value::Number(serial as f64))
+            }
+            _ => unreachable!("dispatched above"),
+        };
+        match result {
+            Ok(value) => value,
+            Err(error) => Value::Error(error),
+        }
+    }
+
+    /// `LOOKUP(value, lookup_vector, [result_vector])` in vector form, and the
+    /// array form that searches the first row or column of a rectangle.
+    fn evaluate_lookup_vector(&self, arguments: &[Expr<usize>]) -> Value {
+        if !matches!(arguments.len(), 2 | 3) {
+            return Value::Error(CalcError::InvalidArguments);
+        }
+        let lookup = self.evaluate(&arguments[0]);
+        if matches!(lookup, Value::Error(_)) {
+            return lookup;
+        }
+        let Some((node, rows, columns)) = range_parts(&arguments[1]) else {
+            return Value::Error(CalcError::InvalidArguments);
+        };
+        let (candidates, results): (Vec<Value>, Vec<Value>) = if arguments.len() == 3 {
+            let Some((result_node, result_rows, result_columns)) = range_parts(&arguments[2])
+            else {
+                return Value::Error(CalcError::InvalidArguments);
+            };
+            if (rows != 1 && columns != 1)
+                || (result_rows != 1 && result_columns != 1)
+                || rows * columns != result_rows * result_columns
+            {
+                return Value::Error(CalcError::InvalidArguments);
+            }
+            (self.range_values(node), self.range_values(result_node))
+        } else if rows == 1 || columns == 1 {
+            let values = self.range_values(node);
+            (values.clone(), values)
+        } else if columns > rows {
+            // More columns than rows: search the first row, answer from the last.
+            let candidates = (0..columns)
+                .map(|column| self.range_value(node, column))
+                .collect();
+            let results = (0..columns)
+                .map(|column| self.range_value(node, (rows - 1) * columns + column))
+                .collect();
+            (candidates, results)
+        } else {
+            let candidates = (0..rows)
+                .map(|row| self.range_value(node, row * columns))
+                .collect();
+            let results = (0..rows)
+                .map(|row| self.range_value(node, row * columns + columns - 1))
+                .collect();
+            (candidates, results)
+        };
+        match match_position(&lookup, &candidates, MatchMode::Ascending) {
+            Ok(position) => results[position].clone(),
+            Err(error) => Value::Error(error),
+        }
+    }
+
+    /// `PMT`, `NPV`, `XNPV` and `XIRR`.
+    fn evaluate_financial_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+        let result = match function {
+            Function::Pmt => {
+                if !matches!(arguments.len(), 3..=5) {
+                    return Value::Error(CalcError::InvalidArguments);
+                }
+                let mut numbers = Vec::with_capacity(5);
+                for argument in arguments {
+                    match number(self.evaluate(argument)) {
+                        Ok(value) => numbers.push(value),
+                        Err(error) => return Value::Error(error),
+                    }
+                }
+                payment(
+                    numbers[0],
+                    numbers[1],
+                    numbers[2],
+                    numbers.get(3).copied().unwrap_or(0.0),
+                    numbers.get(4).copied().unwrap_or(0.0) != 0.0,
+                )
+            }
+            Function::Npv => {
+                if arguments.len() < 2 {
+                    return Value::Error(CalcError::InvalidArguments);
+                }
+                let rate = match number(self.evaluate(&arguments[0])) {
+                    Ok(value) => value,
+                    Err(error) => return Value::Error(error),
+                };
+                let mut values = Vec::new();
+                for argument in &arguments[1..] {
+                    self.flatten_values(argument, &mut values);
+                }
+                if let Some(error) = first_error(&values) {
+                    return Value::Error(error);
+                }
+                net_present_value(rate, &numeric_only(&values))
+            }
+            Function::Xnpv | Function::Xirr => {
+                if !matches!(
+                    (function, arguments.len()),
+                    (Function::Xnpv, 3) | (Function::Xirr, 2 | 3)
+                ) {
+                    return Value::Error(CalcError::InvalidArguments);
+                }
+                let (values_argument, dates_argument) = if function == Function::Xnpv {
+                    (&arguments[1], &arguments[2])
+                } else {
+                    (&arguments[0], &arguments[1])
+                };
+                let mut values = Vec::new();
+                self.flatten_values(values_argument, &mut values);
+                let mut dates = Vec::new();
+                self.flatten_values(dates_argument, &mut dates);
+                let cash_flows = match dated_cash_flows(&values, &dates) {
+                    Ok(cash_flows) => cash_flows,
+                    Err(error) => return Value::Error(error),
+                };
+                if function == Function::Xnpv {
+                    match number(self.evaluate(&arguments[0])) {
+                        Ok(rate) => dated_net_present_value(rate, &cash_flows),
+                        Err(error) => Err(error),
+                    }
+                } else {
+                    let guess = arguments
+                        .get(2)
+                        .map_or(Ok(0.1), |argument| number(self.evaluate(argument)));
+                    guess.and_then(|guess| internal_rate_of_return(&cash_flows, guess))
+                }
+            }
+            _ => unreachable!("dispatched above"),
+        };
+        match result {
+            Ok(value) => Value::Number(value),
+            Err(error) => Value::Error(error),
+        }
+    }
+
+    /// `CORREL(array1, array2)`: Pearson correlation over the positions where
+    /// both sides are numbers.
+    fn evaluate_correl(&self, arguments: &[Expr<usize>]) -> Value {
+        if arguments.len() != 2 {
+            return Value::Error(CalcError::InvalidArguments);
+        }
+        let mut left = Vec::new();
+        self.flatten_values(&arguments[0], &mut left);
+        let mut right = Vec::new();
+        self.flatten_values(&arguments[1], &mut right);
+        if let Some(error) = first_error(&left).or_else(|| first_error(&right)) {
+            return Value::Error(error);
+        }
+        if left.len() != right.len() {
+            return Value::Error(CalcError::NotAvailable);
+        }
+        let pairs: Vec<(f64, f64)> = left
+            .iter()
+            .zip(&right)
+            .filter_map(|(x, y)| match (x, y) {
+                (Value::Number(x), Value::Number(y)) => Some((*x, *y)),
+                _ => None,
+            })
+            .collect();
+        match correlation(&pairs) {
+            Ok(value) => Value::Number(value),
             Err(error) => Value::Error(error),
         }
     }
@@ -2177,6 +2470,249 @@ fn repeat_text(values: &[Value]) -> Value {
         return Value::Error(CalcError::InvalidValue);
     }
     Value::Text(text.repeat(count))
+}
+
+fn first_error(values: &[Value]) -> Option<CalcError> {
+    values.iter().find_map(|value| match value {
+        Value::Error(error) => Some(error.clone()),
+        _ => None,
+    })
+}
+
+fn numeric_only(values: &[Value]) -> Vec<f64> {
+    values
+        .iter()
+        .filter_map(|value| match value {
+            Value::Number(number) => Some(*number),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `AVERAGEA`: numbers as they are, `TRUE`/`FALSE` as 1/0, text as 0,
+/// blanks ignored.
+fn average_a(values: &[Value]) -> Value {
+    let mut sum = 0.0;
+    let mut count = 0_usize;
+    for value in values {
+        match value {
+            Value::Number(number) => sum += number,
+            Value::Boolean(true) => sum += 1.0,
+            Value::Boolean(false) | Value::Text(_) => {}
+            Value::Blank => continue,
+            Value::Error(error) => return Value::Error(error.clone()),
+        }
+        count += 1;
+    }
+    if count == 0 {
+        Value::Error(CalcError::DivisionByZero)
+    } else {
+        Value::Number(sum / count as f64)
+    }
+}
+
+/// `NORMDIST(x, mean, standard_dev, cumulative)`.
+fn normal_distribution(values: &[Value]) -> Value {
+    if values.len() != 4 {
+        return Value::Error(CalcError::InvalidArguments);
+    }
+    let x = number(values[0].clone());
+    let mean = number(values[1].clone());
+    let deviation = number(values[2].clone());
+    let cumulative = truthy(values[3].clone());
+    let (x, mean, deviation, cumulative) = match (x, mean, deviation, cumulative) {
+        (Ok(x), Ok(mean), Ok(deviation), Ok(cumulative)) => (x, mean, deviation, cumulative),
+        (Err(error), ..) | (_, Err(error), ..) | (_, _, Err(error), _) | (_, _, _, Err(error)) => {
+            return Value::Error(error);
+        }
+    };
+    if deviation <= 0.0 {
+        return Value::Error(CalcError::InvalidNumber);
+    }
+    let z = (x - mean) / deviation;
+    Value::Number(if cumulative {
+        0.5 * complementary_error(-z / std::f64::consts::SQRT_2)
+    } else {
+        (-0.5 * z * z).exp() / (deviation * (2.0 * std::f64::consts::PI).sqrt())
+    })
+}
+
+/// `erfc(x)` to double precision: a Maclaurin series below 2, where its
+/// cancellation stays within a few hundred units in the last place of the
+/// tail, and the continued fraction from 2 upwards, evaluated backwards
+/// from a fixed depth.
+fn complementary_error(x: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    let magnitude = x.abs();
+    let tail = if magnitude < 2.0 {
+        let square = magnitude * magnitude;
+        let mut term = magnitude;
+        let mut sum = magnitude;
+        let mut n = 0.0;
+        loop {
+            n += 1.0;
+            term *= -square / n;
+            let addend = term / (2.0 * n + 1.0);
+            sum += addend;
+            if addend.abs() < 1.0e-17 * sum.abs() || n > 200.0 {
+                break;
+            }
+        }
+        1.0 - sum * 2.0 / std::f64::consts::PI.sqrt()
+    } else {
+        let mut fraction = magnitude;
+        for n in (1..=80).rev() {
+            fraction = magnitude + (f64::from(n) / 2.0) / fraction;
+        }
+        (-square_of(magnitude)).exp() / std::f64::consts::PI.sqrt() / fraction
+    };
+    if x < 0.0 { 2.0 - tail } else { tail }
+}
+
+fn square_of(value: f64) -> f64 {
+    value * value
+}
+
+/// `PMT`: the constant payment of an annuity.
+fn payment(
+    rate: f64,
+    periods: f64,
+    present: f64,
+    future: f64,
+    at_start: bool,
+) -> Result<f64, CalcError> {
+    if periods == 0.0 || !periods.is_finite() || !rate.is_finite() {
+        return Err(CalcError::InvalidNumber);
+    }
+    if rate == 0.0 {
+        return Ok(-(present + future) / periods);
+    }
+    let growth = (1.0 + rate).powf(periods);
+    if !growth.is_finite() || growth == 1.0 {
+        return Err(CalcError::InvalidNumber);
+    }
+    let timing = if at_start { 1.0 + rate } else { 1.0 };
+    Ok(-(present * growth + future) * rate / (timing * (growth - 1.0)))
+}
+
+/// `NPV`: cash flows discounted from the end of the first period.
+fn net_present_value(rate: f64, values: &[f64]) -> Result<f64, CalcError> {
+    if rate == -1.0 {
+        return Err(CalcError::DivisionByZero);
+    }
+    let mut total = 0.0;
+    for (index, value) in values.iter().enumerate() {
+        total += value / (1.0 + rate).powi(index as i32 + 1);
+    }
+    if total.is_finite() {
+        Ok(total)
+    } else {
+        Err(CalcError::InvalidNumber)
+    }
+}
+
+/// Cash flows paired with the number of days from the first date, as `XNPV`
+/// and `XIRR` read them: both lists numeric and the same length, no date
+/// before the first.
+fn dated_cash_flows(values: &[Value], dates: &[Value]) -> Result<Vec<(f64, f64)>, CalcError> {
+    if let Some(error) = first_error(values).or_else(|| first_error(dates)) {
+        return Err(error);
+    }
+    if values.len() != dates.len() || values.is_empty() {
+        return Err(CalcError::InvalidNumber);
+    }
+    let mut cash_flows = Vec::with_capacity(values.len());
+    for (value, date) in values.iter().zip(dates) {
+        match (value, date) {
+            (Value::Number(value), Value::Number(date)) => {
+                cash_flows.push((*value, serial_date::serial_from_number(*date)? as f64));
+            }
+            _ => return Err(CalcError::InvalidValue),
+        }
+    }
+    let first = cash_flows[0].1;
+    if cash_flows.iter().any(|(_, date)| *date < first) {
+        return Err(CalcError::InvalidNumber);
+    }
+    Ok(cash_flows
+        .into_iter()
+        .map(|(value, date)| (value, date - first))
+        .collect())
+}
+
+fn dated_net_present_value(rate: f64, cash_flows: &[(f64, f64)]) -> Result<f64, CalcError> {
+    if rate <= -1.0 || !rate.is_finite() {
+        return Err(CalcError::InvalidNumber);
+    }
+    let total: f64 = cash_flows
+        .iter()
+        .map(|(value, days)| value / (1.0 + rate).powf(days / 365.0))
+        .sum();
+    if total.is_finite() {
+        Ok(total)
+    } else {
+        Err(CalcError::InvalidNumber)
+    }
+}
+
+/// `XIRR` by Newton's method from `guess`, the rate at which the dated net
+/// present value is zero.
+fn internal_rate_of_return(cash_flows: &[(f64, f64)], guess: f64) -> Result<f64, CalcError> {
+    if !cash_flows.iter().any(|(value, _)| *value > 0.0)
+        || !cash_flows.iter().any(|(value, _)| *value < 0.0)
+    {
+        return Err(CalcError::InvalidNumber);
+    }
+    let mut rate = if guess > -1.0 && guess.is_finite() {
+        guess
+    } else {
+        0.1
+    };
+    for _ in 0..100 {
+        let base = 1.0 + rate;
+        let mut value = 0.0;
+        let mut slope = 0.0;
+        for (cash, days) in cash_flows {
+            let years = days / 365.0;
+            let discount = base.powf(years);
+            value += cash / discount;
+            slope -= years * cash / (discount * base);
+        }
+        if slope == 0.0 || !slope.is_finite() {
+            return Err(CalcError::InvalidNumber);
+        }
+        let next = rate - value / slope;
+        if !next.is_finite() || next <= -1.0 {
+            return Err(CalcError::InvalidNumber);
+        }
+        if (next - rate).abs() <= 1.0e-10 * rate.abs().max(1.0) {
+            return Ok(next);
+        }
+        rate = next;
+    }
+    Err(CalcError::InvalidNumber)
+}
+
+/// Pearson correlation of numeric pairs.
+fn correlation(pairs: &[(f64, f64)]) -> Result<f64, CalcError> {
+    if pairs.len() < 2 {
+        return Err(CalcError::DivisionByZero);
+    }
+    let count = pairs.len() as f64;
+    let mean_x = pairs.iter().map(|(x, _)| x).sum::<f64>() / count;
+    let mean_y = pairs.iter().map(|(_, y)| y).sum::<f64>() / count;
+    let (mut covariance, mut variance_x, mut variance_y) = (0.0, 0.0, 0.0);
+    for (x, y) in pairs {
+        covariance += (x - mean_x) * (y - mean_y);
+        variance_x += (x - mean_x) * (x - mean_x);
+        variance_y += (y - mean_y) * (y - mean_y);
+    }
+    if variance_x == 0.0 || variance_y == 0.0 {
+        return Err(CalcError::DivisionByZero);
+    }
+    Ok(covariance / (variance_x * variance_y).sqrt())
 }
 
 fn median(mut numbers: Vec<f64>) -> Value {
@@ -3039,6 +3575,18 @@ const FUNCTION_REGISTRY: &[(&str, Function)] = &[
     ("EDATE", Function::EDate),
     ("EOMONTH", Function::EoMonth),
     ("WEEKDAY", Function::Weekday),
+    ("YEARFRAC", Function::YearFrac),
+    ("DAYS360", Function::Days360),
+    ("NETWORKDAYS", Function::NetworkDays),
+    ("WORKDAY", Function::WorkDay),
+    ("LOOKUP", Function::Lookup),
+    ("PMT", Function::Pmt),
+    ("NPV", Function::Npv),
+    ("XNPV", Function::Xnpv),
+    ("XIRR", Function::Xirr),
+    ("NORMDIST", Function::NormDist),
+    ("AVERAGEA", Function::AverageA),
+    ("CORREL", Function::Correl),
     ("ISBLANK", Function::IsBlank),
     ("ISNUMBER", Function::IsNumber),
     ("ISTEXT", Function::IsText),
@@ -4130,6 +4678,250 @@ mod tests {
             ParsedFormula::parse("=Missing!A1", 0, &names),
             Err(FormulaError::UnknownSheet("Missing".into()))
         );
+    }
+
+    fn assert_close(actual: Value, expected: f64, tolerance: f64, label: &str) {
+        match actual {
+            Value::Number(number) => assert!(
+                (number - expected).abs() <= tolerance * expected.abs().max(1.0),
+                "{label}: {number} != {expected}"
+            ),
+            other => panic!("{label}: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn day_count_and_working_day_functions_follow_excel() {
+        let mut workbook = Workbook::default();
+        for (column, formula, expected) in [
+            (0, "=YEARFRAC(DATE(2024,1,1),DATE(2024,7,1))", 0.5),
+            (
+                1,
+                "=YEARFRAC(DATE(2024,1,1),DATE(2024,7,1),1)",
+                182.0 / 366.0,
+            ),
+            (
+                2,
+                "=YEARFRAC(DATE(2024,1,1),DATE(2024,7,1),2)",
+                182.0 / 360.0,
+            ),
+            (
+                3,
+                "=YEARFRAC(DATE(2024,1,1),DATE(2024,7,1),3)",
+                182.0 / 365.0,
+            ),
+            (4, "=YEARFRAC(DATE(2024,1,1),DATE(2024,7,1),4)", 0.5),
+            (
+                5,
+                "=YEARFRAC(DATE(2023,1,31),DATE(2023,3,31),0)",
+                60.0 / 360.0,
+            ),
+            (
+                6,
+                "=YEARFRAC(DATE(2023,3,31),DATE(2023,1,31))",
+                60.0 / 360.0,
+            ),
+            (
+                7,
+                "=YEARFRAC(DATE(2021,1,1),DATE(2024,1,1),1)",
+                1095.0 / (1461.0 / 4.0),
+            ),
+            (8, "=DAYS360(DATE(2023,1,30),DATE(2023,3,31))", 60.0),
+            (9, "=DAYS360(DATE(2023,1,1),DATE(2023,1,31))", 30.0),
+            (10, "=DAYS360(DATE(2023,2,28),DATE(2023,3,31))", 30.0),
+            (11, "=DAYS360(DATE(2023,1,1),DATE(2023,1,31),TRUE)", 29.0),
+            (12, "=DAYS360(DATE(2023,3,31),DATE(2023,1,30))", -60.0),
+            (13, "=NETWORKDAYS(DATE(2024,1,1),DATE(2024,1,31))", 23.0),
+            (14, "=NETWORKDAYS(DATE(2024,1,31),DATE(2024,1,1))", -23.0),
+            (
+                15,
+                "=NETWORKDAYS(DATE(2024,1,1),DATE(2024,1,31),DATE(2024,1,15))",
+                22.0,
+            ),
+            (16, "=WORKDAY(DATE(2024,1,5),1)-DATE(2024,1,8)", 0.0),
+            (17, "=WORKDAY(DATE(2024,1,8),-1)-DATE(2024,1,5)", 0.0),
+            (
+                18,
+                "=WORKDAY(DATE(2024,1,5),1,DATE(2024,1,8))-DATE(2024,1,9)",
+                0.0,
+            ),
+            (19, "=WORKDAY(DATE(2024,1,5),0)-DATE(2024,1,5)", 0.0),
+        ] {
+            workbook.set_formula(cell(0, column), formula).unwrap();
+            assert_close(workbook.value(cell(0, column)), expected, 1e-12, formula);
+        }
+        workbook.set_number(
+            cell(5, 0),
+            serial_date::date_serial(2024.0, 1.0, 15.0).unwrap() as f64,
+        );
+        workbook.set_number(
+            cell(6, 0),
+            serial_date::date_serial(2024.0, 1.0, 16.0).unwrap() as f64,
+        );
+        workbook
+            .set_formula(
+                cell(7, 0),
+                "=NETWORKDAYS(DATE(2024,1,1),DATE(2024,1,31),A6:A7)",
+            )
+            .unwrap();
+        assert_eq!(workbook.value(cell(7, 0)), Value::Number(21.0));
+        for (formula, expected) in [
+            (
+                "=YEARFRAC(DATE(2024,1,1),DATE(2024,7,1),5)",
+                CalcError::InvalidNumber,
+            ),
+            (
+                "=NETWORKDAYS(DATE(2024,1,1),DATE(2024,1,31),\"x\")",
+                CalcError::InvalidValue,
+            ),
+            ("=DAYS360(1,\"x\")", CalcError::InvalidValue),
+        ] {
+            workbook.set_formula(cell(8, 0), formula).unwrap();
+            assert_eq!(
+                workbook.value(cell(8, 0)),
+                Value::Error(expected),
+                "{formula}"
+            );
+        }
+    }
+
+    #[test]
+    fn lookup_vector_and_array_forms_follow_excel() {
+        let mut workbook = Workbook::default();
+        for (row, (frequency, color)) in [
+            (4.14, "red"),
+            (4.19, "orange"),
+            (5.17, "yellow"),
+            (5.77, "green"),
+            (6.39, "blue"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            workbook.set_number(cell(row as u32, 0), frequency);
+            workbook.set_text(cell(row as u32, 1), color);
+        }
+        for (formula, expected) in [
+            ("=LOOKUP(4.19,A1:A5,B1:B5)", Value::Text("orange".into())),
+            ("=LOOKUP(5.75,A1:A5,B1:B5)", Value::Text("yellow".into())),
+            ("=LOOKUP(7.66,A1:A5,B1:B5)", Value::Text("blue".into())),
+            (
+                "=LOOKUP(0,A1:A5,B1:B5)",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            ("=LOOKUP(5.2,A1:B5)", Value::Text("yellow".into())),
+            ("=LOOKUP(5.2,A1:A5)", Value::Number(5.17)),
+            (
+                "=LOOKUP(1,A1:A5,B1:B4)",
+                Value::Error(CalcError::InvalidArguments),
+            ),
+        ] {
+            workbook.set_formula(cell(0, 3), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, 3)), expected, "{formula}");
+        }
+    }
+
+    #[test]
+    fn financial_and_statistical_functions_follow_excel() {
+        let mut workbook = Workbook::default();
+        for (row, (value, date)) in [
+            (-10000.0, (2008.0, 1.0, 1.0)),
+            (2750.0, (2008.0, 3.0, 1.0)),
+            (4250.0, (2008.0, 10.0, 30.0)),
+            (3250.0, (2009.0, 2.0, 15.0)),
+            (2750.0, (2009.0, 4.0, 1.0)),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            workbook.set_number(cell(row as u32, 0), value);
+            workbook.set_number(
+                cell(row as u32, 1),
+                serial_date::date_serial(date.0, date.1, date.2).unwrap() as f64,
+            );
+        }
+        for (row, (x, y)) in [
+            (3.0, 9.0),
+            (2.0, 7.0),
+            (4.0, 12.0),
+            (5.0, 15.0),
+            (6.0, 17.0),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            workbook.set_number(cell(row as u32, 2), x);
+            workbook.set_number(cell(row as u32, 3), y);
+        }
+        workbook.set_number(cell(0, 4), 10.0);
+        workbook.set_text(cell(1, 4), "text");
+        workbook.set_boolean(cell(2, 4), true);
+        for (formula, expected, tolerance) in [
+            ("=PMT(0.08/12,10,10000)", -1037.0320893, 1e-9),
+            (
+                "=PMT(0.08/12,10,10000,0,1)",
+                -1037.0320893 / (1.0 + 0.08 / 12.0),
+                1e-9,
+            ),
+            ("=PMT(0,10,1000)", -100.0, 1e-12),
+            ("=NPV(0.1,-10000,3000,4200,6800)", 1188.4434123, 1e-9),
+            ("=NPV(0.1,A2:A5)", 10332.456799, 1e-9),
+            ("=XNPV(0.09,A1:A5,B1:B5)", 2086.647602, 1e-8),
+            ("=XIRR(A1:A5,B1:B5)", 0.373362535, 1e-8),
+            ("=XIRR(A1:A5,B1:B5,0.5)", 0.373362535, 1e-8),
+            ("=NORMDIST(42,40,1.5,TRUE)", 0.9087887802, 1e-9),
+            ("=NORMDIST(42,40,1.5,FALSE)", 0.1093400498, 1e-8),
+            ("=NORMDIST(0,0,1,TRUE)", 0.5, 1e-15),
+            ("=NORMDIST(-6,0,1,TRUE)", 9.865876450377e-10, 1e-9),
+            ("=NORMDIST(1.959963984540054,0,1,TRUE)", 0.975, 1e-12),
+            ("=AVERAGEA(E1:E4)", 11.0 / 3.0, 1e-12),
+            ("=AVERAGEA(10,TRUE,\"x\")", 11.0 / 3.0, 1e-12),
+            ("=CORREL(C1:C5,D1:D5)", 0.997054486, 1e-9),
+        ] {
+            workbook.set_formula(cell(0, 6), formula).unwrap();
+            assert_close(workbook.value(cell(0, 6)), expected, tolerance, formula);
+        }
+        for (formula, expected) in [
+            ("=PMT(0.1,0,1000)", CalcError::InvalidNumber),
+            ("=NORMDIST(1,0,0,TRUE)", CalcError::InvalidNumber),
+            ("=XNPV(0.09,A1:A5,B1:B4)", CalcError::InvalidNumber),
+            ("=XNPV(-1,A1:A5,B1:B5)", CalcError::InvalidNumber),
+            ("=XIRR(A2:A5,B2:B5)", CalcError::InvalidNumber),
+            ("=CORREL(C1:C5,D1:D4)", CalcError::NotAvailable),
+            ("=CORREL(C1:C1,D1:D1)", CalcError::DivisionByZero),
+            ("=AVERAGEA(E5:E6)", CalcError::DivisionByZero),
+        ] {
+            workbook.set_formula(cell(0, 6), formula).unwrap();
+            assert_eq!(
+                workbook.value(cell(0, 6)),
+                Value::Error(expected),
+                "{formula}"
+            );
+        }
+    }
+
+    #[test]
+    fn complementary_error_function_is_accurate_across_the_join() {
+        for (x, expected) in [
+            (0.5, 1.0 - 0.5204998778130465),
+            (1.0, 0.15729920705028513),
+            (2.0, 0.004677734981047266),
+            (2.5, 4.069520174449589e-4),
+            (3.0, 2.209049699858544e-5),
+            (4.0, 1.541725790028002e-8),
+            (5.0, 1.537459794428035e-12),
+            (-1.0, 1.0 + 0.8427007929497149),
+        ] {
+            let actual = complementary_error(x);
+            assert!(
+                (actual - expected).abs() <= 1e-12 * expected.abs(),
+                "erfc({x}) = {actual}, expected {expected}"
+            );
+        }
+        // The series and the continued fraction meet at 2 without a step.
+        let below = complementary_error(2.0 - 1e-9);
+        let above = complementary_error(2.0);
+        assert!((below - above).abs() < 1e-10, "join: {below} vs {above}");
     }
 
     #[test]

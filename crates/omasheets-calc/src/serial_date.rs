@@ -158,6 +158,193 @@ pub fn weekday(serial: i64, return_type: i64) -> Result<i64, CalcError> {
     }
 }
 
+/// `YEARFRAC(start, end, basis)` for bases 0 to 4, following Excel's
+/// documented day-count conventions: US 30/360, actual/actual, actual/360,
+/// actual/365 and European 30/360. Dates are swapped so the result is never
+/// negative.
+pub fn year_fraction(start: i64, end: i64, basis: i64) -> Result<f64, CalcError> {
+    let (start, end) = if start <= end {
+        (start, end)
+    } else {
+        (end, start)
+    };
+    let first = civil_from_serial(start)?;
+    let last = civil_from_serial(end)?;
+    let actual = (end - start) as f64;
+    match basis {
+        0 => {
+            let (mut d1, mut d2) = (i64::from(first.day), i64::from(last.day));
+            let first_is_end_of_february =
+                first.month == 2 && first.day == days_in_month(first.year, 2);
+            let last_is_end_of_february =
+                last.month == 2 && last.day == days_in_month(last.year, 2);
+            if first_is_end_of_february && last_is_end_of_february {
+                d2 = 30;
+            }
+            if first_is_end_of_february {
+                d1 = 30;
+            }
+            if d2 == 31 && d1 >= 30 {
+                d2 = 30;
+            }
+            if d1 == 31 {
+                d1 = 30;
+            }
+            Ok(days_360_between(
+                first.year,
+                i64::from(first.month),
+                d1,
+                last.year,
+                i64::from(last.month),
+                d2,
+            ) as f64
+                / 360.0)
+        }
+        1 => {
+            let year_length = if first.year == last.year {
+                days_in_year(first.year)
+            } else if last.year == first.year + 1
+                && (first.month, first.day) >= (last.month, last.day)
+            {
+                // Within one year: 366 only when a 29 February lies inside.
+                let february_29_in_first =
+                    is_leap_year(first.year) && (first.month, first.day) <= (2, 29);
+                let february_29_in_last =
+                    is_leap_year(last.year) && (last.month, last.day) >= (2, 29);
+                if february_29_in_first || february_29_in_last {
+                    366.0
+                } else {
+                    365.0
+                }
+            } else {
+                let years = (first.year..=last.year).map(days_in_year).sum::<f64>();
+                years / (last.year - first.year + 1) as f64
+            };
+            Ok(actual / year_length)
+        }
+        2 => Ok(actual / 360.0),
+        3 => Ok(actual / 365.0),
+        4 => {
+            let d1 = if first.day == 31 {
+                30
+            } else {
+                i64::from(first.day)
+            };
+            let d2 = if last.day == 31 {
+                30
+            } else {
+                i64::from(last.day)
+            };
+            Ok(days_360_between(
+                first.year,
+                i64::from(first.month),
+                d1,
+                last.year,
+                i64::from(last.month),
+                d2,
+            ) as f64
+                / 360.0)
+        }
+        _ => Err(CalcError::InvalidNumber),
+    }
+}
+
+/// `DAYS360(start, end, method)`: the US (NASD) convention unless
+/// `european` is set. Negative when `end` precedes `start`, as in Excel.
+pub fn days_360(start: i64, end: i64, european: bool) -> Result<i64, CalcError> {
+    let first = civil_from_serial(start)?;
+    let last = civil_from_serial(end)?;
+    let (mut d1, mut d2) = (i64::from(first.day), i64::from(last.day));
+    if european {
+        if d1 == 31 {
+            d1 = 30;
+        }
+        if d2 == 31 {
+            d2 = 30;
+        }
+    } else {
+        if d1 == 31 || (first.month == 2 && first.day == days_in_month(first.year, 2)) {
+            d1 = 30;
+        }
+        if d2 == 31 && d1 >= 30 {
+            d2 = 30;
+        }
+    }
+    Ok(days_360_between(
+        first.year,
+        i64::from(first.month),
+        d1,
+        last.year,
+        i64::from(last.month),
+        d2,
+    ))
+}
+
+fn days_360_between(y1: i64, m1: i64, d1: i64, y2: i64, m2: i64, d2: i64) -> i64 {
+    (y2 - y1) * 360 + (m2 - m1) * 30 + (d2 - d1)
+}
+
+fn days_in_year(year: i64) -> f64 {
+    if year == 1900 || is_leap_year(year) {
+        366.0
+    } else {
+        365.0
+    }
+}
+
+fn is_weekend(serial: i64) -> bool {
+    // Return type 1: 1 is Sunday, 7 is Saturday.
+    matches!((serial - 1).rem_euclid(7) + 1, 1 | 7)
+}
+
+/// `NETWORKDAYS`: whole working days between two serials inclusive, minus
+/// the holidays that fall on working days; negative when `end` precedes
+/// `start`.
+pub fn network_days(start: i64, end: i64, holidays: &std::collections::HashSet<i64>) -> i64 {
+    let (low, high, sign) = if start <= end {
+        (start, end, 1)
+    } else {
+        (end, start, -1)
+    };
+    let span = high - low + 1;
+    let full_weeks = span / 7;
+    let mut count = full_weeks * 5;
+    for serial in low + full_weeks * 7..=high {
+        if !is_weekend(serial) {
+            count += 1;
+        }
+    }
+    let excluded = holidays
+        .iter()
+        .filter(|holiday| (low..=high).contains(holiday) && !is_weekend(**holiday))
+        .count() as i64;
+    sign * (count - excluded)
+}
+
+/// `WORKDAY`: the serial `days` working days after (or before) `start`.
+pub fn work_day(
+    start: i64,
+    days: i64,
+    holidays: &std::collections::HashSet<i64>,
+) -> Result<i64, CalcError> {
+    if days.abs() > 1_000_000 {
+        return Err(CalcError::InvalidNumber);
+    }
+    let step = days.signum();
+    let mut remaining = days.abs();
+    let mut serial = start;
+    while remaining > 0 {
+        serial += step;
+        if !(MIN_SERIAL..=MAX_SERIAL).contains(&serial) {
+            return Err(CalcError::InvalidNumber);
+        }
+        if !is_weekend(serial) && !holidays.contains(&serial) {
+            remaining -= 1;
+        }
+    }
+    Ok(serial)
+}
+
 /// Days in a month as Excel counts them: February 1900 has 29.
 fn days_in_month(year: i64, month: i64) -> u32 {
     match month {
