@@ -1032,6 +1032,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "zip 8.6.0",
 ]
 
 [[package]]

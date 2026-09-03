@@ -3,72 +3,75 @@
   "source": "enron-figshare",
   "manifest": "enron-figshare.jsonl",
   "manifest_sha256": "2f5ea94c02ae3779206d6ca1b1da9e77002450bc070fa968ca566cfd526ff80d",
-  "baseline_engine_commit": "08f38d1eeedf22d38dcc58eb928d083580c206ab",
-  "engine_commit": "0eccafff50d0280dc8e7411b406b3d11ccd58489",
-  "scored": "2026-09-01",
+  "baseline_engine_commit": "0eccafff50d0280dc8e7411b406b3d11ccd58489",
+  "engine_commit": "ed1cc1dd69a0a9b09061d1513656f3e9e5bc8441",
+  "scored": "2026-09-02",
   "owned_lane": {
     "opened": {
       "before": 971,
-      "after": 971
+      "after": 996
     },
     "failed": {
       "before": 29,
-      "after": 29
+      "after": 4
     },
     "timed_out": {
       "before": 2,
-      "after": 2
+      "after": 0
     },
     "formula_cells_observed": {
       "before": 730879,
-      "after": 730879
+      "after": 924235
     },
     "formula_cells_loaded": {
-      "before": 600171,
-      "after": 662234
+      "before": 662234,
+      "after": 816260
     },
     "formula_cells_compared": {
-      "before": 600171,
-      "after": 662234
+      "before": 662234,
+      "after": 816260
     },
     "stored_values_matched": {
-      "before": 542159,
-      "after": 648639
+      "before": 648639,
+      "after": 796076
     },
     "stored_values_mismatched": {
-      "before": 58012,
-      "after": 13595
+      "before": 13595,
+      "after": 20184
     },
     "unsupported_formulas": {
-      "before": 130708,
-      "after": 68645
+      "before": 68645,
+      "after": 107975
     },
     "formula_parse_rate": {
-      "before": 0.821163284209835,
-      "after": 0.9060788447882618
+      "before": 0.9060788447882618,
+      "after": 0.8831736517227762
     },
     "comparison_coverage": {
-      "before": 0.821163284209835,
-      "after": 0.9060788447882618
+      "before": 0.9060788447882618,
+      "after": 0.8831736517227762
     },
     "stored_value_match_rate": {
-      "before": 0.9033408811821964,
-      "after": 0.9794710026969319
+      "before": 0.9794710026969319,
+      "after": 0.9752725847156544
     },
     "peak_rss_bytes_max": {
-      "before": 193032192,
-      "after": 1022779392
+      "before": 1022779392,
+      "after": 115863552
+    }
+  },
+  "owned_lane_added": {
+    "workbooks_with_skipped_sheets": {
+      "before": null,
+      "after": 23
+    },
+    "skipped_sheets": {
+      "before": null,
+      "after": 48
     }
   },
   "unsupported_reasons": {
     "before": {
-      "cycle": 56,
-      "invalid_reference": 24123,
-      "syntax": 52523,
-      "unknown_sheet": 9747,
-      "unsupported_function": 44259
-    },
-    "after": {
       "cycle": 1836,
       "external_reference": 39987,
       "invalid_reference": 4574,
@@ -76,24 +79,28 @@
       "unknown_name": 120,
       "unsupported_function": 16085,
       "unsupported_name": 5765
+    },
+    "after": {
+      "cycle": 2314,
+      "external_reference": 46967,
+      "invalid_reference": 12051,
+      "syntax": 10791,
+      "unknown_name": 122,
+      "unsupported_function": 27594,
+      "unsupported_name": 8136
     }
   },
-  "resolved_functions": [
-    "CHOOSE",
-    "FIND",
-    "HLOOKUP",
-    "ISNA",
-    "NA",
-    "REPT",
-    "STDEV",
-    "SUBTOTAL"
-  ],
+  "resolved_functions": [],
+  "resolved_open_failures": {
+    "relationship_not_found": 24,
+    "timed_out_30s": 2
+  },
   "wall_seconds": {
-    "before": 242.8,
-    "after": 269.8
+    "before": 269.8,
+    "after": 144.9
   },
   "process_tree_peak_rss_bytes": {
-    "before": 1543901184,
-    "after": 2065264640
+    "before": 2065264640,
+    "after": 1533501440
   }
 }
