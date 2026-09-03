@@ -10,8 +10,8 @@
 //! agent may not append to the `main` branch at all.
 
 use omasheets_core::{
-    Actor, ActorKind, CellRef, CellState, CellValue, CheckResult, Command, DocumentId, Event,
-    Lineage, ObjectId, SheetId,
+    Actor, ActorKind, CellRef, CellState, CellValue, CheckResult, ColumnId, ColumnType, Command,
+    DocumentId, Event, InferredColumnType, Lineage, ObjectId, SheetId,
 };
 use omasheets_store::{BranchDiff, LoadReport, MergeReport, Store, StoreError};
 use serde::{Deserialize, Serialize};
@@ -123,6 +123,16 @@ pub struct SheetSummary {
     pub rows: usize,
     pub columns: usize,
     pub cells: usize,
+    #[serde(default)]
+    pub column_types: Vec<ColumnSummary>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ColumnSummary {
+    pub id: ColumnId,
+    pub position: usize,
+    pub declared: ColumnType,
+    pub inferred: InferredColumnType,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -395,13 +405,29 @@ impl Service {
                     .iter()
                     .map(|sheet| {
                         let rows = document.rows(*sheet).map_or(0, <[_]>::len);
-                        let columns = document.columns(*sheet).map_or(0, <[_]>::len);
+                        let column_ids = document.columns(*sheet).unwrap_or(&[]);
+                        let columns = column_ids.len();
+                        let column_types = column_ids
+                            .iter()
+                            .enumerate()
+                            .map(|(position, column)| ColumnSummary {
+                                id: *column,
+                                position,
+                                declared: document
+                                    .column_type(*sheet, *column)
+                                    .expect("listed column has a type"),
+                                inferred: document
+                                    .inferred_column_type(*sheet, *column)
+                                    .expect("listed column can be inferred"),
+                            })
+                            .collect();
                         SheetSummary {
                             id: *sheet,
                             name: document.sheet_name(*sheet).unwrap_or("").to_string(),
                             rows,
                             columns,
                             cells: document.cell_count(*sheet),
+                            column_types,
                         }
                     })
                     .collect();

@@ -55,6 +55,13 @@ introduce structured table references first.
   computed cells derived from the template and all structured-range
   rebindings in the same content-addressed event. Application verifies those
   derivations and rolls the entire operation back if any formula fails.
+- **Column types.** A column may declare number, 1900-system date serial,
+  text or boolean input, with `any` as the default. The document separately
+  infers `empty`, `number`, `date_serial`, `text`, `boolean` or
+  `mixed` from its current calculated values. Blanks and errors do not
+  contribute a type. Inference is read-only: mixed data remains mixed, and
+  setting a declared type still refuses incompatible literal cells rather
+  than converting them.
 - **Transactions.** `Document::apply` validates an event completely before
   mutating anything. The calculation engine's own transactional cycle
   rejection runs before the core mutation, so an invalid event leaves both the
