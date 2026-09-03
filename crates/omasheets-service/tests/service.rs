@@ -368,7 +368,7 @@ fn one_api_drives_the_whole_branch_workflow() {
     );
     assert_eq!(
         summary.sheets[0].column_types[1].inferred,
-        InferredColumnType::Empty
+        InferredColumnType::Number
     );
     assert_eq!(summary.checks, 1);
     assert!(summary.load.is_some());
