@@ -3,8 +3,8 @@
   "source": "enron-figshare",
   "manifest": "enron-figshare.jsonl",
   "manifest_sha256": "2f5ea94c02ae3779206d6ca1b1da9e77002450bc070fa968ca566cfd526ff80d",
-  "baseline_engine_commit": "dd1829c63eaafdc6b9deae3440a456dad1c2ea48",
-  "engine_commit": "3d32520f91d51b63d327202cca82920125e7d36d",
+  "baseline_engine_commit": "3d32520f91d51b63d327202cca82920125e7d36d",
+  "engine_commit": "71f21c5e285c7ec98543b498088c17ee648ef858",
   "scored": "2026-09-02",
   "owned_lane": {
     "opened": {
@@ -25,39 +25,39 @@
     },
     "formula_cells_loaded": {
       "before": 817225,
-      "after": 817225
+      "after": 825016
     },
     "formula_cells_compared": {
       "before": 817225,
-      "after": 817225
+      "after": 825016
     },
     "stored_values_matched": {
-      "before": 815395,
-      "after": 816141
+      "before": 816141,
+      "after": 823932
     },
     "stored_values_mismatched": {
-      "before": 1830,
+      "before": 1084,
       "after": 1084
     },
     "unsupported_formulas": {
       "before": 107010,
-      "after": 107010
+      "after": 99219
     },
     "formula_parse_rate": {
       "before": 0.8842177584705189,
-      "after": 0.8842177584705189
+      "after": 0.8926474327416728
     },
     "comparison_coverage": {
       "before": 0.8842177584705189,
-      "after": 0.8842177584705189
+      "after": 0.8926474327416728
     },
     "stored_value_match_rate": {
-      "before": 0.9977607146134786,
-      "after": 0.9986735599131206
+      "before": 0.9986735599131206,
+      "after": 0.9986860860880273
     },
     "peak_rss_bytes_max": {
-      "before": 116137984,
-      "after": 116269056
+      "before": 116269056,
+      "after": 116408320
     }
   },
   "owned_lane_added": {
@@ -83,7 +83,7 @@
     "after": {
       "cycle": 2286,
       "external_reference": 47007,
-      "invalid_reference": 12051,
+      "invalid_reference": 4260,
       "syntax": 10791,
       "unknown_name": 122,
       "unsupported_function": 26617,
@@ -92,16 +92,18 @@
   },
   "resolved_functions": [],
   "resolved_defects": [
-    "comparisons, exact lookups and criteria compared numbers at full binary precision instead of Excel's 15 significant digits",
-    "range expressions inside aggregate arguments intersected implicitly instead of evaluating elementwise (CSE array formulas)"
+    "a sheet-qualified #REF! (a deleted cell on another sheet) was refused as an invalid reference instead of compiling to the #REF! error"
   ],
   "resolved_open_failures": {},
   "wall_seconds": {
-    "before": 139.2,
-    "after": 139.0
+    "before": 139.0,
+    "after": 208.0
   },
   "process_tree_peak_rss_bytes": {
-    "before": 1529622528,
-    "after": 1539121152
-  }
+    "before": 1539121152,
+    "after": 1544372224
+  },
+  "notes": [
+    "Timing evidence in this entry comes from a restarted container that is about 35% slower than the one the previous entries ran on: the candidate lane, which this engine change does not touch, went from 44 s to 60 s of summed import time. Per-cell results are identical across two runs on the new container; compare cell counts across entries, not wall seconds."
+  ]
 }
