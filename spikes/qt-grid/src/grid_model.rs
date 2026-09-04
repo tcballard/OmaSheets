@@ -59,6 +59,10 @@ pub mod qobject {
         fn set_cell_text(self: Pin<&mut Self>, row: i32, column: i32, value: &QString) -> bool;
 
         #[qinvokable]
+        #[cxx_name = "prepareCellEdit"]
+        fn prepare_cell_edit(self: Pin<&mut Self>, row: i32, column: i32) -> bool;
+
+        #[qinvokable]
         #[cxx_name = "refreshTheme"]
         fn refresh_theme(self: Pin<&mut Self>);
 
@@ -200,6 +204,20 @@ impl Default for GridModelRust {
 }
 
 impl qobject::GridModel {
+    pub fn prepare_cell_edit(mut self: Pin<&mut Self>, row: i32, column: i32) -> bool {
+        if row < 0 || row >= self.row_count || column < 0 || column >= self.column_count {
+            return false;
+        }
+        if let Some(document) = &self.document {
+            if let Err(error) = document.cell(row as usize, column as usize) {
+                self.as_mut().set_source_status(error.as_str().into());
+                return false;
+            }
+            return true;
+        }
+        !self.document_mode
+    }
+
     pub fn cell_text(&self, row: i32, column: i32) -> QString {
         self.cell_reads.fetch_add(1, Ordering::Relaxed);
         if row < 0 || row >= self.row_count || column < 0 || column >= self.column_count {
