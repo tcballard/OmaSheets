@@ -49,6 +49,13 @@ grid, an agent bridge and a person's shell can share.
   the service refused, 1 means the client could not ask. Production install
   exposes that command through a conflict-safe user-local launcher while the
   source-bound binary remains inside the private application tree.
+- **Background service setup is explicit.** `omasheets setup --omarchy`
+  refreshes user-local desktop integration without starting a daemon. Adding
+  `--enable-service` installs a hashed systemd user unit, reloads the user
+  manager and enables it immediately. The unit uses a restrictive umask and
+  restarts only after failures. Product uninstall first disables and stops the
+  unit; a stop failure or locally modified unit preserves the installation and
+  reports a conflict instead of removing a binary that may still be running.
 - **The service is a release-bundle executable.** Its binary is built from the
   locked Rust workspace with remapped source/build paths, stripped, hashed in
   the native manifest and checked against the bundle's source identity through

@@ -10,9 +10,11 @@ import unittest
 from unittest.mock import patch
 
 from omasheets import __version__
+from omasheets.errors import ConflictError
 from omasheets.installation import ARCH_PACKAGES, InstallPaths, PLUGIN_ENTRY, install, source_identity, uninstall
 from omasheets.integration import DESKTOP_ID, IntegrationPaths
 from omasheets.native_bundle import NATIVE_EXECUTABLES, normalized_architecture, platform_id
+from omasheets.user_service import UserServicePaths
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +36,11 @@ class InstallationTests(unittest.TestCase):
                 root / "data/applications" / DESKTOP_ID,
                 root / "config/mimeapps.list",
                 root / "state/omasheets/desktop-integration.json",
+            ),
+            user_service=UserServicePaths(
+                root / "data/omasheets/app/bin/omasheets-service",
+                root / "config/systemd/user/omasheets-native.service",
+                root / "state/omasheets/user-service.json",
             ),
         )
         self.bundle = root / "omasheets-native.tar.gz"
@@ -127,6 +134,18 @@ class InstallationTests(unittest.TestCase):
         self.assertTrue(self.paths.service_launcher.exists())
         self.assertTrue(self.paths.journal.exists())
 
+    def test_uninstall_preserves_product_when_user_service_cannot_stop(self):
+        install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        with patch(
+            "omasheets.installation.uninstall_user_service",
+            side_effect=ConflictError("service still running"),
+        ):
+            result = uninstall(self.paths)
+        self.assertFalse(result["changed"])
+        self.assertEqual(result["conflicts"], ["service still running"])
+        self.assertTrue(self.paths.app.exists())
+        self.assertTrue(self.paths.launcher.exists())
+
     def test_launcher_quotes_shell_metacharacters_in_install_path(self):
         paths = InstallPaths(
             app=self.paths.app.with_name("app $(touch nope) 'quoted'"),
@@ -137,6 +156,7 @@ class InstallationTests(unittest.TestCase):
             codex_marketplace=self.paths.codex_marketplace,
             journal=self.paths.journal,
             integration=self.paths.integration,
+            user_service=self.paths.user_service,
         )
         install(ROOT, paths, check_dependencies=False, bundle_path=self.bundle)
         launcher = paths.launcher.read_text()
@@ -153,6 +173,7 @@ class InstallationTests(unittest.TestCase):
             codex_marketplace=self.paths.codex_marketplace,
             journal=self.paths.journal,
             integration=self.paths.integration,
+            user_service=self.paths.user_service,
         )
         install(ROOT, paths, check_dependencies=False, bundle_path=self.bundle)
         launcher = paths.service_launcher.read_text()
