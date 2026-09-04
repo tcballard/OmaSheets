@@ -141,6 +141,9 @@ pass.
 **Purpose:** make native documents reviewable, scriptable and safe for public
 use before adding model-led automation.
 
+The concrete v0.1.0 promise, current evidence and owner-only release gates are
+tracked in [`V0.1-RELEASE.md`](V0.1-RELEASE.md).
+
 **Build:**
 
 - Add named event-log branches, watched outputs, semantic diffs and
