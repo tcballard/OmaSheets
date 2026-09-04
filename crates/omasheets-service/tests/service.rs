@@ -1,4 +1,6 @@
-use omasheets_core::{Actor, ActorKind, CellValue, Command, Literal, Severity};
+use omasheets_core::{
+    Actor, ActorKind, CellValue, ColumnType, Command, InferredColumnType, Literal, Severity,
+};
 use omasheets_service::{Request, Response, Service, ServiceError};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -354,6 +356,20 @@ fn one_api_drives_the_whole_branch_workflow() {
     };
     assert_eq!(summary.sheets[0].name, "Model");
     assert_eq!(summary.sheets[0].cells, 2);
+    assert_eq!(summary.sheets[0].column_types.len(), 2);
+    assert_eq!(summary.sheets[0].column_types[0].position, 0);
+    assert_eq!(
+        summary.sheets[0].column_types[0].declared,
+        ColumnType::Any
+    );
+    assert_eq!(
+        summary.sheets[0].column_types[0].inferred,
+        InferredColumnType::Boolean
+    );
+    assert_eq!(
+        summary.sheets[0].column_types[1].inferred,
+        InferredColumnType::Number
+    );
     assert_eq!(summary.checks, 1);
     assert!(summary.load.is_some());
     reopened.close_all().unwrap();

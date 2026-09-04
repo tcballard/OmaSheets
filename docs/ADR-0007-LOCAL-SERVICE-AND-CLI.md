@@ -26,6 +26,9 @@ grid, an agent bridge and a person's shell can share.
   behind a mutex. Errors are `ServiceError { code, message, details }` with
   stable codes (`unknown_branch`, `agent_on_main`, `checks_failed`,
   `conflicts`, `unauthorized`, …) so clients branch on codes, not prose.
+  Each sheet in the document summary includes its stable columns in view
+  order with their declared and currently inferred base types. This is
+  descriptive metadata only; requesting a summary never coerces a cell.
 - **Authority rules live in the service, not in clients.** An agent actor
   may not append to `main`; it works on a branch and a human merges. Only a
   human actor may approve a merge. Every refusal happens before anything is

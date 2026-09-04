@@ -275,8 +275,22 @@ fn calc_error_label(error: &CalcError) -> &'static str {
 pub enum ColumnType {
     Any,
     Number,
+    DateSerial,
     Text,
     Boolean,
+}
+
+/// Type observed from the current values in a column. Inference is
+/// descriptive only: it never rewrites cells or changes the declared type.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InferredColumnType {
+    Empty,
+    Number,
+    DateSerial,
+    Text,
+    Boolean,
+    Mixed,
 }
 
 /// A cell named by stable identities, never by coordinates.
@@ -1319,6 +1333,61 @@ impl Document {
         self.sheets
             .get(&sheet)
             .map(|sheet| sheet.columns.as_slice())
+    }
+
+    pub fn column_type(&self, sheet: SheetId, column: ColumnId) -> Option<ColumnType> {
+        let sheet = self.sheets.get(&sheet)?;
+        sheet
+            .column_ordinals
+            .contains_key(&column)
+            .then(|| {
+                sheet
+                    .column_types
+                    .get(&column)
+                    .copied()
+                    .unwrap_or(ColumnType::Any)
+            })
+    }
+
+    /// Infers a column's current value type without coercing or mutating it.
+    /// Blank and error values carry no base type. A declared date column
+    /// interprets numeric calculation results as 1900-system date serials.
+    pub fn inferred_column_type(
+        &self,
+        sheet: SheetId,
+        column: ColumnId,
+    ) -> Option<InferredColumnType> {
+        let state = self.sheets.get(&sheet)?;
+        if !state.column_ordinals.contains_key(&column) {
+            return None;
+        }
+        let declared = state
+            .column_types
+            .get(&column)
+            .copied()
+            .unwrap_or(ColumnType::Any);
+        let mut inferred = InferredColumnType::Empty;
+        for row in &state.rows {
+            let observed = match self.value(CellRef {
+                sheet,
+                row: *row,
+                column,
+            }) {
+                CellValue::Blank | CellValue::Error(_) => continue,
+                CellValue::Number(_) if declared == ColumnType::DateSerial => {
+                    InferredColumnType::DateSerial
+                }
+                CellValue::Number(_) => InferredColumnType::Number,
+                CellValue::Text(_) => InferredColumnType::Text,
+                CellValue::Boolean(_) => InferredColumnType::Boolean,
+            };
+            if inferred == InferredColumnType::Empty {
+                inferred = observed;
+            } else if inferred != observed {
+                return Some(InferredColumnType::Mixed);
+            }
+        }
+        Some(inferred)
     }
 
     pub fn table(&self, table: TableId) -> Option<&Table> {
@@ -2962,6 +3031,7 @@ fn literal_matches(value: &Literal, column_type: ColumnType) -> bool {
         (ColumnType::Any, _)
             | (_, Literal::Blank)
             | (ColumnType::Number, Literal::Number(_))
+            | (ColumnType::DateSerial, Literal::Number(_))
             | (ColumnType::Text, Literal::Text(_))
             | (ColumnType::Boolean, Literal::Boolean(_))
     )
@@ -3568,6 +3638,89 @@ mod tests {
             Document::replay(&fixture.events).unwrap().digest(),
             fixture.document.digest()
         );
+    }
+
+    #[test]
+    fn column_inference_reports_values_without_coercing_mixed_data() {
+        let mut fixture = Fixture::new();
+        let sheet = fixture.sheet;
+        let columns = fixture.document.columns(sheet).unwrap().to_vec();
+
+        assert_eq!(
+            fixture.document.inferred_column_type(sheet, columns[0]),
+            Some(InferredColumnType::Empty)
+        );
+        fixture.set("A1", 4.0);
+        fixture.formula("A2", "=A1*2");
+        assert_eq!(
+            fixture.document.inferred_column_type(sheet, columns[0]),
+            Some(InferredColumnType::Number)
+        );
+
+        fixture.run(
+            human(),
+            Command::SetValue {
+                sheet,
+                a1: "B1".into(),
+                value: Literal::Text("four".into()),
+            },
+        );
+        fixture.run(
+            human(),
+            Command::SetValue {
+                sheet,
+                a1: "B2".into(),
+                value: Literal::Boolean(true),
+            },
+        );
+        assert_eq!(
+            fixture.document.inferred_column_type(sheet, columns[1]),
+            Some(InferredColumnType::Mixed)
+        );
+        assert_eq!(
+            fixture.fail(
+                human(),
+                Command::SetColumnType {
+                    sheet,
+                    column: columns[1],
+                    column_type: ColumnType::Text,
+                },
+            ),
+            ApplyError::TypeMismatch {
+                column: columns[1],
+                expected: ColumnType::Text,
+            }
+        );
+        assert_eq!(
+            fixture.document.inferred_column_type(sheet, columns[1]),
+            Some(InferredColumnType::Mixed)
+        );
+
+        fixture.run(
+            human(),
+            Command::SetColumnType {
+                sheet,
+                column: columns[2],
+                column_type: ColumnType::DateSerial,
+            },
+        );
+        fixture.set("C1", 45_000.0);
+        fixture.formula("C2", "=C1+1");
+        assert_eq!(
+            fixture.document.column_type(sheet, columns[2]),
+            Some(ColumnType::DateSerial)
+        );
+        assert_eq!(
+            fixture.document.inferred_column_type(sheet, columns[2]),
+            Some(InferredColumnType::DateSerial)
+        );
+
+        let replayed = Document::replay(&fixture.events).unwrap();
+        assert_eq!(
+            replayed.inferred_column_type(sheet, columns[1]),
+            Some(InferredColumnType::Mixed)
+        );
+        assert_eq!(replayed.digest(), fixture.document.digest());
     }
 
     #[test]
