@@ -37,6 +37,7 @@ class InstallPaths:
     app: Path
     build: Path
     launcher: Path
+    service_launcher: Path
     codex_plugin: Path
     codex_marketplace: Path
     journal: Path
@@ -53,6 +54,7 @@ class InstallPaths:
             app=data / "omasheets/app",
             build=cache / "omasheets/native-bundle",
             launcher=home / ".local/bin/omasheets",
+            service_launcher=home / ".local/bin/omasheets-service",
             codex_plugin=home / ".codex/plugins/omasheets",
             codex_marketplace=home / ".agents/plugins/marketplace.json",
             journal=state / "omasheets/installation.json",
@@ -156,6 +158,14 @@ def _launcher(app: Path) -> bytes:
     ).encode()
 
 
+def _service_launcher(app: Path) -> bytes:
+    executable = app / "bin/omasheets-service"
+    return (
+        "#!/bin/bash\nset -euo pipefail\n"
+        f"exec {shlex.quote(str(executable))} \"$@\"\n"
+    ).encode()
+
+
 def _marketplace_after(before: bytes | None) -> bytes:
     if before:
         payload = json.loads(before)
@@ -203,6 +213,11 @@ def install(
     if paths.journal.is_file():
         journal = read_json(paths.journal)
         intact = paths.launcher.is_file() and _sha_file(paths.launcher) == journal["launcher_sha256"]
+        service_launcher_sha256 = journal.get("service_launcher_sha256")
+        intact = intact and service_launcher_sha256 is not None
+        intact = intact and paths.service_launcher.is_file()
+        if intact:
+            intact = _sha_file(paths.service_launcher) == service_launcher_sha256
         intact = intact and paths.app.is_dir() and _tree_sha(paths.app) == journal["app_sha256"]
         intact = intact and paths.codex_plugin.is_dir()
         intact = intact and _tree_sha(paths.codex_plugin) == journal["codex_plugin_sha256"]
@@ -218,7 +233,7 @@ def install(
     if check_dependencies and not report["ready"]:
         missing = ", ".join(check["name"] for check in report["checks"] if not check["ok"])
         raise RuntimeError(f"missing dependencies: {missing}\nInstall them explicitly with: {report['install_command']}")
-    for target in (paths.app, paths.launcher, paths.codex_plugin):
+    for target in (paths.app, paths.launcher, paths.service_launcher, paths.codex_plugin):
         if target.exists():
             raise ConflictError(f"refusing to overwrite unowned installation target: {target}")
 
@@ -250,6 +265,7 @@ def install(
         _write_bytes(stage / "provenance.json", (json.dumps(provenance, indent=2, sort_keys=True) + "\n").encode())
         os.replace(stage, paths.app)
         _write_bytes(paths.launcher, _launcher(paths.app), 0o755)
+        _write_bytes(paths.service_launcher, _service_launcher(paths.app), 0o755)
         paths.codex_plugin.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source_root / "plugins/omasheets", paths.codex_plugin)
         mcp_path = paths.codex_plugin / ".mcp.json"
@@ -262,20 +278,28 @@ def install(
             "schema": 1, "version": __version__, "source": identity,
             "app_sha256": _tree_sha(paths.app),
             "launcher_sha256": _sha_file(paths.launcher),
+            "service_launcher_sha256": _sha_file(paths.service_launcher),
             "codex_plugin_sha256": _tree_sha(paths.codex_plugin),
             "marketplace_before": base64.b64encode(marketplace_before).decode() if marketplace_before is not None else None,
             "marketplace_after_sha256": _sha_bytes(marketplace_after),
         }
         write_json_atomic(paths.journal, journal)
-        return {"installed": True, "changed": True, "source": identity, "launcher": str(paths.launcher)}
+        return {
+            "installed": True,
+            "changed": True,
+            "source": identity,
+            "launcher": str(paths.launcher),
+            "service_launcher": str(paths.service_launcher),
+        }
     except Exception:
         if stage.exists():
             shutil.rmtree(stage)
         for target in (paths.app, paths.codex_plugin):
             if target.exists():
                 shutil.rmtree(target)
-        if paths.launcher.exists():
-            paths.launcher.unlink()
+        for launcher in (paths.launcher, paths.service_launcher):
+            if launcher.exists():
+                launcher.unlink()
         if marketplace_before is None:
             paths.codex_marketplace.unlink(missing_ok=True)
         else:
@@ -315,11 +339,13 @@ def uninstall(paths: InstallPaths | None = None) -> dict[str, Any]:
     except ConflictError as error:
         conflicts.append(str(error))
     _remove_marketplace_entry(paths.codex_marketplace, journal)
-    owned = (
+    owned = [
         (paths.launcher, journal["launcher_sha256"], _sha_file),
         (paths.codex_plugin, journal["codex_plugin_sha256"], _tree_sha),
         (paths.app, journal["app_sha256"], _tree_sha),
-    )
+    ]
+    if service_launcher_sha256 := journal.get("service_launcher_sha256"):
+        owned.insert(1, (paths.service_launcher, service_launcher_sha256, _sha_file))
     for target, expected, hasher in owned:
         if not target.exists():
             continue

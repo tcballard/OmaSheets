@@ -46,7 +46,9 @@ grid, an agent bridge and a person's shell can share.
   the network can reach it, and the kernel enforces the ownership check.
 - **The CLI is the client.** `omasheets-service call REQUEST_JSON` reads
   the token, sends one request and prints the envelope; exit status 2 means
-  the service refused, 1 means the client could not ask.
+  the service refused, 1 means the client could not ask. Production install
+  exposes that command through a conflict-safe user-local launcher while the
+  source-bound binary remains inside the private application tree.
 - **The service is a release-bundle executable.** Its binary is built from the
   locked Rust workspace with remapped source/build paths, stripped, hashed in
   the native manifest and checked against the bundle's source identity through

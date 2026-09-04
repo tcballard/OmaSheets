@@ -447,11 +447,12 @@ jobs:
           PY
       - name: Exercise the installed native service workflow
         run: |
-          app="$XDG_DATA_HOME/omasheets/app"
+          service="$HOME/.local/bin/omasheets-service"
           evidence="$RUNNER_TEMP/native-service"
           mkdir -p "$evidence"
+          test -x "$service"
           python scripts/check_native_service_install.py \
-            --service "$app/bin/omasheets-service" \
+            --service "$service" \
             --workdir "$evidence" \
             > "$evidence/report.json"
       - name: Create an Excel 97 fixture
