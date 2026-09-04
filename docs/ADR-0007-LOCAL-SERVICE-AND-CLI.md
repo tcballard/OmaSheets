@@ -19,8 +19,9 @@ grid, an agent bridge and a person's shell can share.
   names the document by path, so one service can hold several documents
   open. The requests are: create, open, close, document summary, a bounded
   page of cells, one cell, lineage, append a command, branch, check, diff,
-  merge and snapshot. `Command` from the event core is serialisable so an
-  append carries the same command the library takes.
+  merge, bounded XLSX import, CSV export and snapshot. `Command` from the
+  event core is serialisable so an append carries the same command the library
+  takes.
 - **`Service` is the in-process form.** The CLI, tests and any embedding
   call `Service::handle` directly; the socket server wraps the same struct
   behind a mutex. Errors are `ServiceError { code, message, details }` with
@@ -32,8 +33,10 @@ grid, an agent bridge and a person's shell can share.
 - **Authority rules live in the service, not in clients.** An agent actor
   may not append to `main`; it works on a branch and a human merges. Only a
   human actor may approve a merge. Every refusal happens before anything is
-  written. Publication (writing an `.xlsx`, updating the installed product's
-  document) is not in this API and stays behind the v0.0.2 approval flow.
+  written. An import needs a human actor; agents cannot create a native
+  document indirectly through an import request. Publishing workbook bytes or
+  updating an installed compatibility document stays behind the v0.0.2
+  approval flow.
 - **Transport is a Unix socket in the user's runtime directory.**
   `omasheets-service serve` listens on `$XDG_RUNTIME_DIR/omasheets/native.sock`
   in a directory that must be mode 0700, writes a fresh random 32-byte
@@ -49,6 +52,15 @@ grid, an agent bridge and a person's shell can share.
   a manifest tied to the branch and document digest. Formula source, styles,
   tables, checks and lineage are explicitly reported as omitted. Potential
   spreadsheet-formula injection text is counted but never silently rewritten.
+- **Native XLSX import is a bounded conversion.** The source package is limited
+  to 50 MiB, 64 sheets, 100,000 formulas and 100,000 cells across occupied
+  sheet rectangles. The service stages semantic commands against a cloned
+  document, persists them in one transaction, closes the SQLite file, publishes
+  it without replacement and verifies the digest after reopening. Supported
+  formulas become native formula events; refused formulas retain their cached
+  values when possible. The manifest counts native, cached-only and omitted
+  formulas, omitted error or rejected literal cells, skipped source sheets and
+  the source hash, and states the unsupported feature classes.
 
 ## Consequences
 

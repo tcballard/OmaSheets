@@ -3,6 +3,7 @@ use omasheets_core::{
 };
 use omasheets_service::{Request, Response, Service, ServiceError};
 use std::path::{Path, PathBuf};
+use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_document() -> PathBuf {
@@ -14,6 +15,41 @@ fn temp_document() -> PathBuf {
         "omasheets-service-{}-{nonce}.omasheets",
         std::process::id()
     ))
+}
+
+fn temp_xlsx() -> PathBuf {
+    let path = temp_document().with_extension("xlsx");
+    let file = std::fs::File::create(&path).unwrap();
+    let mut writer = zip::ZipWriter::new(file);
+    for (name, body) in [
+        (
+            "[Content_Types].xml",
+            r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"#,
+        ),
+        (
+            "_rels/.rels",
+            r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#,
+        ),
+        (
+            "xl/workbook.xml",
+            r#"<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            r#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
+        ),
+        (
+            "xl/worksheets/sheet1.xml",
+            r#"<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1"><v>2</v></c><c r="B1" t="b"><v>1</v></c></row><row r="2"><c r="A2"><v>3</v></c><c r="B2"><f>NOPE(A1)</f><v>9</v></c></row><row r="3"><c r="A3"><f>A1+A2</f><v>5</v></c></row></sheetData></worksheet>"#,
+        ),
+    ] {
+        writer
+            .start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(body.as_bytes()).unwrap();
+    }
+    writer.finish().unwrap();
+    path
 }
 
 fn human(id: &str) -> Actor {
@@ -585,6 +621,87 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
     let _ = std::fs::remove_file(output);
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
+
+#[test]
+fn xlsx_import_is_bounded_replayable_and_never_overwrites() {
+    let source = temp_xlsx();
+    let output = temp_document();
+    let mut service = Service::new(|| 42);
+    let response = service
+        .handle(Request::ImportXlsx {
+            source: source.clone(),
+            output: output.clone(),
+            actor: human("tom"),
+            name: Some("Imported plan".into()),
+        })
+        .unwrap();
+    let Response::ImportedXlsx(manifest) = response else {
+        panic!("{response:?}")
+    };
+    assert_eq!(manifest.format, "omasheets-native-v1");
+    assert_eq!(manifest.date_system, "1900");
+    assert_eq!(manifest.sheets.len(), 1);
+    assert_eq!((manifest.sheets[0].rows, manifest.sheets[0].columns), (3, 2));
+    assert_eq!(manifest.occupied_rectangle_cells, 6);
+    assert_eq!(manifest.value_cells_imported, 5);
+    assert_eq!(manifest.formula_cells_observed, 2);
+    assert_eq!(manifest.formula_cells_native, 1);
+    assert_eq!(manifest.formula_cells_cached_only, 1);
+    assert_eq!(manifest.formula_cells_omitted, 0);
+    assert_eq!(manifest.owned_engine_unsupported_formulas, 1);
+    assert_eq!(manifest.error_cells_omitted, 0);
+    assert_eq!(manifest.rejected_value_cells_omitted, 0);
+    assert_eq!(manifest.skipped_source_sheets, 0);
+    assert_eq!(manifest.limitations.len(), 4);
+
+    let digest = manifest.document_digest.clone();
+    let sheet = manifest.sheets[0].id.to_string();
+    assert!(matches!(
+        service
+            .handle(Request::Cell {
+                path: output.clone(),
+                branch: None,
+                sheet: sheet.clone(),
+                a1: "A3".into(),
+            })
+            .unwrap(),
+        Response::Cell(ref cell) if cell.value == CellValue::Number(5.0)
+    ));
+    assert!(matches!(
+        service
+            .handle(Request::Cell {
+                path: output.clone(),
+                branch: None,
+                sheet,
+                a1: "B2".into(),
+            })
+            .unwrap(),
+        Response::Cell(ref cell) if cell.value == CellValue::Number(9.0)
+    ));
+    service.close_all().unwrap();
+
+    let reopened = service
+        .handle(Request::Document {
+            path: output.clone(),
+            branch: None,
+        })
+        .unwrap();
+    assert!(matches!(reopened, Response::Document(ref summary) if summary.digest == digest));
+    let refused = service.handle(Request::ImportXlsx {
+        source: source.clone(),
+        output: output.clone(),
+        actor: human("tom"),
+        name: None,
+    });
+    assert!(
+        matches!(refused, Err(ServiceError { ref code, .. }) if code == "output_exists")
+    );
+    service.close_all().unwrap();
+    let _ = std::fs::remove_file(source);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", output.display()));
     }
 }
 

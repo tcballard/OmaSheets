@@ -450,6 +450,31 @@ impl Store {
         Ok(event)
     }
 
+    /// Resolves and appends a command sequence in one database transaction.
+    /// Resolution happens against a cloned document, so a rejected command or
+    /// failed transaction leaves both the durable and cached state unchanged.
+    pub fn append_batch(
+        &mut self,
+        branch: BranchId,
+        actor: Actor,
+        timestamp: i64,
+        commands: Vec<Command>,
+    ) -> Result<Vec<Event>, StoreError> {
+        self.document(branch)?;
+        let mut staged = self.documents[&branch].clone();
+        let mut events = Vec::with_capacity(commands.len());
+        for command in commands {
+            events.push(staged.command(actor.clone(), timestamp, command)?);
+        }
+        if events.is_empty() {
+            return Ok(events);
+        }
+        self.persist(branch, &events)?;
+        self.documents.insert(branch, staged);
+        self.load_reports.remove(&branch);
+        Ok(events)
+    }
+
     fn persist(&mut self, branch: BranchId, events: &[Event]) -> Result<(), StoreError> {
         let transaction = self
             .connection
@@ -980,6 +1005,62 @@ mod tests {
             let cell = document.resolve_a1(sheet, a1).unwrap();
             document.value(cell)
         }
+    }
+
+    #[test]
+    fn batch_append_is_atomic_and_replays_identically() {
+        let path = temp_path("batch");
+        let (main, expected) = {
+            let mut setup = Setup::new(&path);
+            let before = setup.store.document(setup.main).unwrap().digest();
+            let rejected = setup.store.append_batch(
+                setup.main,
+                human(),
+                2_000,
+                vec![
+                    Command::SetValue {
+                        sheet: setup.sheet,
+                        a1: "A1".into(),
+                        value: Literal::Number(1.0),
+                    },
+                    Command::SetValue {
+                        sheet: setup.sheet,
+                        a1: "A99".into(),
+                        value: Literal::Number(99.0),
+                    },
+                ],
+            );
+            assert!(matches!(rejected, Err(StoreError::Apply(_))));
+            assert_eq!(setup.store.document(setup.main).unwrap().digest(), before);
+
+            let events = setup
+                .store
+                .append_batch(
+                    setup.main,
+                    human(),
+                    2_001,
+                    vec![
+                        Command::SetValue {
+                            sheet: setup.sheet,
+                            a1: "A1".into(),
+                            value: Literal::Number(1.0),
+                        },
+                        Command::SetValue {
+                            sheet: setup.sheet,
+                            a1: "B1".into(),
+                            value: Literal::Number(2.0),
+                        },
+                    ],
+                )
+                .unwrap();
+            assert_eq!(events.len(), 2);
+            let expected = setup.store.document(setup.main).unwrap().digest();
+            (setup.main, expected)
+        };
+        let mut reopened = Store::open(&path).unwrap();
+        assert_eq!(reopened.document(main).unwrap().digest(), expected);
+        drop(reopened);
+        cleanup(&path);
     }
 
     #[test]
