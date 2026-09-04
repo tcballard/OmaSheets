@@ -3,7 +3,7 @@ pub mod qobject {
     unsafe extern "C++" {
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
-        include!("native_clipboard.h");
+        include!("omasheets-grid/src/native_clipboard.h");
         fn write_grid_clipboard(text: &QString, origin: &QString);
         fn grid_clipboard_origin(text: &QString) -> QString;
     }

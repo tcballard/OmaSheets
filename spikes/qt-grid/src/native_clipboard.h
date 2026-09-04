@@ -1,4 +1,5 @@
-#pragma once
+#ifndef OMASHEETS_NATIVE_CLIPBOARD_H
+#define OMASHEETS_NATIVE_CLIPBOARD_H
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QMimeData>
@@ -19,3 +20,4 @@ inline QString grid_clipboard_origin(const QString &text) {
     if (data.size() > 256) return QStringLiteral("invalid");
     return QString::fromUtf8(data);
 }
+#endif
