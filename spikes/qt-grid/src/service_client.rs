@@ -223,7 +223,7 @@ impl GridDocument {
             for (dc, text) in line.iter().enumerate() {
                 let old = self.cell(row + dr, column + dc)?;
                 let a1 = format!("{}{}", column_letters(column + dc), row + dr + 1);
-                record.before.push(edit_command(&sheet.id, &a1, &old.input));
+                record.before.push(restore_command(&sheet.id, &a1, &old));
                 record.after.push(edit_command(&sheet.id, &a1, text));
             }
         }
@@ -459,6 +459,14 @@ fn edit_command(sheet: &str, a1: &str, text: &str) -> Value {
     json!({ "command": "set_value", "sheet": sheet, "a1": a1, "value": value })
 }
 
+fn restore_command(sheet: &str, a1: &str, cell: &GridCell) -> Value {
+    match cell.kind.as_str() {
+        "formula" => json!({"command":"set_formula","sheet":sheet,"a1":a1,"source":cell.input}),
+        "blank" => json!({"command":"set_value","sheet":sheet,"a1":a1,"value":{"type":"blank"}}),
+        _ => edit_command(sheet, a1, &cell.input),
+    }
+}
+
 fn runtime_directory() -> Result<PathBuf, String> {
     std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
@@ -663,6 +671,17 @@ mod tests {
         assert_eq!(edit_command("sheet-id", "A1", "'00123")["value"]["value"], "00123");
         assert_eq!(edit_command("sheet-id", "A1", "'=1+1")["value"]["type"], "text");
         assert_eq!(edit_command("sheet-id", "A1", "'TRUE")["value"]["type"], "text");
+    }
+
+    #[test]
+    fn undo_retains_formula_and_explicit_blank_inputs() {
+        let formula = parse_cell(&json!({"formula":"A1+1","value":{"type":"number","value":2}})).unwrap();
+        let restored = restore_command("sheet", "B1", &formula);
+        assert_eq!(restored["command"], "set_formula");
+        assert_eq!(restored["source"], "A1+1");
+        let blank = parse_cell(&json!({"value":{"type":"blank"}})).unwrap();
+        assert_eq!(restore_command("sheet", "B1", &blank)["value"]["type"], "blank");
+        assert_eq!(restore_command("sheet", "B1", &GridCell::default())["command"], "clear_cell");
     }
 
     #[test]

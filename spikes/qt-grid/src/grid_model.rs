@@ -234,7 +234,10 @@ impl qobject::GridModel {
             for r in row..row + rows {
                 let mut line = Vec::new();
                 for c in column..column + columns {
-                    let value = document.cell(r as usize, c as usize)?.input;
+                    let cell = document.cell(r as usize, c as usize)?;
+                    let value = if cell.kind == "formula" && !cell.input.starts_with('=') {
+                        format!("={}", cell.input)
+                    } else { cell.input };
                     bytes += value.len();
                     if bytes > crate::clipboard::MAX_BYTES { return Err("copy exceeds 1 MiB".into()); }
                     line.push(value);
