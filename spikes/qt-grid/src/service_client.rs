@@ -227,7 +227,7 @@ impl GridDocument {
                 record.after.push(edit_command(&sheet.id, &a1, text));
             }
         }
-        if record.before == record.after { return Ok(()); }
+        if record.before == record.after { return self.verify_revision(); }
         if record_bytes(&record) > 4 * 1024 * 1024 {
             return Err("edit is too large to retain safe undo history".into());
         }
@@ -500,14 +500,18 @@ mod tests {
         let server = std::thread::spawn(move || {
             let mut reader = BufReader::new(peer.try_clone().unwrap());
             let mut writer = peer;
-            for step in 0..8 {
+            for step in 0..10 {
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
                 let request: Value = serde_json::from_str(&line).unwrap();
-                let response = if step == 0 || step == 6 {
+                let response = if step == 0 || step == 6 || step == 8 {
                     assert_eq!(request["kind"], "grid_page");
                     json!({"ok": true, "response": {"kind":"grid_page", "sheet":"sheet-id",
-                        "row_start":0,"column_start":0,"rows":4,"columns":4,"cells":[]}})
+                        "row_start":0,"column_start":0,"rows":4,"columns":4,
+                        "cells": if step == 8 { vec![json!({"row":0,"column":0,"value":{"type":"number","value":5}})] } else { vec![] }}})
+                } else if step == 9 {
+                    assert_eq!(request["kind"], "document");
+                    json!({"ok":true,"response":{"kind":"document","digest":"changed-elsewhere"}})
                 } else {
                     assert_eq!(request["kind"], "append_batch");
                     let (digest, next) = match step {
@@ -544,6 +548,7 @@ mod tests {
         document.undo(false).unwrap();
         document.set_text(0,0,"5").unwrap();
         assert!(document.undo(true).unwrap_err().contains("nothing to redo"));
+        assert!(document.set_text(0,0,"5").unwrap_err().contains("document changed"));
         server.join().unwrap();
     }
 
