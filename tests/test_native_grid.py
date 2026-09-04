@@ -123,6 +123,42 @@ class NativeGridTests(unittest.TestCase):
         service.terminate.assert_called_once_with()
         service.wait.assert_called_once_with(timeout=5)
 
+    def test_transient_service_cleanup_removes_only_a_dead_endpoint(self):
+        from omasheets.native_grid import _stop_native_service
+
+        service = Mock()
+        service.poll.return_value = 0
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary)
+            directory = runtime / "omasheets"
+            directory.mkdir(mode=0o700)
+            socket_path = directory / "native.sock"
+            token_path = directory / "native.token"
+            socket_path.write_text("stale")
+            token_path.write_text("stale")
+            with patch("omasheets.native_grid._service_socket_ready", return_value=False):
+                _stop_native_service(runtime, service)
+            self.assertFalse(socket_path.exists())
+            self.assertFalse(token_path.exists())
+
+    def test_transient_service_cleanup_preserves_a_live_replacement(self):
+        from omasheets.native_grid import _stop_native_service
+
+        service = Mock()
+        service.poll.return_value = 0
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary)
+            directory = runtime / "omasheets"
+            directory.mkdir(mode=0o700)
+            socket_path = directory / "native.sock"
+            token_path = directory / "native.token"
+            socket_path.write_text("replacement")
+            token_path.write_text("replacement")
+            with patch("omasheets.native_grid._service_socket_ready", return_value=True):
+                _stop_native_service(runtime, service)
+            self.assertTrue(socket_path.exists())
+            self.assertTrue(token_path.exists())
+
     def test_launch_reports_missing_service_binary(self):
         with tempfile.TemporaryDirectory() as temporary:
             document = Path(temporary) / "book.omasheets"

@@ -98,6 +98,27 @@ def _ensure_native_service(runtime: Path) -> subprocess.Popen | None:
     raise EngineError("the native document service did not become ready")
 
 
+def _stop_native_service(runtime: Path, process: subprocess.Popen) -> None:
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+    directory = runtime / "omasheets"
+    if not directory.is_dir():
+        return
+    lock_path = directory / "grid-service.lock"
+    with lock_path.open("a+b") as lock:
+        os.chmod(lock_path, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        socket_path = directory / "native.sock"
+        if not _service_socket_ready(socket_path):
+            socket_path.unlink(missing_ok=True)
+            (directory / "native.token").unlink(missing_ok=True)
+
+
 def _run_host(source: Path) -> int:
     runtime = _runtime_base()
     owned_service = _ensure_native_service(runtime)
@@ -114,13 +135,8 @@ def _run_host(source: Path) -> int:
         )
         return grid.wait()
     finally:
-        if owned_service is not None and owned_service.poll() is None:
-            owned_service.terminate()
-            try:
-                owned_service.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                owned_service.kill()
-                owned_service.wait(timeout=5)
+        if owned_service is not None:
+            _stop_native_service(runtime, owned_service)
 
 
 def open_grid(path: Path) -> int:
