@@ -51,6 +51,10 @@ def check_static_contract() -> None:
             "Qt adapter must cache bounded service pages")
     require("backend.cellInput" in qml and 'cxx_name = "cellInput"' in model,
             "editing must preserve formula input instead of calculated display text")
+    require("backend.sheetCount" in qml and 'cxx_name = "selectSheet"' in model,
+            "native documents need stable-ID sheet switching")
+    require("backend.currentSheet - 1" in qml and "backend.currentSheet + 1" in qml,
+            "Ctrl+Page Up/Down must switch native sheets")
     require("frameNumber === 1 && backend.documentMode" in qml,
             "native headless smoke must exercise edits through the grid")
     for key in ("Key_Left", "Key_Right", "Key_Up", "Key_Down", "Key_PageUp", "Key_PageDown"):
@@ -74,6 +78,7 @@ def check_report(
     report: dict[str, object],
     require_omarchy_theme: bool = False,
     require_native_document: bool = False,
+    require_multi_sheet: bool = False,
 ) -> None:
     require(report.get("schema") == 1, "unexpected benchmark schema")
     source = report.get("source")
@@ -95,12 +100,20 @@ def check_report(
     require(report.get("theme_source") in ("omarchy", "fallback"), "benchmark must identify its theme source")
     requests = report.get("service_requests")
     require(isinstance(requests, int) and requests >= 0, "benchmark must count local-service requests")
+    sheet_count = report.get("sheet_count")
+    current_sheet = report.get("current_sheet")
+    require(isinstance(sheet_count, int) and sheet_count >= 0, "benchmark must count sheets")
+    require(isinstance(current_sheet, int) and current_sheet >= 0, "benchmark must identify its sheet")
     if require_omarchy_theme:
         require(report["theme_source"] == "omarchy", "benchmark did not load the injected Omarchy theme")
     if require_native_document:
         require(source == "native-document", "benchmark did not load a native document")
         require(0 < requests < report["cell_reads"], "grid must page rather than call the service per cell")
         require(requests <= 256, "native grid made an unexpectedly large number of service requests")
+    if require_multi_sheet:
+        require(source == "native-document", "multi-sheet proof requires a native document")
+        require(sheet_count >= 2, "native document did not expose multiple sheets")
+        require(current_sheet == 1, "headless grid did not switch to the second sheet")
 
 
 def main() -> None:
@@ -110,11 +123,18 @@ def main() -> None:
                         help="require the benchmark to have loaded an Omarchy colors.toml")
     parser.add_argument("--require-native-document", action="store_true",
                         help="require a real native document loaded through the local service")
+    parser.add_argument("--require-multi-sheet", action="store_true",
+                        help="require the native smoke to switch to its second sheet")
     args = parser.parse_args()
 
     check_static_contract()
     if args.report:
-        check_report(read_report(args.report), args.require_omarchy_theme, args.require_native_document)
+        check_report(
+            read_report(args.report),
+            args.require_omarchy_theme,
+            args.require_native_document,
+            args.require_multi_sheet,
+        )
 
 
 if __name__ == "__main__":

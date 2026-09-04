@@ -21,6 +21,7 @@ pub struct GridCell {
 
 #[derive(Debug)]
 struct CachedPage {
+    sheet: String,
     row_start: usize,
     column_start: usize,
     cells: BTreeMap<(usize, usize), GridCell>,
@@ -87,17 +88,23 @@ struct DocumentState {
     client: ServiceClient,
     path: PathBuf,
     branch: Option<String>,
-    sheet: String,
+    current_sheet: usize,
     actor: String,
     pages: VecDeque<CachedPage>,
     requests: u64,
 }
 
-pub struct GridDocument {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SheetInfo {
+    pub id: String,
     pub name: String,
-    pub sheet_name: String,
     pub rows: usize,
     pub columns: usize,
+}
+
+pub struct GridDocument {
+    pub name: String,
+    pub sheets: Vec<SheetInfo>,
     state: Mutex<DocumentState>,
 }
 
@@ -110,14 +117,15 @@ impl GridDocument {
             "path": path,
             "branch": branch.as_deref(),
         }))?;
-        let sheet = summary["sheets"]
+        let sheets = summary["sheets"]
             .as_array()
-            .and_then(|sheets| sheets.first())
-            .ok_or("the document has no sheets")?;
-        let sheet_id = sheet["id"]
-            .as_str()
-            .ok_or("the first sheet has no stable ID")?
-            .to_string();
+            .ok_or("the document summary has no sheet list")?
+            .iter()
+            .map(parse_sheet)
+            .collect::<Result<Vec<_>, _>>()?;
+        if sheets.is_empty() {
+            return Err("the document has no sheets".into());
+        }
         let actor = std::env::var("OMASHEETS_ACTOR")
             .ok()
             .filter(|actor| !actor.trim().is_empty() && actor.chars().count() <= 128)
@@ -126,14 +134,12 @@ impl GridDocument {
             .unwrap_or_else(|| "local-user".into());
         Ok(Self {
             name: summary["name"].as_str().unwrap_or("Untitled").to_string(),
-            sheet_name: sheet["name"].as_str().unwrap_or("Sheet").to_string(),
-            rows: sheet["rows"].as_u64().unwrap_or(0) as usize,
-            columns: sheet["columns"].as_u64().unwrap_or(0) as usize,
+            sheets,
             state: Mutex::new(DocumentState {
                 client,
                 path: path.to_path_buf(),
                 branch,
-                sheet: sheet_id,
+                current_sheet: 0,
                 actor,
                 pages: VecDeque::new(),
                 requests: 2,
@@ -142,19 +148,27 @@ impl GridDocument {
     }
 
     pub fn cell(&self, row: usize, column: usize) -> Result<GridCell, String> {
-        if row >= self.rows || column >= self.columns {
+        let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
+        let sheet = self
+            .sheets
+            .get(state.current_sheet)
+            .ok_or("the current sheet is unavailable")?;
+        if row >= sheet.rows || column >= sheet.columns {
             return Ok(GridCell::default());
         }
         let row_start = row / PAGE_ROWS * PAGE_ROWS;
         let column_start = column / PAGE_COLUMNS * PAGE_COLUMNS;
-        let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
         let position = state
             .pages
             .iter()
-            .position(|page| page.row_start == row_start && page.column_start == column_start);
+            .position(|page| {
+                page.sheet == sheet.id
+                    && page.row_start == row_start
+                    && page.column_start == column_start
+            });
         let page = match position {
             Some(position) => state.pages.remove(position).expect("position was found"),
-            None => fetch_page(&mut state, row_start, column_start)?,
+            None => fetch_page(&mut state, &sheet.id, row_start, column_start)?,
         };
         let cell = page.cells.get(&(row, column)).cloned().unwrap_or_default();
         state.pages.push_back(page);
@@ -165,12 +179,16 @@ impl GridDocument {
     }
 
     pub fn set_text(&self, row: usize, column: usize, text: &str) -> Result<(), String> {
-        if row >= self.rows || column >= self.columns {
+        let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
+        let sheet = self
+            .sheets
+            .get(state.current_sheet)
+            .ok_or("the current sheet is unavailable")?;
+        if row >= sheet.rows || column >= sheet.columns {
             return Err("cell is outside the document view".into());
         }
-        let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
         let a1 = format!("{}{}", column_letters(column), row + 1);
-        let command = edit_command(&state.sheet, &a1, text);
+        let command = edit_command(&sheet.id, &a1, text);
         let request = json!({
             "kind": "append",
             "path": &state.path,
@@ -184,6 +202,32 @@ impl GridDocument {
         Ok(())
     }
 
+    pub fn current_sheet(&self) -> Result<SheetInfo, String> {
+        let state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
+        self.sheets
+            .get(state.current_sheet)
+            .cloned()
+            .ok_or_else(|| "the current sheet is unavailable".into())
+    }
+
+    pub fn current_sheet_index(&self) -> usize {
+        self.state.lock().map_or(0, |state| state.current_sheet)
+    }
+
+    pub fn select_sheet(&self, index: usize) -> Result<SheetInfo, String> {
+        let sheet = self
+            .sheets
+            .get(index)
+            .cloned()
+            .ok_or_else(|| "sheet index is outside the document".to_string())?;
+        let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
+        if state.current_sheet != index {
+            state.current_sheet = index;
+            state.pages.clear();
+        }
+        Ok(sheet)
+    }
+
     pub fn request_count(&self) -> u64 {
         self.state.lock().map_or(0, |state| state.requests)
     }
@@ -191,6 +235,7 @@ impl GridDocument {
 
 fn fetch_page(
     state: &mut DocumentState,
+    sheet: &str,
     row_start: usize,
     column_start: usize,
 ) -> Result<CachedPage, String> {
@@ -198,7 +243,7 @@ fn fetch_page(
         "kind": "grid_page",
         "path": &state.path,
         "branch": state.branch.as_deref(),
-        "sheet": state.sheet.as_str(),
+        "sheet": sheet,
         "row_start": row_start,
         "column_start": column_start,
         "rows": PAGE_ROWS,
@@ -217,9 +262,22 @@ fn fetch_page(
         cells.insert((row, column), parse_cell(cell));
     }
     Ok(CachedPage {
+        sheet: sheet.to_string(),
         row_start,
         column_start,
         cells,
+    })
+}
+
+fn parse_sheet(sheet: &Value) -> Result<SheetInfo, String> {
+    Ok(SheetInfo {
+        id: sheet["id"]
+            .as_str()
+            .ok_or("a sheet has no stable ID")?
+            .to_string(),
+        name: sheet["name"].as_str().unwrap_or("Sheet").to_string(),
+        rows: sheet["rows"].as_u64().unwrap_or(0) as usize,
+        columns: sheet["columns"].as_u64().unwrap_or(0) as usize,
     })
 }
 
@@ -335,5 +393,25 @@ mod tests {
     fn page_and_cache_bounds_fit_the_service_contract() {
         assert!(PAGE_ROWS * PAGE_COLUMNS <= 10_000);
         assert_eq!(MAX_CACHED_PAGES * PAGE_ROWS * PAGE_COLUMNS, 8_192);
+    }
+
+    #[test]
+    fn parses_stable_sheet_metadata() {
+        let sheet = parse_sheet(&json!({
+            "id": "sheet-id",
+            "name": "Forecast",
+            "rows": 256,
+            "columns": 16
+        }))
+        .expect("valid sheet metadata");
+        assert_eq!(
+            sheet,
+            SheetInfo {
+                id: "sheet-id".into(),
+                name: "Forecast".into(),
+                rows: 256,
+                columns: 16,
+            }
+        );
     }
 }

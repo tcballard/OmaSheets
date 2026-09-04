@@ -12,11 +12,12 @@ editing with Enter or F2, and accessibility metadata for the grid and visible
 cells.
 
 When given a native `.omasheets` path, the grid connects to the authenticated
-local service, opens the document's first sheet and requests 64-row by 16-column
-sparse tiles. At most eight tiles (8,192 coordinates) stay cached. Displayed
-formula results and editable formula source remain separate, and edits append
-through the same service API used by the CLI. The service never receives one
-request per painted cell.
+local service, exposes its sheets as themed tabs and requests 64-row by
+16-column sparse tiles for the selected stable sheet ID. At most eight tiles
+(8,192 coordinates) stay cached, and the cache is cleared when switching
+sheets. Displayed formula results and editable formula source remain separate,
+and edits append through the same service API used by the CLI. The service never
+receives one request per painted cell.
 
 On Omarchy, the window reads the active normalized palette from
 `~/.config/omarchy/current/theme/colors.toml`. Background, foreground, accent,
@@ -44,8 +45,8 @@ OMASHEETS_ACTOR="$USER" \
   spikes/qt-grid/target/release/omasheets-qt-grid-spike document.omasheets
 ```
 
-The document must already contain at least one sheet, row and column. The first
-sheet is shown in this slice; sheet switching is deferred to the next UI slice.
+The document must already contain at least one sheet, row and column. Select a
+sheet with the tab strip or switch with Ctrl+Page Up and Ctrl+Page Down.
 
 ## Evidence smoke
 
@@ -72,5 +73,7 @@ The report also records `theme_source` as `omarchy` or `fallback`. For an
 on-Omarchy evidence run, add `--require-omarchy-theme` to the checker command.
 For a native-document run, add `--require-native-document`; this also proves
 that service requests are bounded below the number of model cell reads.
+For a two-sheet acceptance fixture, add `--require-multi-sheet`; the benchmark
+switches to the second stable sheet ID before writing its persistence probe.
 
 See `docs/M1-GRID-SPIKE.md` for the on-device review and acceptance record.

@@ -15,6 +15,8 @@ pub mod qobject {
         #[qproperty(bool, document_mode, cxx_name = "documentMode")]
         #[qproperty(QString, document_name, cxx_name = "documentName")]
         #[qproperty(QString, sheet_name, cxx_name = "sheetName")]
+        #[qproperty(i32, sheet_count, cxx_name = "sheetCount")]
+        #[qproperty(i32, current_sheet, cxx_name = "currentSheet")]
         #[qproperty(QString, source_status, cxx_name = "sourceStatus")]
         #[qproperty(QString, theme_name, cxx_name = "themeName")]
         #[qproperty(QString, theme_background, cxx_name = "themeBackground")]
@@ -43,6 +45,14 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "columnLabel"]
         fn column_label(&self, column: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "sheetLabel"]
+        fn sheet_label(&self, index: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "selectSheet"]
+        fn select_sheet(self: Pin<&mut Self>, index: i32);
 
         #[qinvokable]
         #[cxx_name = "setCellText"]
@@ -87,6 +97,8 @@ pub struct GridModelRust {
     document_mode: bool,
     document_name: QString,
     sheet_name: QString,
+    sheet_count: i32,
+    current_sheet: i32,
     source_status: QString,
     theme_name: QString,
     theme_background: QString,
@@ -109,41 +121,54 @@ impl Default for GridModelRust {
     fn default() -> Self {
         let theme = load_active_theme();
         let requested = requested_document_path();
-        let (document, row_count, column_count, document_name, sheet_name, source_status) =
-            match requested.as_deref().map(|path| {
-                GridDocument::open(path, std::env::var("OMASHEETS_BRANCH").ok())
-            }) {
-                Some(Ok(document)) => {
-                    let rows = document.rows.min(i32::MAX as usize) as i32;
-                    let columns = document.columns.min(i32::MAX as usize) as i32;
-                    let name = document.name.clone();
-                    let sheet = document.sheet_name.clone();
-                    (
-                        Some(document),
-                        rows.max(1),
-                        columns.max(1),
-                        name,
-                        sheet,
-                        "Connected to the local service".to_string(),
-                    )
-                }
-                Some(Err(error)) => (
-                    None,
-                    1,
-                    1,
-                    "Document unavailable".into(),
-                    String::new(),
-                    error,
-                ),
-                None => (
-                    None,
-                    ROWS,
-                    COLUMNS,
-                    "Synthetic operations".into(),
-                    "Fixture".into(),
-                    "Synthetic fixture".into(),
-                ),
-            };
+        let (
+            document,
+            row_count,
+            column_count,
+            document_name,
+            sheet_name,
+            sheet_count,
+            source_status,
+        ) = match requested.as_deref().map(|path| {
+            GridDocument::open(path, std::env::var("OMASHEETS_BRANCH").ok())
+        }) {
+            Some(Ok(document)) => {
+                let sheet = document
+                    .current_sheet()
+                    .expect("an opened document has a sheet");
+                let rows = sheet.rows.min(i32::MAX as usize) as i32;
+                let columns = sheet.columns.min(i32::MAX as usize) as i32;
+                let name = document.name.clone();
+                let sheet_count = document.sheets.len().min(i32::MAX as usize) as i32;
+                (
+                    Some(document),
+                    rows.max(1),
+                    columns.max(1),
+                    name,
+                    sheet.name,
+                    sheet_count,
+                    "Connected to the local service".to_string(),
+                )
+            }
+            Some(Err(error)) => (
+                None,
+                1,
+                1,
+                "Document unavailable".into(),
+                String::new(),
+                0,
+                error,
+            ),
+            None => (
+                None,
+                ROWS,
+                COLUMNS,
+                "Synthetic operations".into(),
+                "Fixture".into(),
+                1,
+                "Synthetic fixture".into(),
+            ),
+        };
         Self {
             row_count,
             column_count,
@@ -152,6 +177,8 @@ impl Default for GridModelRust {
             document_mode: requested.is_some(),
             document_name: document_name.as_str().into(),
             sheet_name: sheet_name.as_str().into(),
+            sheet_count,
+            current_sheet: 0,
             source_status: source_status.as_str().into(),
             theme_name: theme.name.as_str().into(),
             theme_background: theme.palette.background.as_str().into(),
@@ -229,6 +256,49 @@ impl qobject::GridModel {
 
     pub fn column_label(&self, column: i32) -> QString {
         column_letters(column).into()
+    }
+
+    pub fn sheet_label(&self, index: i32) -> QString {
+        if index < 0 {
+            return QString::default();
+        }
+        if let Some(document) = &self.document {
+            return document
+                .sheets
+                .get(index as usize)
+                .map(|sheet| sheet.name.as_str().into())
+                .unwrap_or_default();
+        }
+        if !self.document_mode && index == 0 {
+            return "Fixture".into();
+        }
+        QString::default()
+    }
+
+    pub fn select_sheet(mut self: Pin<&mut Self>, index: i32) {
+        if index < 0 || index >= self.sheet_count || index == self.current_sheet {
+            return;
+        }
+        let result = self
+            .document
+            .as_ref()
+            .ok_or_else(|| "sheet switching requires a native document".to_string())
+            .and_then(|document| document.select_sheet(index as usize));
+        match result {
+            Ok(sheet) => {
+                self.as_mut()
+                    .set_row_count(sheet.rows.min(i32::MAX as usize).max(1) as i32);
+                self.as_mut()
+                    .set_column_count(sheet.columns.min(i32::MAX as usize).max(1) as i32);
+                self.as_mut().set_sheet_name(sheet.name.as_str().into());
+                self.as_mut().set_current_sheet(index);
+                let revision = *self.revision();
+                self.as_mut().set_revision(revision.wrapping_add(1));
+                self.as_mut()
+                    .set_source_status("Switched sheets through stable IDs".into());
+            }
+            Err(error) => self.as_mut().set_source_status(error.as_str().into()),
+        }
     }
 
     pub fn set_cell_text(
@@ -315,7 +385,8 @@ impl qobject::GridModel {
                 "\"worst_frame_ms\":{:.6},\"visible_delegates\":{},",
                 "\"cell_reads\":{},\"startup_to_report_ms\":{:.3},",
                 "\"theme_source\":\"{}\",\"source\":\"{}\",",
-                "\"service_requests\":{}}}"
+                "\"service_requests\":{},\"sheet_count\":{},",
+                "\"current_sheet\":{}}}"
             ),
             if source == "synthetic" {
                 "synthetic-1000000x64"
@@ -340,6 +411,12 @@ impl qobject::GridModel {
             self.document
                 .as_ref()
                 .map_or(0, GridDocument::request_count),
+            self.sheet_count,
+            self.document
+                .as_ref()
+                .map_or(self.current_sheet, |document| {
+                    document.current_sheet_index() as i32
+                }),
         );
     }
 }

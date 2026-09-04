@@ -306,17 +306,22 @@ jobs:
           call_service "{\"kind\":\"create\",\"path\":\"$document\",\"name\":\"Grid evidence\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"}}" \
             > "$evidence/create.json"
           call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"add_sheet\",\"name\":\"Operations\"}}" \
-            > "$evidence/add-sheet.json"
+            > "$evidence/add-operations-sheet.json"
+          call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"add_sheet\",\"name\":\"Forecast\"}}" \
+            > "$evidence/add-forecast-sheet.json"
           summary=$(call_service "{\"kind\":\"document\",\"path\":\"$document\"}")
-          sheet=$(python -c 'import json,sys; print(json.load(sys.stdin)["response"]["sheets"][0]["id"])' <<< "$summary")
-          call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"add_columns\",\"sheet\":\"$sheet\",\"count\":16,\"at\":0}}" \
-            > "$evidence/add-columns.json"
-          call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"add_rows\",\"sheet\":\"$sheet\",\"count\":256,\"at\":0,\"table\":null}}" \
-            > "$evidence/add-rows.json"
-          call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"set_value\",\"sheet\":\"$sheet\",\"a1\":\"A1\",\"value\":{\"type\":\"number\",\"value\":4}}}" \
-            > "$evidence/set-value.json"
-          call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"set_formula\",\"sheet\":\"$sheet\",\"a1\":\"B1\",\"source\":\"=A1*2\"}}" \
-            > "$evidence/set-formula.json"
+          operations_sheet=$(python -c 'import json,sys; print(json.load(sys.stdin)["response"]["sheets"][0]["id"])' <<< "$summary")
+          forecast_sheet=$(python -c 'import json,sys; print(json.load(sys.stdin)["response"]["sheets"][1]["id"])' <<< "$summary")
+          for sheet in "$operations_sheet" "$forecast_sheet"; do
+            call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"add_columns\",\"sheet\":\"$sheet\",\"count\":16,\"at\":0}}" \
+              >> "$evidence/add-columns.jsonl"
+            call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"add_rows\",\"sheet\":\"$sheet\",\"count\":256,\"at\":0,\"table\":null}}" \
+              >> "$evidence/add-rows.jsonl"
+            call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"set_value\",\"sheet\":\"$sheet\",\"a1\":\"A1\",\"value\":{\"type\":\"number\",\"value\":4}}}" \
+              >> "$evidence/set-value.jsonl"
+            call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"set_formula\",\"sheet\":\"$sheet\",\"a1\":\"B1\",\"source\":\"=A1*2\"}}" \
+              >> "$evidence/set-formula.jsonl"
+          done
           env \
             XDG_CONFIG_HOME="$theme_config" \
             XDG_RUNTIME_DIR="$runtime" \
@@ -332,8 +337,8 @@ jobs:
             > "$evidence/report.txt" 2> "$evidence/stderr.txt"
           python scripts/check_qt_grid_spike.py \
             --report "$evidence/report.txt" --require-omarchy-theme \
-            --require-native-document
-          call_service "{\"kind\":\"cell\",\"path\":\"$document\",\"sheet\":\"$sheet\",\"a1\":\"B1\"}" \
+            --require-native-document --require-multi-sheet
+          call_service "{\"kind\":\"cell\",\"path\":\"$document\",\"sheet\":\"$forecast_sheet\",\"a1\":\"B1\"}" \
             > "$evidence/persisted-edit.json"
           python -c 'import json,sys; value=json.load(sys.stdin)["response"]; assert value["value"] == {"type":"number","value":21.0}; assert value["state"]["input"]["formula"]["source"] == "=A1*3"' \
             < "$evidence/persisted-edit.json"
