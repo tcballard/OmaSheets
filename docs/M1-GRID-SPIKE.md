@@ -22,11 +22,16 @@ packaging, and the ongoing Qt dependency cost.
 - Accessible grid and visible-cell names, descriptions, focus, and selection.
 - Live inheritance of Omarchy's active semantic palette, with a standalone
   fallback, using standard Qt Quick controls.
+- First-sheet native-document loading through the authenticated local service,
+  using a bounded eight-tile cache over sparse 64 × 16 grid pages.
+- Native value/formula editing appended through the service; calculated display
+  values remain separate from editable formula source.
 - Repeatable headless wiring smoke plus a manual on-device evidence run.
 
-The spike does not yet connect to `.omasheets` documents. The production path
-would add a paged model adapter over the existing local service API; it must not
-make a Unix-socket round trip for every painted cell.
+The spike now connects to `.omasheets` documents without making a Unix-socket
+round trip for every painted cell. This slice deliberately opens the first
+sheet only. Sheet switching, row/column insertion and production error recovery
+remain outside the candidate integration.
 
 ## Non-gating CI observation
 
@@ -51,11 +56,13 @@ Check all of the following with the keyboard and then a screen reader:
 1. Move with arrows, Page Up/Down, Home/End, and Ctrl+Home/End.
 2. Start editing with Enter and F2; commit with Enter and cancel with Escape.
 3. Select and edit with the mouse without losing keyboard focus.
-4. Verify the grid name, current cell address/value/type, selection, and edit
+4. Open a native document, edit a literal and a formula, restart the window and
+   verify both edits persisted and the formula bar retained formula source.
+5. Verify the grid name, current cell address/value/type, selection, and edit
    state are announced.
-5. Switch between the maintainer's normal dark, light and one customized
+6. Switch between the maintainer's normal dark, light and one customized
    Omarchy theme while the window remains open; verify the palette updates.
-6. Verify headers, selection, formulas, status colours, editing, scrollbars and
+7. Verify headers, selection, formulas, status colours, editing, scrollbars and
    scaling remain legible at the maintainer's normal display scale.
 
 ## Evidence record
@@ -66,6 +73,7 @@ Check all of the following with the keyboard and then a screen reader:
 | Omarchy / Qt / renderer | _not recorded_ |
 | Customization review | _not run_ |
 | Active-theme review | _not run_ |
+| Native document read/edit persistence | _not run_ |
 | Keyboard-only review | _not run_ |
 | Screen-reader review | _not run_ |
 | Warm scroll, synthetic 1,000,000 × 64 | _not measured_ |

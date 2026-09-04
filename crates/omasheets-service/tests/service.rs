@@ -190,6 +190,40 @@ fn one_api_drives_the_whole_branch_workflow() {
         Err(ServiceError { ref code, .. }) if code == "invalid_limit"
     ));
 
+    let grid_page = service
+        .handle(Request::GridPage {
+            path: path.clone(),
+            branch: None,
+            sheet: sheet.clone(),
+            row_start: 0,
+            column_start: 0,
+            rows: 2,
+            columns: 2,
+        })
+        .unwrap();
+    let Response::GridPage(grid_page) = grid_page else {
+        panic!("{grid_page:?}")
+    };
+    assert_eq!((grid_page.rows, grid_page.columns), (2, 2));
+    assert_eq!(grid_page.cells.len(), 2);
+    assert_eq!((grid_page.cells[0].row, grid_page.cells[0].column), (0, 0));
+    assert_eq!(grid_page.cells[0].value, CellValue::Number(4.0));
+    assert_eq!((grid_page.cells[1].row, grid_page.cells[1].column), (0, 1));
+    assert_eq!(grid_page.cells[1].value, CellValue::Number(8.0));
+    assert_eq!(grid_page.cells[1].formula.as_deref(), Some("=A1*2"));
+    assert!(matches!(
+        service.handle(Request::GridPage {
+            path: path.clone(),
+            branch: None,
+            sheet: sheet.clone(),
+            row_start: 0,
+            column_start: 0,
+            rows: 101,
+            columns: 100,
+        }),
+        Err(ServiceError { ref code, .. }) if code == "invalid_grid_page"
+    ));
+
     let lineage = service
         .handle(Request::Lineage {
             path: path.clone(),

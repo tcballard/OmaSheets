@@ -10,8 +10,8 @@
 //! agent may not append to the `main` branch at all.
 
 use omasheets_core::{
-    Actor, ActorKind, CellRef, CellState, CellValue, CheckResult, ColumnId, ColumnType, Command,
-    DocumentId, Event, InferredColumnType, Lineage, ObjectId, SheetId,
+    Actor, ActorKind, CellInput, CellRef, CellState, CellValue, CheckResult, ColumnId, ColumnType,
+    Command, DocumentId, Event, InferredColumnType, Lineage, ObjectId, SheetId,
 };
 use omasheets_store::{BranchDiff, LoadReport, MergeReport, Store, StoreError};
 use serde::{Deserialize, Serialize};
@@ -21,6 +21,8 @@ use std::path::{Path, PathBuf};
 
 /// Largest cell page one `cells` request returns.
 pub const MAX_CELL_PAGE: usize = 10_000;
+/// Largest rectangular grid page one `grid_page` request may inspect.
+pub const MAX_GRID_PAGE_CELLS: usize = 10_000;
 const DEFAULT_CELL_PAGE: usize = 1_000;
 const MAX_ACTOR_CHARS: usize = 128;
 const MAIN_BRANCH: &str = "main";
@@ -60,6 +62,18 @@ pub enum Request {
         start: usize,
         #[serde(default)]
         limit: Option<usize>,
+    },
+    /// A bounded rectangular page in current row/column view order. Blank
+    /// cells are omitted from the sparse result.
+    GridPage {
+        path: PathBuf,
+        #[serde(default)]
+        branch: Option<String>,
+        sheet: String,
+        row_start: usize,
+        column_start: usize,
+        rows: usize,
+        columns: usize,
     },
     Cell {
         path: PathBuf,
@@ -169,6 +183,26 @@ pub struct CellPage {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GridCell {
+    pub row: usize,
+    pub column: usize,
+    pub a1: Option<String>,
+    pub value: CellValue,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formula: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GridPage {
+    pub sheet: SheetId,
+    pub row_start: usize,
+    pub column_start: usize,
+    pub rows: usize,
+    pub columns: usize,
+    pub cells: Vec<GridCell>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Response {
     Created {
@@ -182,6 +216,7 @@ pub enum Response {
     Closed,
     Document(DocumentSummary),
     Cells(CellPage),
+    GridPage(GridPage),
     Cell(CellReport),
     Lineage(Option<Lineage>),
     Appended(Event),
@@ -497,6 +532,73 @@ impl Service {
                     total,
                     cells: page,
                     next,
+                }))
+            }
+            Request::GridPage {
+                path,
+                branch,
+                sheet,
+                row_start,
+                column_start,
+                rows: requested_rows,
+                columns: requested_columns,
+            } => {
+                let page_cells = requested_rows.checked_mul(requested_columns);
+                if requested_rows == 0
+                    || requested_columns == 0
+                    || page_cells.is_none_or(|count| count > MAX_GRID_PAGE_CELLS)
+                {
+                    return Err(ServiceError::new(
+                        "invalid_grid_page",
+                        format!(
+                            "rows and columns must be positive and cover at most {MAX_GRID_PAGE_CELLS} cells"
+                        ),
+                    ));
+                }
+                let store = self.store(&path)?;
+                let (_, branch) = Self::branch(store, branch.as_deref())?;
+                let document = store.document(branch)?;
+                let sheet = Self::sheet(document, &sheet)?;
+                let all_rows = document.rows(sheet).unwrap_or(&[]);
+                let all_columns = document.columns(sheet).unwrap_or(&[]);
+                let rows = requested_rows.min(all_rows.len().saturating_sub(row_start));
+                let columns = requested_columns
+                    .min(all_columns.len().saturating_sub(column_start));
+                let mut cells = Vec::new();
+                for (row_offset, row) in all_rows.iter().skip(row_start).take(rows).enumerate() {
+                    for (column_offset, column) in all_columns
+                        .iter()
+                        .skip(column_start)
+                        .take(columns)
+                        .enumerate()
+                    {
+                        let cell = CellRef {
+                            sheet,
+                            row: *row,
+                            column: *column,
+                        };
+                        if let Some(state) = document.cell(cell) {
+                            let formula = match &state.input {
+                                CellInput::Formula { formula } => Some(formula.source.clone()),
+                                CellInput::Value { .. } => None,
+                            };
+                            cells.push(GridCell {
+                                row: row_start + row_offset,
+                                column: column_start + column_offset,
+                                a1: document.project_a1(cell),
+                                value: document.value(cell),
+                                formula,
+                            });
+                        }
+                    }
+                }
+                Ok(Response::GridPage(GridPage {
+                    sheet,
+                    row_start,
+                    column_start,
+                    rows,
+                    columns,
+                    cells,
                 }))
             }
             Request::Cell {

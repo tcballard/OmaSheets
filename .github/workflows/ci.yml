@@ -268,13 +268,17 @@ jobs:
           mkdir -p "$evidence"
           trap 'test ! -f spikes/qt-grid/Cargo.lock || cp spikes/qt-grid/Cargo.lock "$evidence/Cargo.lock"' EXIT
           python scripts/check_qt_grid_spike.py
+          cargo build --locked --release -p omasheets-service
           cargo test --locked --release --manifest-path spikes/qt-grid/Cargo.toml
           cargo build --locked --release --manifest-path spikes/qt-grid/Cargo.toml
       - name: Exercise bounded viewport rendering headlessly
         run: |
           evidence="$RUNNER_TEMP/omasheets-qt-grid"
           theme_config="$RUNNER_TEMP/omasheets-theme-config"
+          runtime="$RUNNER_TEMP/omasheets-grid-runtime"
+          document="$evidence/grid.omasheets"
           mkdir -p "$evidence"
+          mkdir -m 700 "$runtime"
           mkdir -p "$theme_config/omarchy/current/theme"
           printf '%s\n' \
             'background = "#101216"' \
@@ -287,18 +291,52 @@ jobs:
             'blue = "#70a5ff"' \
             'magenta = "#c58cff"' \
             > "$theme_config/omarchy/current/theme/colors.toml"
+          target/release/omasheets-service serve --runtime-dir "$runtime" \
+            > "$evidence/service-stdout.txt" 2> "$evidence/service-stderr.txt" &
+          service_pid=$!
+          trap 'kill "$service_pid" 2>/dev/null || true; wait "$service_pid" 2>/dev/null || true' EXIT
+          for _ in {1..100}; do
+            test -S "$runtime/omasheets/native.sock" && break
+            sleep 0.05
+          done
+          test -S "$runtime/omasheets/native.sock"
+          call_service() {
+            target/release/omasheets-service call --runtime-dir "$runtime" "$1"
+          }
+          call_service "{\"kind\":\"create\",\"path\":\"$document\",\"name\":\"Grid evidence\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"}}" \
+            > "$evidence/create.json"
+          call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"add_sheet\",\"name\":\"Operations\"}}" \
+            > "$evidence/add-sheet.json"
+          summary=$(call_service "{\"kind\":\"document\",\"path\":\"$document\"}")
+          sheet=$(python -c 'import json,sys; print(json.load(sys.stdin)["response"]["sheets"][0]["id"])' <<< "$summary")
+          call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"add_columns\",\"sheet\":\"$sheet\",\"count\":16,\"at\":0}}" \
+            > "$evidence/add-columns.json"
+          call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"add_rows\",\"sheet\":\"$sheet\",\"count\":256,\"at\":0,\"table\":null}}" \
+            > "$evidence/add-rows.json"
+          call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"set_value\",\"sheet\":\"$sheet\",\"a1\":\"A1\",\"value\":{\"type\":\"number\",\"value\":4}}}" \
+            > "$evidence/set-value.json"
+          call_service "{\"kind\":\"append\",\"path\":\"$document\",\"actor\":{\"kind\":\"human\",\"id\":\"ci\"},\"command\":{\"command\":\"set_formula\",\"sheet\":\"$sheet\",\"a1\":\"B1\",\"source\":\"=A1*2\"}}" \
+            > "$evidence/set-formula.json"
           env \
             XDG_CONFIG_HOME="$theme_config" \
+            XDG_RUNTIME_DIR="$runtime" \
             LIBGL_ALWAYS_SOFTWARE=1 \
             QSG_RHI_BACKEND=opengl \
             OMASHEETS_GRID_BENCHMARK=1 \
+            OMASHEETS_DOCUMENT="$document" \
+            OMASHEETS_ACTOR=ci \
             xvfb-run -a \
             /usr/bin/time -v -o "$evidence/resource.txt" \
             timeout 90 \
             spikes/qt-grid/target/release/omasheets-qt-grid-spike \
             > "$evidence/report.txt" 2> "$evidence/stderr.txt"
           python scripts/check_qt_grid_spike.py \
-            --report "$evidence/report.txt" --require-omarchy-theme
+            --report "$evidence/report.txt" --require-omarchy-theme \
+            --require-native-document
+          call_service "{\"kind\":\"cell\",\"path\":\"$document\",\"sheet\":\"$sheet\",\"a1\":\"B1\"}" \
+            > "$evidence/persisted-edit.json"
+          python -c 'import json,sys; value=json.load(sys.stdin)["response"]; assert value["value"] == {"type":"number","value":21.0}; assert value["state"]["input"]["formula"]["source"] == "=A1*3"' \
+            < "$evidence/persisted-edit.json"
           lscpu > "$evidence/hardware.txt"
           qmake6 -query QT_VERSION > "$evidence/qt-version.txt"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
