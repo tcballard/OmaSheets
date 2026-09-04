@@ -1,7 +1,7 @@
 # M1 native grid spike
 
-**Status:** implementation candidate; dependency acceptance and on-device review
-are not complete.
+**Status:** Qt 6 / Qt Quick / CXX-Qt accepted by the maintainer; measured
+on-device release evidence is not complete.
 
 ## Decision under test
 
@@ -87,7 +87,11 @@ Check all of the following with the keyboard and then a screen reader:
 
 ## Decision
 
-- [ ] Accept Qt 6 / Qt Quick / CXX-Qt for the M1 native grid.
+- [x] Accept Qt 6 / Qt Quick / CXX-Qt for the M1 native grid.
 - [ ] Reject it and record the failed gate and next candidate.
 
-Decision owner, date, and notes: _pending maintainer review_.
+Decision owner, date, and notes: Tom Ballard, 2026-09-04. The maintainer
+approved the native grid direction and its Qt dependency stack. This closes
+the product-level architecture fork and authorizes promotion work. The blank
+evidence fields above remain explicit release blockers; this approval does not
+claim that keyboard, screen-reader, theme or performance measurements were run.
