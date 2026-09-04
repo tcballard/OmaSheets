@@ -357,7 +357,7 @@ jobs:
     container:
       image: archlinux:base-devel
     steps:
-      - run: pacman -Syu --noconfirm --needed git cmake gtk3 libreoffice-fresh libreoffice-fresh-sdk
+      - run: pacman -Syu --noconfirm --needed git cmake rust gtk3 libreoffice-fresh libreoffice-fresh-sdk
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Verify the release gate in Arch
         run: |
@@ -379,6 +379,7 @@ jobs:
           (cd dist-native && sha256sum --check "$checksum")
           "$RUNNER_TEMP/native-smoke/bin/omasheets-window" --provenance
           "$RUNNER_TEMP/native-smoke/bin/omasheets-lok-render" --provenance
+          "$RUNNER_TEMP/native-smoke/bin/omasheets-service" --provenance
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: omasheets-native-linux-x86_64
@@ -439,11 +440,20 @@ jobs:
           expected = source_identity(plugin)
           receipt = json.loads((app / "provenance.json").read_text())
           assert receipt["source"] == expected
-          for binary in ("omasheets-window", "omasheets-lok-render"):
+          for binary in ("omasheets-window", "omasheets-lok-render", "omasheets-service"):
               report = json.loads(subprocess.check_output([app / "bin" / binary, "--provenance"], text=True))
               assert report["source_commit"] == expected["commit"]
               assert report["source_sha256"] == expected["sha256"]
           PY
+      - name: Exercise the installed native service workflow
+        run: |
+          app="$XDG_DATA_HOME/omasheets/app"
+          evidence="$RUNNER_TEMP/native-service"
+          mkdir -p "$evidence"
+          python scripts/check_native_service_install.py \
+            --service "$app/bin/omasheets-service" \
+            --workdir "$evidence" \
+            > "$evidence/report.json"
       - name: Create an Excel 97 fixture
         run: |
           mkdir -p "$RUNNER_TEMP/lok-input"

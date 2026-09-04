@@ -63,7 +63,10 @@ class ReproducibleArchiveTests(unittest.TestCase):
             raw = compressed.read()
         with tarfile.open(fileobj=io.BytesIO(raw)) as bundle:
             entries = bundle.getmembers()
-        self.assertEqual([entry.name for entry in entries], ["bin/omasheets-lok-render", "bin/omasheets-window", "manifest.json"])
+        self.assertEqual(
+            [entry.name for entry in entries],
+            sorted([*(f"bin/{name}" for name in NATIVE_EXECUTABLES), "manifest.json"]),
+        )
         for entry in entries:
             self.assertEqual((entry.uid, entry.gid, entry.uname, entry.gname, entry.mtime), (0, 0, "", "", 1_700_000_000))
         self.assertEqual({entry.mode for entry in entries}, {0o644, 0o755})

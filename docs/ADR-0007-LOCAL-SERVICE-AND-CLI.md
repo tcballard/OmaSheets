@@ -47,6 +47,12 @@ grid, an agent bridge and a person's shell can share.
 - **The CLI is the client.** `omasheets-service call REQUEST_JSON` reads
   the token, sends one request and prints the envelope; exit status 2 means
   the service refused, 1 means the client could not ask.
+- **The service is a release-bundle executable.** Its binary is built from the
+  locked Rust workspace with remapped source/build paths, stripped, hashed in
+  the native manifest and checked against the bundle's source identity through
+  `--provenance`. The compiler-free Arch acceptance drives the installed
+  binary through import, edit, branch, check, refused and accepted merge, CSV
+  export, close and digest-identical reopen.
 - **Native CSV export is a projection.** `export_csv` streams one stable sheet
   in current view order, refuses to replace an existing destination and returns
   a manifest tied to the branch and document digest. Formula source, styles,

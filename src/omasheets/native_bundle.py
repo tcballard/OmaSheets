@@ -20,7 +20,7 @@ from .release_signing import PublicKey, SignatureError, load_public_key, verify_
 REPOSITORY = "tcballard/OmaSheets"
 MAX_BUNDLE_BYTES = 64 * 1024 * 1024
 MAX_SIDECAR_BYTES = 8 * 1024
-NATIVE_EXECUTABLES = ("omasheets-window", "omasheets-lok-render")
+NATIVE_EXECUTABLES = ("omasheets-window", "omasheets-lok-render", "omasheets-service")
 RELEASE_SIGNING_KEY = Path("release/signing-key.pub")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 

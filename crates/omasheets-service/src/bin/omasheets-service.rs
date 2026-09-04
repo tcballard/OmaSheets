@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 
-const USAGE: &str = "usage:\n  omasheets-service serve [--runtime-dir DIR] [--once]\n  omasheets-service call [--runtime-dir DIR] [REQUEST_JSON]";
+const USAGE: &str = "usage:\n  omasheets-service --provenance\n  omasheets-service serve [--runtime-dir DIR] [--once]\n  omasheets-service call [--runtime-dir DIR] [REQUEST_JSON]";
 /// Largest request line accepted, so a client cannot exhaust memory.
 const MAX_LINE_BYTES: u64 = 4 * 1024 * 1024;
 const TOKEN_BYTES: usize = 32;
@@ -242,6 +242,18 @@ fn call(directory: PathBuf, request: Option<String>) -> Result<bool, String> {
 
 fn main() -> ExitCode {
     let arguments: Vec<String> = env::args().skip(1).collect();
+    if arguments.len() == 1 && arguments[0] == "--provenance" {
+        println!(
+            "{}",
+            serde_json::json!({
+                "source_commit": option_env!("OMASHEETS_SOURCE_COMMIT")
+                    .unwrap_or("development"),
+                "source_sha256": option_env!("OMASHEETS_SOURCE_SHA256")
+                    .unwrap_or("development"),
+            })
+        );
+        return ExitCode::SUCCESS;
+    }
     let (command, rest) = match arguments.split_first() {
         Some((command, rest)) => (command.as_str(), rest),
         None => {
