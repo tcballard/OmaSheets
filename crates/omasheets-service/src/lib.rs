@@ -9,16 +9,16 @@
 //! or grants an agent merge authority: merges need a human approver, and an
 //! agent may not append to the `main` branch at all.
 
+use arrow_array::{ArrayRef, BooleanArray, Float64Array, RecordBatch, StringArray};
+use arrow_schema::{DataType, Field, Schema};
 use omasheets_calc::Value;
 use omasheets_core::{
     Actor, ActorKind, CellInput, CellRef, CellState, CellValue, CheckResult, ColumnId, ColumnType,
-    Command, Document, DocumentId, Event, InferredColumnType, Lineage, Literal, ObjectId,
-    Operation, SheetId, MAX_BATCH,
+    Command, Document, DocumentId, Event, InferredColumnType, Lineage, Literal, MAX_BATCH,
+    ObjectId, Operation, SheetId,
 };
 use omasheets_store::{BranchDiff, LoadReport, MergeReport, Store, StoreError};
 use omasheets_xlsx::{ImportLimits, import_xlsx};
-use arrow_array::{ArrayRef, BooleanArray, Float64Array, RecordBatch, StringArray};
-use arrow_schema::{DataType, Field, Schema};
 use parquet::arrow::ArrowWriter;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -26,8 +26,8 @@ use std::fmt;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Largest cell page one `cells` request returns.
 pub const MAX_CELL_PAGE: usize = 10_000;
@@ -540,9 +540,8 @@ fn export_csv(
             Err(error) => return Err(export_io_error(error)),
         }
     }
-    let (temporary_path, mut file) = temporary.ok_or_else(|| {
-        ServiceError::new("export_io", "could not allocate a temporary CSV file")
-    })?;
+    let (temporary_path, mut file) = temporary
+        .ok_or_else(|| ServiceError::new("export_io", "could not allocate a temporary CSV file"))?;
 
     let written = (|| -> Result<CsvExportStats, ServiceError> {
         let mut stats = CsvExportStats::default();
@@ -619,7 +618,7 @@ fn csv_value(value: &CellValue) -> String {
 }
 
 fn write_csv_field(writer: &mut impl Write, text: &str) -> io::Result<()> {
-    if text.contains(|character| matches!(character, ',' | '"' | '\r' | '\n')) {
+    if text.contains([',', '"', '\r', '\n']) {
         writer.write_all(b"\"")?;
         writer.write_all(text.replace('"', "\"\"").as_bytes())?;
         writer.write_all(b"\"")
@@ -659,7 +658,11 @@ fn parquet_column_array(
     stats: &mut ParquetExportStats,
 ) -> Result<ArrayRef, ServiceError> {
     let values = rows.iter().map(|row| {
-        let cell = CellRef { sheet, row: *row, column };
+        let cell = CellRef {
+            sheet,
+            row: *row,
+            column,
+        };
         if matches!(
             document.cell(cell).map(|state| &state.input),
             Some(CellInput::Formula { .. })
@@ -783,7 +786,11 @@ fn export_parquet(
             std::process::id(),
             nonce
         ));
-        match OpenOptions::new().write(true).create_new(true).open(&candidate) {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
             Ok(file) => {
                 temporary = Some((candidate, file));
                 break;
@@ -910,8 +917,9 @@ fn write_xlsx_value(
     let address = xml_text(address)?;
     match value {
         CellValue::Blank if formula.is_none() => Ok(()),
-        CellValue::Blank => write!(writer, "<c r=\"{address}\">{formula_xml}</c>")
-            .map_err(export_io_error),
+        CellValue::Blank => {
+            write!(writer, "<c r=\"{address}\">{formula_xml}</c>").map_err(export_io_error)
+        }
         CellValue::Number(number) => write!(
             writer,
             "<c r=\"{address}\">{formula_xml}<v>{}</v></c>",
@@ -940,12 +948,15 @@ fn write_xlsx_value(
             if matches!(
                 error.as_str(),
                 "#DIV/0!" | "#REF!" | "#N/A" | "#VALUE!" | "#NUM!" | "#NAME?" | "#NULL!"
-            ) => write!(
+            ) =>
+        {
+            write!(
                 writer,
                 "<c r=\"{address}\" t=\"e\">{formula_xml}<v>{}</v></c>",
                 xml_text(error)?,
             )
-            .map_err(export_io_error),
+            .map_err(export_io_error)
+        }
         CellValue::Error(error) => write!(
             writer,
             "<c r=\"{address}\" t=\"str\">{formula_xml}<v>{}</v></c>",
@@ -974,7 +985,10 @@ fn export_xlsx(
 ) -> Result<(PathBuf, Vec<XlsxExportSheetManifest>, XlsxExportStats), ServiceError> {
     let output = canonical(output)?;
     if output.exists() {
-        return Err(ServiceError::new("output_exists", "XLSX output already exists"));
+        return Err(ServiceError::new(
+            "output_exists",
+            "XLSX output already exists",
+        ));
     }
     let mut sheets = Vec::with_capacity(document.sheets().len());
     let mut total_cells = 0_usize;
@@ -996,11 +1010,12 @@ fn export_xlsx(
                 "XLSX sheets may contain at most 1,048,576 rows and 16,384 columns",
             ));
         }
-        total_cells = total_cells
-            .checked_add(rows.checked_mul(columns).ok_or_else(|| {
-                ServiceError::new("export_too_large", "XLSX dimensions overflow")
-            })?)
-            .ok_or_else(|| ServiceError::new("export_too_large", "XLSX dimensions overflow"))?;
+        total_cells =
+            total_cells
+                .checked_add(rows.checked_mul(columns).ok_or_else(|| {
+                    ServiceError::new("export_too_large", "XLSX dimensions overflow")
+                })?)
+                .ok_or_else(|| ServiceError::new("export_too_large", "XLSX dimensions overflow"))?;
         sheets.push(XlsxExportSheetManifest {
             id: *sheet,
             name: name.into(),
@@ -1022,12 +1037,23 @@ fn export_xlsx(
     }
 
     let parent = output.parent().expect("canonical output has a parent");
-    let file_name = output.file_name().expect("canonical output has a file name").to_string_lossy();
+    let file_name = output
+        .file_name()
+        .expect("canonical output has a file name")
+        .to_string_lossy();
     let mut temporary = None;
     for _ in 0..16 {
         let nonce = EXPORT_NONCE.fetch_add(1, Ordering::Relaxed);
-        let candidate = parent.join(format!(".{file_name}.{}.{}.part", std::process::id(), nonce));
-        match OpenOptions::new().write(true).create_new(true).open(&candidate) {
+        let candidate = parent.join(format!(
+            ".{file_name}.{}.{}.part",
+            std::process::id(),
+            nonce
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
             Ok(file) => {
                 temporary = Some((candidate, file));
                 break;
@@ -1036,8 +1062,9 @@ fn export_xlsx(
             Err(error) => return Err(export_io_error(error)),
         }
     }
-    let (temporary_path, file) = temporary
-        .ok_or_else(|| ServiceError::new("export_io", "could not allocate a temporary XLSX file"))?;
+    let (temporary_path, file) = temporary.ok_or_else(|| {
+        ServiceError::new("export_io", "could not allocate a temporary XLSX file")
+    })?;
 
     let written = (|| -> Result<XlsxExportStats, ServiceError> {
         let mut writer = zip::ZipWriter::new(file);
@@ -1054,7 +1081,14 @@ fn export_xlsx(
         start_xlsx_file(&mut writer, "xl/workbook.xml")?;
         writer.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><workbookPr date1904=\"0\"/><sheets>").map_err(export_io_error)?;
         for (index, sheet) in sheets.iter().enumerate() {
-            write!(writer, "<sheet name=\"{}\" sheetId=\"{}\" r:id=\"rId{}\"/>", xml_text(&sheet.name)?, index + 1, index + 1).map_err(export_io_error)?;
+            write!(
+                writer,
+                "<sheet name=\"{}\" sheetId=\"{}\" r:id=\"rId{}\"/>",
+                xml_text(&sheet.name)?,
+                index + 1,
+                index + 1
+            )
+            .map_err(export_io_error)?;
         }
         writer.write_all(b"</sheets><calcPr calcMode=\"auto\" fullCalcOnLoad=\"1\" forceFullCalc=\"1\"/></workbook>").map_err(export_io_error)?;
 
@@ -1063,19 +1097,30 @@ fn export_xlsx(
         for index in 1..=sheets.len() {
             write!(writer, "<Relationship Id=\"rId{index}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet{index}.xml\"/>").map_err(export_io_error)?;
         }
-        writer.write_all(b"</Relationships>").map_err(export_io_error)?;
+        writer
+            .write_all(b"</Relationships>")
+            .map_err(export_io_error)?;
 
         let mut stats = XlsxExportStats::default();
         for (sheet_index, sheet_manifest) in sheets.iter().enumerate() {
-            start_xlsx_file(&mut writer, &format!("xl/worksheets/sheet{}.xml", sheet_index + 1))?;
+            start_xlsx_file(
+                &mut writer,
+                &format!("xl/worksheets/sheet{}.xml", sheet_index + 1),
+            )?;
             writer.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>").map_err(export_io_error)?;
             let rows = document.rows(sheet_manifest.id).unwrap_or(&[]);
             let columns = document.columns(sheet_manifest.id).unwrap_or(&[]);
             for (row_index, row) in rows.iter().enumerate() {
                 let mut row_open = false;
                 for (column_index, column) in columns.iter().enumerate() {
-                    let cell = CellRef { sheet: sheet_manifest.id, row: *row, column: *column };
-                    let Some(state) = document.cell(cell) else { continue };
+                    let cell = CellRef {
+                        sheet: sheet_manifest.id,
+                        row: *row,
+                        column: *column,
+                    };
+                    let Some(state) = document.cell(cell) else {
+                        continue;
+                    };
                     if !row_open {
                         write!(writer, "<row r=\"{}\">", row_index + 1).map_err(export_io_error)?;
                         row_open = true;
@@ -1094,13 +1139,20 @@ fn export_xlsx(
                         }
                         CellInput::Value { .. } => None,
                     };
-                    write_xlsx_value(&mut writer, &a1(row_index as u32, column_index as u32), &value, formula)?;
+                    write_xlsx_value(
+                        &mut writer,
+                        &a1(row_index as u32, column_index as u32),
+                        &value,
+                        formula,
+                    )?;
                 }
                 if row_open {
                     writer.write_all(b"</row>").map_err(export_io_error)?;
                 }
             }
-            writer.write_all(b"</sheetData></worksheet>").map_err(export_io_error)?;
+            writer
+                .write_all(b"</sheetData></worksheet>")
+                .map_err(export_io_error)?;
         }
         let file = writer.finish().map_err(xlsx_error)?;
         file.sync_all().map_err(export_io_error)?;
@@ -1117,9 +1169,10 @@ fn export_xlsx(
     let _ = std::fs::remove_file(&temporary_path);
     match linked {
         Ok(()) => Ok((output, sheets, stats)),
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-            Err(ServiceError::new("output_exists", "XLSX output already exists"))
-        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Err(ServiceError::new(
+            "output_exists",
+            "XLSX output already exists",
+        )),
         Err(error) => Err(export_io_error(error)),
     }
 }
@@ -1232,7 +1285,10 @@ fn import_native_xlsx(
         ServiceError::new("invalid_source", format!("{}: {error}", source.display()))
     })?;
     if !metadata.is_file() {
-        return Err(ServiceError::new("invalid_source", "XLSX source is not a file"));
+        return Err(ServiceError::new(
+            "invalid_source",
+            "XLSX source is not a file",
+        ));
     }
     if metadata.len() > MAX_NATIVE_IMPORT_BYTES {
         return Err(ServiceError::new(
@@ -1273,9 +1329,7 @@ fn import_native_xlsx(
     if occupied_rectangle_cells > MAX_NATIVE_IMPORT_CELLS {
         return Err(ServiceError::new(
             "import_too_large",
-            format!(
-                "XLSX occupied rectangles may cover at most {MAX_NATIVE_IMPORT_CELLS} cells"
-            ),
+            format!("XLSX occupied rectangles may cover at most {MAX_NATIVE_IMPORT_CELLS} cells"),
         ));
     }
 
@@ -1287,7 +1341,11 @@ fn import_native_xlsx(
             .unwrap_or("Imported workbook")
             .to_string()
     });
-    let seed = format!("{}:{}:{timestamp}", output.display(), imported.source_sha256);
+    let seed = format!(
+        "{}:{}:{timestamp}",
+        output.display(),
+        imported.source_sha256
+    );
     let document_id = DocumentId(ObjectId::from_seed(&seed));
     let (mut planning, _) =
         Document::create(document_id, &document_name, actor.clone(), timestamp)?;
@@ -1418,13 +1476,7 @@ fn import_native_xlsx(
     let expected_digest = planning.digest();
     let temporary = temporary_store_path(&output)?;
     let built = (|| -> Result<(), ServiceError> {
-        let mut store = Store::create(
-            &temporary,
-            document_id,
-            &document_name,
-            actor,
-            timestamp,
-        )?;
+        let mut store = Store::create(&temporary, document_id, &document_name, actor, timestamp)?;
         store.append_batch(branch, import_actor, timestamp, commands)?;
         if store.document(branch)?.digest() != expected_digest {
             return Err(ServiceError::new(
@@ -1724,8 +1776,7 @@ impl Service {
                 let all_rows = document.rows(sheet).unwrap_or(&[]);
                 let all_columns = document.columns(sheet).unwrap_or(&[]);
                 let rows = requested_rows.min(all_rows.len().saturating_sub(row_start));
-                let columns = requested_columns
-                    .min(all_columns.len().saturating_sub(column_start));
+                let columns = requested_columns.min(all_columns.len().saturating_sub(column_start));
                 let mut cells = Vec::new();
                 for (row_offset, row) in all_rows.iter().skip(row_start).take(rows).enumerate() {
                     for (column_offset, column) in all_columns
@@ -1891,8 +1942,7 @@ impl Service {
                     columns,
                     document_digest,
                     formula_cells: stats.formula_cells,
-                    potential_formula_injection_cells: stats
-                        .potential_formula_injection_cells,
+                    potential_formula_injection_cells: stats.potential_formula_injection_cells,
                     limitations: vec![
                         "formula_source_omitted".into(),
                         "styles_tables_checks_lineage_omitted".into(),
@@ -1981,8 +2031,7 @@ impl Service {
                         "native output is already open",
                     ));
                 }
-                let (store, manifest) =
-                    import_native_xlsx(&source, &key, actor, name, now)?;
+                let (store, manifest) = import_native_xlsx(&source, &key, actor, name, now)?;
                 self.stores.insert(key, store);
                 Ok(Response::ImportedXlsx(manifest))
             }

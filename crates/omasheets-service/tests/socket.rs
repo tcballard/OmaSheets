@@ -99,9 +99,7 @@ fn the_cli_drives_the_service_through_the_socket_with_a_session_token() {
     let sheet = summary["response"]["sheets"][0]["id"].as_str().unwrap();
     for command in [
         format!(r#"{{"command":"add_columns","sheet":"{sheet}","count":1,"at":0}}"#),
-        format!(
-            r#"{{"command":"add_rows","sheet":"{sheet}","count":1,"at":0,"table":null}}"#
-        ),
+        format!(r#"{{"command":"add_rows","sheet":"{sheet}","count":1,"at":0,"table":null}}"#),
         format!(
             r#"{{"command":"set_value","sheet":"{sheet}","a1":"A1","value":{{"type":"text","value":"portable"}}}}"#
         ),

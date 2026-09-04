@@ -139,7 +139,10 @@ pub enum FormulaError {
     /// A structured reference named a table absent from the parse context.
     UnknownTable(String),
     /// A structured reference named a column absent from its table.
-    UnknownTableColumn { table: String, column: String },
+    UnknownTableColumn {
+        table: String,
+        column: String,
+    },
     /// A structured reference is well-delimited but outside the supported
     /// `Column`, `@Column`, `#Headers`, `#Data`, `#All`, or column-span forms.
     InvalidStructuredReference(String),
@@ -4270,9 +4273,7 @@ fn structured_expression(
                 .map_or((columns, columns), |(first, last)| (first, last));
             (rows, first, last)
         } else {
-            let (first, last) = compound
-                .split_once("]:[")
-                .ok_or_else(invalid)?;
+            let (first, last) = compound.split_once("]:[").ok_or_else(invalid)?;
             (Rows::Data, first, last)
         }
     } else {

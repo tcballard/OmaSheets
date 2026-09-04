@@ -59,6 +59,11 @@ jobs:
         run: |
           rustup toolchain install 1.88.0 --profile minimal --no-self-update
           rustup default 1.88.0
+          rustup component add --toolchain 1.88.0 clippy rustfmt
+      - name: Enforce Rust formatting and lints
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build and test the isolated corpus scorer
         run: |
           cargo test --workspace --locked --release

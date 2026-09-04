@@ -1,11 +1,11 @@
+use arrow_array::{Array, BooleanArray, Float64Array, StringArray};
 use omasheets_core::{
     Actor, ActorKind, CellValue, ColumnType, Command, InferredColumnType, Literal, Severity,
 };
-use arrow_array::{Array, BooleanArray, Float64Array, StringArray};
 use omasheets_service::{Request, Response, Service, ServiceError};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-use std::path::{Path, PathBuf};
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_document() -> PathBuf {
@@ -431,10 +431,7 @@ fn one_api_drives_the_whole_branch_workflow() {
     assert_eq!(summary.sheets[0].cells, 2);
     assert_eq!(summary.sheets[0].column_types.len(), 2);
     assert_eq!(summary.sheets[0].column_types[0].position, 0);
-    assert_eq!(
-        summary.sheets[0].column_types[0].declared,
-        ColumnType::Any
-    );
+    assert_eq!(summary.sheets[0].column_types[0].declared, ColumnType::Any);
     assert_eq!(
         summary.sheets[0].column_types[0].inferred,
         InferredColumnType::Boolean
@@ -626,9 +623,7 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
         sheet,
         output: output.clone(),
     });
-    assert!(
-        matches!(refused, Err(ServiceError { ref code, .. }) if code == "output_exists")
-    );
+    assert!(matches!(refused, Err(ServiceError { ref code, .. }) if code == "output_exists"));
     assert_eq!(
         std::fs::read_to_string(&output).unwrap(),
         "\"hello, \"\"world\"\"\",,2,4\r\n=not-a-formula,TRUE,,5"
@@ -703,21 +698,32 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
     assert_eq!(manifest.columns[2].inferred, InferredColumnType::Number);
     assert_eq!(manifest.formula_cells, 2);
     assert_eq!(manifest.error_cells_as_null, 0);
-    let mut reader = ParquetRecordBatchReaderBuilder::try_new(
-        std::fs::File::open(&parquet).unwrap(),
-    )
-    .unwrap()
-    .build()
-    .unwrap();
+    let mut reader =
+        ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(&parquet).unwrap())
+            .unwrap()
+            .build()
+            .unwrap();
     let batch = reader.next().unwrap().unwrap();
     assert_eq!(batch.num_rows(), 2);
     assert_eq!(batch.schema().field(0).name(), "A");
-    let text = batch.column(0).as_any().downcast_ref::<StringArray>().unwrap();
+    let text = batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
     assert_eq!(text.value(0), "hello, \"world\"");
-    let flags = batch.column(1).as_any().downcast_ref::<BooleanArray>().unwrap();
+    let flags = batch
+        .column(1)
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .unwrap();
     assert!(flags.is_null(0));
     assert!(flags.value(1));
-    let numbers = batch.column(2).as_any().downcast_ref::<Float64Array>().unwrap();
+    let numbers = batch
+        .column(2)
+        .as_any()
+        .downcast_ref::<Float64Array>()
+        .unwrap();
     assert_eq!(numbers.value(0), 2.0);
     assert!(numbers.is_null(1));
     assert!(reader.next().is_none());
@@ -753,14 +759,9 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
         sheet: sheet_id.to_string(),
         output: oversized.clone(),
     });
-    assert!(
-        matches!(refused, Err(ServiceError { ref code, .. }) if code == "field_too_large")
-    );
+    assert!(matches!(refused, Err(ServiceError { ref code, .. }) if code == "field_too_large"));
     assert!(!oversized.exists(), "failed export must not leave output");
-    let part_prefix = format!(
-        ".{}.",
-        oversized.file_name().unwrap().to_string_lossy()
-    );
+    let part_prefix = format!(".{}.", oversized.file_name().unwrap().to_string_lossy());
     assert!(
         std::fs::read_dir(oversized.parent().unwrap())
             .unwrap()
@@ -798,24 +799,42 @@ fn parquet_export_refuses_mixed_columns_without_creating_output() {
         &path,
         None,
         human("tom"),
-        Command::AddSheet { name: "Data".into() },
+        Command::AddSheet {
+            name: "Data".into(),
+        },
     )
     .unwrap();
     let sheet = match service
-        .handle(Request::Document { path: path.clone(), branch: None })
+        .handle(Request::Document {
+            path: path.clone(),
+            branch: None,
+        })
         .unwrap()
     {
         Response::Document(summary) => summary.sheets[0].id,
         other => panic!("{other:?}"),
     };
     for command in [
-        Command::AddColumns { sheet, count: 1, at: 0 },
-        Command::AddRows { sheet, count: 2, at: 0, table: None },
-        Command::SetValue {
-            sheet, a1: "A1".into(), value: Literal::Number(1.0),
+        Command::AddColumns {
+            sheet,
+            count: 1,
+            at: 0,
+        },
+        Command::AddRows {
+            sheet,
+            count: 2,
+            at: 0,
+            table: None,
         },
         Command::SetValue {
-            sheet, a1: "A2".into(), value: Literal::Text("one".into()),
+            sheet,
+            a1: "A1".into(),
+            value: Literal::Number(1.0),
+        },
+        Command::SetValue {
+            sheet,
+            a1: "A2".into(),
+            value: Literal::Text("one".into()),
         },
     ] {
         append(&mut service, &path, None, human("tom"), command).unwrap();
@@ -906,7 +925,10 @@ fn xlsx_import_is_bounded_replayable_and_never_overwrites() {
     assert_eq!(manifest.format, "omasheets-native-v1");
     assert_eq!(manifest.date_system, "1900");
     assert_eq!(manifest.sheets.len(), 1);
-    assert_eq!((manifest.sheets[0].rows, manifest.sheets[0].columns), (3, 2));
+    assert_eq!(
+        (manifest.sheets[0].rows, manifest.sheets[0].columns),
+        (3, 2)
+    );
     assert_eq!(manifest.occupied_rectangle_cells, 6);
     assert_eq!(manifest.value_cells_imported, 5);
     assert_eq!(manifest.formula_cells_observed, 2);
@@ -958,9 +980,7 @@ fn xlsx_import_is_bounded_replayable_and_never_overwrites() {
         actor: human("tom"),
         name: None,
     });
-    assert!(
-        matches!(refused, Err(ServiceError { ref code, .. }) if code == "output_exists")
-    );
+    assert!(matches!(refused, Err(ServiceError { ref code, .. }) if code == "output_exists"));
     service.close_all().unwrap();
     let _ = std::fs::remove_file(source);
     for suffix in ["", "-wal", "-shm"] {

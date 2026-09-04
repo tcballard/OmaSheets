@@ -555,9 +555,7 @@ impl Operation {
                 column: *column,
             }],
             Operation::SetComputedColumn {
-                table,
-                formulas,
-                ..
+                table, formulas, ..
             } => {
                 let mut touches = vec![Touch::Table { table: *table }];
                 touches.extend(
@@ -1337,16 +1335,13 @@ impl Document {
 
     pub fn column_type(&self, sheet: SheetId, column: ColumnId) -> Option<ColumnType> {
         let sheet = self.sheets.get(&sheet)?;
-        sheet
-            .column_ordinals
-            .contains_key(&column)
-            .then(|| {
-                sheet
-                    .column_types
-                    .get(&column)
-                    .copied()
-                    .unwrap_or(ColumnType::Any)
-            })
+        sheet.column_ordinals.contains_key(&column).then(|| {
+            sheet
+                .column_types
+                .get(&column)
+                .copied()
+                .unwrap_or(ColumnType::Any)
+        })
     }
 
     /// Infers a column's current value type without coercing or mutating it.
@@ -1919,7 +1914,8 @@ impl Document {
             && !table_bindings.iter().any(|(_, id)| *id == current)
         {
             table_bindings.push((self.tables[&current].name.clone(), current));
-            table_bindings.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
+            table_bindings
+                .sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
         }
         Ok(CompiledFormula {
             source: source.to_string(),
@@ -2040,26 +2036,25 @@ impl Document {
             .iter()
             .map(|(id, ordinal)| (*ordinal, *id))
             .collect();
-        let references = view_references
-            .into_iter()
-            .map(|view| {
-                let target = by_ordinal[&view.sheet];
-                let state = &self.sheets[&target];
-                let row = *state
-                    .rows
-                    .get(view.row as usize)
-                    .ok_or_else(|| ApplyError::ReferenceOutOfView((view.row + 1).to_string()))?;
-                let column = *state
-                    .columns
-                    .get(view.column as usize)
-                    .ok_or_else(|| ApplyError::ReferenceOutOfView((view.column + 1).to_string()))?;
-                Ok(CellRef {
-                    sheet: target,
-                    row,
-                    column,
+        let references =
+            view_references
+                .into_iter()
+                .map(|view| {
+                    let target = by_ordinal[&view.sheet];
+                    let state = &self.sheets[&target];
+                    let row = *state.rows.get(view.row as usize).ok_or_else(|| {
+                        ApplyError::ReferenceOutOfView((view.row + 1).to_string())
+                    })?;
+                    let column = *state.columns.get(view.column as usize).ok_or_else(|| {
+                        ApplyError::ReferenceOutOfView((view.column + 1).to_string())
+                    })?;
+                    Ok(CellRef {
+                        sheet: target,
+                        row,
+                        column,
+                    })
                 })
-            })
-            .collect::<Result<Vec<_>, ApplyError>>()?;
+                .collect::<Result<Vec<_>, ApplyError>>()?;
         let mut rebound = formula.clone();
         rebound.references = references;
         Ok(rebound)

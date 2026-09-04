@@ -801,8 +801,7 @@ fn import_ranges_with_names(
 }
 
 fn range_extent(end: Option<(u32, u32)>) -> (usize, usize) {
-    end
-        .map(|(row, column)| (row as usize + 1, column as usize + 1))
+    end.map(|(row, column)| (row as usize + 1, column as usize + 1))
         .unwrap_or((0, 0))
 }
 
@@ -1038,7 +1037,10 @@ mod tests {
         );
         assert_eq!(imported.parity().stored_values_matched, 3);
         assert_eq!(imported.parity().stored_values_mismatched, 0);
-        assert_eq!((imported.sheets[0].rows, imported.sheets[0].columns), (3, 3));
+        assert_eq!(
+            (imported.sheets[0].rows, imported.sheets[0].columns),
+            (3, 3)
+        );
         assert_eq!(imported.source_cells().len(), 5);
         let formula = imported
             .source_cells()
