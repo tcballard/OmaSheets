@@ -61,6 +61,9 @@ in the [`v0.1.0 native release gate`](docs/V0.1-RELEASE.md).
 The native service can also convert a bounded `.xlsx` source into a new
 replayable `.omasheets` document. It never replaces an output file and returns
 a loss manifest; this is an alpha import path, not a full-fidelity Excel claim.
+The same authenticated service binary ships inside the verified native bundle;
+the compiler-free Arch acceptance runs its complete local review workflow after
+installation.
 
 ## Install on Omarchy
 

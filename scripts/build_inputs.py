@@ -19,7 +19,7 @@ import subprocess
 import sys
 
 DEFAULT_PACKAGES = (
-    "gcc", "glibc", "cmake", "make", "gtk3", "libreoffice-fresh", "libreoffice-fresh-sdk",
+    "gcc", "glibc", "cmake", "make", "rust", "gtk3", "libreoffice-fresh", "libreoffice-fresh-sdk",
 )
 
 

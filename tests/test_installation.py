@@ -69,6 +69,7 @@ class InstallationTests(unittest.TestCase):
         self.assertTrue(result["changed"])
         self.assertTrue(self.paths.launcher.is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-window").is_file())
+        self.assertTrue((self.paths.app / "bin/omasheets-service").is_file())
         mcp = json.loads((self.paths.codex_plugin / ".mcp.json").read_text())
         self.assertEqual(mcp["mcpServers"]["omasheets"]["command"], str(self.paths.launcher))
         marketplace = json.loads(self.paths.codex_marketplace.read_text())

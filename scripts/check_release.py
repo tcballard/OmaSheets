@@ -82,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         "src/omasheets/native_bundle.py", ".github/workflows/release.yml",
         "src/omasheets/release_signing.py", "src/omasheets/bounded_process.py",
         "scripts/panel_status.py", "scripts/build_inputs.py",
+        "scripts/check_native_service_install.py",
         "scripts/verify_release_signature.py", "docs/RELEASE.md",
         "native/libreofficekit/CMakeLists.txt", "plugins/omasheets/.codex-plugin/plugin.json",
     ):
@@ -98,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     assert "cmake" not in install_job.split("      - name: Install through", 1)[0]
     assert "OMASHEETS_NATIVE_BUNDLE_PATH" in install_job
     assert "Exercise the installed agentic workbook loop" in workflow
+    assert "Exercise the installed native service workflow" in workflow
     assert '"agent-session", "call", "query_workbook"' in workflow
     assert "omasheets://session" in (ROOT / "README.md").read_text()
     assert "Ask Agent" in (ROOT / "README.md").read_text()

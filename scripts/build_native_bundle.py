@@ -10,6 +10,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -88,6 +89,25 @@ def main(argv: list[str] | None = None) -> int:
     stage_context = tempfile.TemporaryDirectory(prefix="omasheets-native-stage-")
     stage = Path(stage_context.name)
     try:
+        rust_target = build / "rust-target"
+        rust_environment = os.environ.copy()
+        rust_environment["CARGO_TARGET_DIR"] = str(rust_target)
+        rust_environment["CARGO_PROFILE_RELEASE_STRIP"] = "symbols"
+        rust_environment["OMASHEETS_SOURCE_SHA256"] = identity["sha256"]
+        rust_environment["OMASHEETS_SOURCE_COMMIT"] = identity["commit"]
+        remaps = (
+            f"--remap-path-prefix={ROOT}=/omasheets "
+            f"--remap-path-prefix={build}=/omasheets-build"
+        )
+        rust_environment["RUSTFLAGS"] = " ".join(
+            part for part in (rust_environment.get("RUSTFLAGS", ""), remaps) if part
+        )
+        subprocess.run(
+            ["cargo", "build", "--locked", "--release", "-p", "omasheets-service"],
+            cwd=ROOT,
+            env=rust_environment,
+            check=True,
+        )
         subprocess.run([
             "cmake", "-S", str(ROOT / "native/libreofficekit"), "-B", str(build),
             "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={stage}",
@@ -96,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         ], check=True)
         subprocess.run(["cmake", "--build", str(build), "--parallel", "2"], check=True)
         subprocess.run(["cmake", "--install", str(build)], check=True)
+        shutil.copy2(rust_target / "release/omasheets-service", stage / "bin/omasheets-service")
         files = {f"bin/{name}": sha256(stage / "bin" / name) for name in NATIVE_EXECUTABLES}
         manifest = {
             "schema": 1,
@@ -104,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
             "architecture": normalized_architecture(),
             "source": identity,
             "build_contract": "native/libreofficekit/CMakeLists.txt",
+            "rust_build_contract": ["Cargo.lock", "crates/omasheets-service/Cargo.toml"],
             "files": files,
         }
         if build_inputs is not None:
