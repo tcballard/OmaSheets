@@ -18,10 +18,16 @@ grid, an agent bridge and a person's shell can share.
 - **`Request` and `Response` are plain serialisable enums.** Every request
   names the document by path, so one service can hold several documents
   open. The requests are: create, open, close, document summary, a bounded
-  page of cells, one cell, lineage, append a command, branch, check, diff,
-  merge, bounded XLSX import, CSV export and snapshot. `Command` from the
+  page of cells, one cell, lineage, append a command or atomic command batch,
+  branch, check, diff, merge, bounded XLSX import, CSV export and snapshot. `Command` from the
   event core is serialisable so an append carries the same command the library
-  takes.
+  takes. `append_batch` accepts 1–1,000 commands in `commands`, with the same
+  `path`, optional `branch` and `actor` fields as `append`. All commands stage
+  against one document clone and commit in one SQLite transaction; a rejected
+  command leaves both cached and durable state unchanged. The response kind is
+  `appended_batch`, containing the ordered `events`. Actor restrictions are
+  identical to single-command appends. This API does not itself add clipboard
+  UI or undo.
 - **`Service` is the in-process form.** The CLI, tests and any embedding
   call `Service::handle` directly; the socket server wraps the same struct
   behind a mutex. Errors are `ServiceError { code, message, details }` with

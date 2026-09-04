@@ -33,6 +33,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub const MAX_CELL_PAGE: usize = 10_000;
 /// Largest rectangular grid page one `grid_page` request may inspect.
 pub const MAX_GRID_PAGE_CELLS: usize = 10_000;
+/// Largest atomic sequence accepted by `append_batch`.
+pub const MAX_COMMAND_BATCH: usize = 1_000;
 /// Largest native CSV projection, checked before the output file is created.
 pub const MAX_CSV_EXPORT_CELLS: usize = 10_000_000;
 /// Largest native XLSX projection, checked before the package is created.
@@ -121,6 +123,14 @@ pub enum Request {
         branch: Option<String>,
         actor: Actor,
         command: Command,
+    },
+    /// Append all commands atomically; actor restrictions match `append`.
+    AppendBatch {
+        path: PathBuf,
+        #[serde(default)]
+        branch: Option<String>,
+        actor: Actor,
+        commands: Vec<Command>,
     },
     Branch {
         path: PathBuf,
@@ -370,6 +380,9 @@ pub enum Response {
     Cell(CellReport),
     Lineage(Option<Lineage>),
     Appended(Event),
+    AppendedBatch {
+        events: Vec<Event>,
+    },
     Branched {
         branch: String,
         id: String,
@@ -1862,6 +1875,30 @@ impl Service {
                 }
                 let event = store.append(branch, actor, now, command)?;
                 Ok(Response::Appended(event))
+            }
+            Request::AppendBatch {
+                path,
+                branch,
+                actor,
+                commands,
+            } => {
+                check_actor(&actor)?;
+                if commands.is_empty() || commands.len() > MAX_COMMAND_BATCH {
+                    return Err(ServiceError::new(
+                        "invalid_command_batch",
+                        format!("a batch must contain 1 to {MAX_COMMAND_BATCH} commands"),
+                    ));
+                }
+                let store = self.store(&path)?;
+                let (branch_name, branch) = Self::branch(store, branch.as_deref())?;
+                if actor.kind == ActorKind::Agent && branch_name == MAIN_BRANCH {
+                    return Err(ServiceError::new(
+                        "agent_on_main",
+                        "agents append on their own branches; main changes through a human-approved merge",
+                    ));
+                }
+                let events = store.append_batch(branch, actor, now, commands)?;
+                Ok(Response::AppendedBatch { events })
             }
             Request::Branch {
                 path,
