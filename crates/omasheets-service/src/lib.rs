@@ -31,6 +31,8 @@ pub const MAX_CELL_PAGE: usize = 10_000;
 pub const MAX_GRID_PAGE_CELLS: usize = 10_000;
 /// Largest native CSV projection, checked before the output file is created.
 pub const MAX_CSV_EXPORT_CELLS: usize = 10_000_000;
+/// Largest native XLSX projection, checked before the package is created.
+pub const MAX_XLSX_EXPORT_CELLS: usize = 10_000_000;
 /// Largest occupied rectangle accepted into one native alpha document.
 pub const MAX_NATIVE_IMPORT_CELLS: usize = 100_000;
 /// Largest source package read by the local import endpoint.
@@ -148,6 +150,15 @@ pub enum Request {
         sheet: String,
         output: PathBuf,
     },
+    /// Project every native sheet to a new XLSX package. Supported formulas
+    /// are retained; formulas whose stable bindings cannot be represented are
+    /// flattened to their calculated value and counted in the manifest.
+    ExportXlsx {
+        path: PathBuf,
+        #[serde(default)]
+        branch: Option<String>,
+        output: PathBuf,
+    },
     /// Convert one bounded XLSX package into a new replayable native file.
     /// The destination is never overwritten.
     ImportXlsx {
@@ -252,6 +263,27 @@ pub struct CsvExportManifest {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct XlsxExportSheetManifest {
+    pub id: SheetId,
+    pub name: String,
+    pub rows: usize,
+    pub columns: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct XlsxExportManifest {
+    pub format: String,
+    pub output: PathBuf,
+    pub branch: String,
+    pub document_digest: String,
+    pub sheets: Vec<XlsxExportSheetManifest>,
+    pub formula_cells: usize,
+    pub formula_cells_preserved: usize,
+    pub formula_cells_flattened: usize,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImportedSheetManifest {
     pub id: SheetId,
     pub name: String,
@@ -310,6 +342,7 @@ pub enum Response {
     Diff(BranchDiff),
     Merged(MergeReport),
     ExportedCsv(CsvExportManifest),
+    ExportedXlsx(XlsxExportManifest),
     ImportedXlsx(XlsxImportManifest),
     Snapshot {
         digest: String,
@@ -552,6 +585,289 @@ fn write_csv_field(writer: &mut impl Write, text: &str) -> io::Result<()> {
         writer.write_all(b"\"")
     } else {
         writer.write_all(text.as_bytes())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct XlsxExportStats {
+    formula_cells: usize,
+    formula_cells_preserved: usize,
+    formula_cells_flattened: usize,
+}
+
+fn xml_text(value: &str) -> Result<String, ServiceError> {
+    if value.chars().any(|character| {
+        !matches!(
+            character,
+            '\u{9}' | '\u{A}' | '\u{D}' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}'
+                | '\u{10000}'..='\u{10FFFF}'
+        )
+    }) {
+        return Err(ServiceError::new(
+            "unsupported_xml_text",
+            "XLSX cannot represent XML control characters",
+        ));
+    }
+    Ok(value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;"))
+}
+
+fn valid_xlsx_sheet_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().count() <= 31
+        && !name.chars().any(|character| "[]:*?/\\".contains(character))
+        && !name.starts_with('\'')
+        && !name.ends_with('\'')
+}
+
+fn xlsx_error(error: impl fmt::Display) -> ServiceError {
+    ServiceError::new("xlsx_export", error.to_string())
+}
+
+fn xlsx_formula_is_portable(
+    document: &Document,
+    cell: CellRef,
+    formula: &omasheets_core::CompiledFormula,
+) -> bool {
+    formula.current_table.is_none()
+        && formula.table_bindings.is_empty()
+        && document
+            .compile_formula(cell.sheet, &formula.source)
+            .is_ok_and(|current| current.references == formula.references)
+}
+
+fn write_xlsx_value(
+    writer: &mut impl Write,
+    address: &str,
+    value: &CellValue,
+    formula: Option<&str>,
+) -> Result<(), ServiceError> {
+    let formula = formula
+        .map(|source| source.strip_prefix('=').unwrap_or(source))
+        .map(xml_text)
+        .transpose()?;
+    let formula_xml = formula
+        .as_deref()
+        .map(|source| format!("<f>{source}</f>"))
+        .unwrap_or_default();
+    let address = xml_text(address)?;
+    match value {
+        CellValue::Blank if formula.is_none() => Ok(()),
+        CellValue::Blank => write!(writer, "<c r=\"{address}\">{formula_xml}</c>")
+            .map_err(export_io_error),
+        CellValue::Number(number) => write!(
+            writer,
+            "<c r=\"{address}\">{formula_xml}<v>{}</v></c>",
+            if *number == 0.0 { 0.0 } else { *number },
+        )
+        .map_err(export_io_error),
+        CellValue::Boolean(flag) => write!(
+            writer,
+            "<c r=\"{address}\" t=\"b\">{formula_xml}<v>{}</v></c>",
+            if *flag { 1 } else { 0 },
+        )
+        .map_err(export_io_error),
+        CellValue::Text(text) if formula.is_some() => write!(
+            writer,
+            "<c r=\"{address}\" t=\"str\">{formula_xml}<v>{}</v></c>",
+            xml_text(text)?,
+        )
+        .map_err(export_io_error),
+        CellValue::Text(text) => write!(
+            writer,
+            "<c r=\"{address}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">{}</t></is></c>",
+            xml_text(text)?,
+        )
+        .map_err(export_io_error),
+        CellValue::Error(error)
+            if matches!(
+                error.as_str(),
+                "#DIV/0!" | "#REF!" | "#N/A" | "#VALUE!" | "#NUM!" | "#NAME?" | "#NULL!"
+            ) => write!(
+                writer,
+                "<c r=\"{address}\" t=\"e\">{formula_xml}<v>{}</v></c>",
+                xml_text(error)?,
+            )
+            .map_err(export_io_error),
+        CellValue::Error(error) => write!(
+            writer,
+            "<c r=\"{address}\" t=\"str\">{formula_xml}<v>{}</v></c>",
+            xml_text(error)?,
+        )
+        .map_err(export_io_error),
+    }
+}
+
+fn start_xlsx_file(
+    writer: &mut zip::ZipWriter<std::fs::File>,
+    name: &str,
+) -> Result<(), ServiceError> {
+    writer
+        .start_file(
+            name,
+            zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated),
+        )
+        .map_err(xlsx_error)
+}
+
+fn export_xlsx(
+    document: &Document,
+    output: &Path,
+) -> Result<(PathBuf, Vec<XlsxExportSheetManifest>, XlsxExportStats), ServiceError> {
+    let output = canonical(output)?;
+    if output.exists() {
+        return Err(ServiceError::new("output_exists", "XLSX output already exists"));
+    }
+    let mut sheets = Vec::with_capacity(document.sheets().len());
+    let mut total_cells = 0_usize;
+    let mut folded_names = std::collections::BTreeSet::new();
+    for sheet in document.sheets() {
+        let name = document.sheet_name(*sheet).unwrap_or("");
+        if !valid_xlsx_sheet_name(name) || !folded_names.insert(name.to_lowercase()) {
+            return Err(ServiceError::new(
+                "unsupported_sheet_name",
+                format!("sheet name cannot be represented in XLSX: {name:?}"),
+            ));
+        }
+        xml_text(name)?;
+        let rows = document.rows(*sheet).map_or(0, <[_]>::len);
+        let columns = document.columns(*sheet).map_or(0, <[_]>::len);
+        if rows > 1_048_576 || columns > 16_384 {
+            return Err(ServiceError::new(
+                "export_too_large",
+                "XLSX sheets may contain at most 1,048,576 rows and 16,384 columns",
+            ));
+        }
+        total_cells = total_cells
+            .checked_add(rows.checked_mul(columns).ok_or_else(|| {
+                ServiceError::new("export_too_large", "XLSX dimensions overflow")
+            })?)
+            .ok_or_else(|| ServiceError::new("export_too_large", "XLSX dimensions overflow"))?;
+        sheets.push(XlsxExportSheetManifest {
+            id: *sheet,
+            name: name.into(),
+            rows,
+            columns,
+        });
+    }
+    if sheets.is_empty() {
+        return Err(ServiceError::new(
+            "empty_workbook",
+            "XLSX export needs at least one sheet",
+        ));
+    }
+    if total_cells > MAX_XLSX_EXPORT_CELLS {
+        return Err(ServiceError::new(
+            "export_too_large",
+            format!("XLSX export may cover at most {MAX_XLSX_EXPORT_CELLS} cells"),
+        ));
+    }
+
+    let parent = output.parent().expect("canonical output has a parent");
+    let file_name = output.file_name().expect("canonical output has a file name").to_string_lossy();
+    let mut temporary = None;
+    for _ in 0..16 {
+        let nonce = EXPORT_NONCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(".{file_name}.{}.{}.part", std::process::id(), nonce));
+        match OpenOptions::new().write(true).create_new(true).open(&candidate) {
+            Ok(file) => {
+                temporary = Some((candidate, file));
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(export_io_error(error)),
+        }
+    }
+    let (temporary_path, file) = temporary
+        .ok_or_else(|| ServiceError::new("export_io", "could not allocate a temporary XLSX file"))?;
+
+    let written = (|| -> Result<XlsxExportStats, ServiceError> {
+        let mut writer = zip::ZipWriter::new(file);
+        start_xlsx_file(&mut writer, "[Content_Types].xml")?;
+        write!(writer, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>").map_err(export_io_error)?;
+        for index in 1..=sheets.len() {
+            write!(writer, "<Override PartName=\"/xl/worksheets/sheet{index}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>").map_err(export_io_error)?;
+        }
+        writer.write_all(b"</Types>").map_err(export_io_error)?;
+
+        start_xlsx_file(&mut writer, "_rels/.rels")?;
+        writer.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>").map_err(export_io_error)?;
+
+        start_xlsx_file(&mut writer, "xl/workbook.xml")?;
+        writer.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><workbookPr date1904=\"0\"/><sheets>").map_err(export_io_error)?;
+        for (index, sheet) in sheets.iter().enumerate() {
+            write!(writer, "<sheet name=\"{}\" sheetId=\"{}\" r:id=\"rId{}\"/>", xml_text(&sheet.name)?, index + 1, index + 1).map_err(export_io_error)?;
+        }
+        writer.write_all(b"</sheets><calcPr calcMode=\"auto\" fullCalcOnLoad=\"1\" forceFullCalc=\"1\"/></workbook>").map_err(export_io_error)?;
+
+        start_xlsx_file(&mut writer, "xl/_rels/workbook.xml.rels")?;
+        writer.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">").map_err(export_io_error)?;
+        for index in 1..=sheets.len() {
+            write!(writer, "<Relationship Id=\"rId{index}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet{index}.xml\"/>").map_err(export_io_error)?;
+        }
+        writer.write_all(b"</Relationships>").map_err(export_io_error)?;
+
+        let mut stats = XlsxExportStats::default();
+        for (sheet_index, sheet_manifest) in sheets.iter().enumerate() {
+            start_xlsx_file(&mut writer, &format!("xl/worksheets/sheet{}.xml", sheet_index + 1))?;
+            writer.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>").map_err(export_io_error)?;
+            let rows = document.rows(sheet_manifest.id).unwrap_or(&[]);
+            let columns = document.columns(sheet_manifest.id).unwrap_or(&[]);
+            for (row_index, row) in rows.iter().enumerate() {
+                let mut row_open = false;
+                for (column_index, column) in columns.iter().enumerate() {
+                    let cell = CellRef { sheet: sheet_manifest.id, row: *row, column: *column };
+                    let Some(state) = document.cell(cell) else { continue };
+                    if !row_open {
+                        write!(writer, "<row r=\"{}\">", row_index + 1).map_err(export_io_error)?;
+                        row_open = true;
+                    }
+                    let value = document.value(cell);
+                    let formula = match &state.input {
+                        CellInput::Formula { formula } => {
+                            stats.formula_cells += 1;
+                            if xlsx_formula_is_portable(document, cell, formula) {
+                                stats.formula_cells_preserved += 1;
+                                Some(formula.source.as_str())
+                            } else {
+                                stats.formula_cells_flattened += 1;
+                                None
+                            }
+                        }
+                        CellInput::Value { .. } => None,
+                    };
+                    write_xlsx_value(&mut writer, &a1(row_index as u32, column_index as u32), &value, formula)?;
+                }
+                if row_open {
+                    writer.write_all(b"</row>").map_err(export_io_error)?;
+                }
+            }
+            writer.write_all(b"</sheetData></worksheet>").map_err(export_io_error)?;
+        }
+        let file = writer.finish().map_err(xlsx_error)?;
+        file.sync_all().map_err(export_io_error)?;
+        Ok(stats)
+    })();
+    let stats = match written {
+        Ok(stats) => stats,
+        Err(error) => {
+            let _ = std::fs::remove_file(&temporary_path);
+            return Err(error);
+        }
+    };
+    let linked = std::fs::hard_link(&temporary_path, &output);
+    let _ = std::fs::remove_file(&temporary_path);
+    match linked {
+        Ok(()) => Ok((output, sheets, stats)),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            Err(ServiceError::new("output_exists", "XLSX output already exists"))
+        }
+        Err(error) => Err(export_io_error(error)),
     }
 }
 
@@ -1328,6 +1644,33 @@ impl Service {
                         "formula_source_omitted".into(),
                         "styles_tables_checks_lineage_omitted".into(),
                         "potential_formula_injection_cells_are_not_rewritten".into(),
+                    ],
+                }))
+            }
+            Request::ExportXlsx {
+                path,
+                branch,
+                output,
+            } => {
+                let store = self.store(&path)?;
+                let (branch_name, branch) = Self::branch(store, branch.as_deref())?;
+                let document = store.document(branch)?;
+                let document_digest = document.digest();
+                let (output, sheets, stats) = export_xlsx(document, &output)?;
+                Ok(Response::ExportedXlsx(XlsxExportManifest {
+                    format: "xlsx-2007".into(),
+                    output,
+                    branch: branch_name,
+                    document_digest,
+                    sheets,
+                    formula_cells: stats.formula_cells,
+                    formula_cells_preserved: stats.formula_cells_preserved,
+                    formula_cells_flattened: stats.formula_cells_flattened,
+                    limitations: vec![
+                        "styles_and_number_formats_omitted".into(),
+                        "tables_checks_watches_lineage_and_branch_history_omitted".into(),
+                        "formulas_with_table_or_stale_positional_bindings_flattened".into(),
+                        "date_serials_exported_as_unformatted_1900_system_numbers".into(),
                     ],
                 }))
             }

@@ -54,12 +54,20 @@ grid, an agent bridge and a person's shell can share.
   the native manifest and checked against the bundle's source identity through
   `--provenance`. The compiler-free Arch acceptance drives the installed
   binary through import, edit, branch, check, refused and accepted merge, CSV
-  export, close and digest-identical reopen.
+  and XLSX export, close and digest-identical reopen.
 - **Native CSV export is a projection.** `export_csv` streams one stable sheet
   in current view order, refuses to replace an existing destination and returns
   a manifest tied to the branch and document digest. Formula source, styles,
   tables, checks and lineage are explicitly reported as omitted. Potential
   spreadsheet-formula injection text is counted but never silently rewritten.
+- **Native XLSX export is a bounded projection.** `export_xlsx` writes every
+  native sheet into a new 1900-date-system package without replacing an
+  existing destination. A1 formulas with current sheet bindings are retained
+  with cached results when reparsing their source still resolves to the same
+  stable cells. Table-bound formulas and formulas whose sheet, row or column
+  changes made their original text stale are flattened and counted, because
+  emitting stale source would silently change their meaning. Styles, formats,
+  tables, checks, watches, lineage and branch history are named omissions.
 - **Native XLSX import is a bounded conversion.** The source package is limited
   to 50 MiB, 64 sheets, 100,000 formulas and 100,000 cells across occupied
   sheet rectangles. The service stages semantic commands against a cloned

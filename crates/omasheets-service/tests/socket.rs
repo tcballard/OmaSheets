@@ -126,6 +126,18 @@ fn the_cli_drives_the_service_through_the_socket_with_a_session_token() {
     assert_eq!(exported["response"]["kind"], "exported_csv");
     assert_eq!(exported["response"]["rows"], 1);
     assert_eq!(std::fs::read_to_string(csv).unwrap(), "portable");
+    let xlsx = server.runtime.join("plan.xlsx");
+    let (code, exported) = call(
+        &server,
+        &format!(
+            r#"{{"kind":"export_xlsx","path":"{path}","output":"{}"}}"#,
+            xlsx.display()
+        ),
+    );
+    assert_eq!(code, 0, "{exported}");
+    assert_eq!(exported["response"]["kind"], "exported_xlsx");
+    assert_eq!(exported["response"]["sheets"][0]["rows"], 1);
+    assert!(xlsx.is_file());
 
     // A refusal is a JSON error with a stable code and exit status 2.
     let (code, refused) = call(

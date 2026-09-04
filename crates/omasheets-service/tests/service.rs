@@ -3,7 +3,7 @@ use omasheets_core::{
 };
 use omasheets_service::{Request, Response, Service, ServiceError};
 use std::path::{Path, PathBuf};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn temp_document() -> PathBuf {
@@ -113,6 +113,7 @@ fn one_api_drives_the_whole_branch_workflow() {
         },
     )
     .unwrap();
+
     let sheet = sheet_of(&mut service, &path, None);
     let sheet_id = omasheets_core::SheetId(omasheets_core::ObjectId::parse(&sheet).unwrap());
     append(
@@ -529,6 +530,70 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
     )
     .unwrap();
 
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::AddSheet {
+            name: "Inputs".into(),
+        },
+    )
+    .unwrap();
+    let inputs = match service
+        .handle(Request::Document {
+            path: path.clone(),
+            branch: None,
+        })
+        .unwrap()
+    {
+        Response::Document(summary) => summary.sheets[1].id,
+        other => panic!("{other:?}"),
+    };
+    for command in [
+        Command::AddColumns {
+            sheet: inputs,
+            count: 1,
+            at: 0,
+        },
+        Command::AddRows {
+            sheet: inputs,
+            count: 1,
+            at: 0,
+            table: None,
+        },
+        Command::SetValue {
+            sheet: inputs,
+            a1: "A1".into(),
+            value: Literal::Number(5.0),
+        },
+    ] {
+        append(&mut service, &path, None, human("tom"), command).unwrap();
+    }
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::SetFormula {
+            sheet: sheet_id,
+            a1: "D2".into(),
+            source: "=Inputs!A1".into(),
+        },
+    )
+    .unwrap();
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::RenameSheet {
+            sheet: inputs,
+            name: "Renamed & safe".into(),
+        },
+    )
+    .unwrap();
+
     let exported = service
         .handle(Request::ExportCsv {
             path: path.clone(),
@@ -550,7 +615,7 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
     assert_eq!(manifest.limitations.len(), 3);
     assert_eq!(
         std::fs::read_to_string(&output).unwrap(),
-        "\"hello, \"\"world\"\"\",,2,4\r\n=not-a-formula,TRUE,,"
+        "\"hello, \"\"world\"\"\",,2,4\r\n=not-a-formula,TRUE,,5"
     );
 
     let refused = service.handle(Request::ExportCsv {
@@ -564,8 +629,54 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
     );
     assert_eq!(
         std::fs::read_to_string(&output).unwrap(),
-        "\"hello, \"\"world\"\"\",,2,4\r\n=not-a-formula,TRUE,,"
+        "\"hello, \"\"world\"\"\",,2,4\r\n=not-a-formula,TRUE,,5"
     );
+
+    let xlsx = path.with_extension("projected.xlsx");
+    let exported = service
+        .handle(Request::ExportXlsx {
+            path: path.clone(),
+            branch: None,
+            output: xlsx.clone(),
+        })
+        .unwrap();
+    let Response::ExportedXlsx(manifest) = exported else {
+        panic!("{exported:?}")
+    };
+    assert_eq!(manifest.format, "xlsx-2007");
+    assert_eq!(manifest.branch, "main");
+    assert_eq!(manifest.sheets.len(), 2);
+    assert_eq!(manifest.formula_cells, 2);
+    assert_eq!(manifest.formula_cells_preserved, 1);
+    assert_eq!(manifest.formula_cells_flattened, 1);
+    assert_eq!(manifest.limitations.len(), 4);
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(&xlsx).unwrap()).unwrap();
+    let mut workbook = String::new();
+    archive
+        .by_name("xl/workbook.xml")
+        .unwrap()
+        .read_to_string(&mut workbook)
+        .unwrap();
+    assert!(workbook.contains("Renamed &amp; safe"));
+    let mut worksheet = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .unwrap()
+        .read_to_string(&mut worksheet)
+        .unwrap();
+    assert!(worksheet.contains("<f>C1*2</f><v>4</v>"));
+    assert!(worksheet.contains("<c r=\"D2\"><v>5</v></c>"));
+    assert!(!worksheet.contains("Inputs!A1"));
+    drop(archive);
+    let refused = service.handle(Request::ExportXlsx {
+        path: path.clone(),
+        branch: None,
+        output: xlsx.clone(),
+    });
+    assert!(matches!(
+        refused,
+        Err(ServiceError { ref code, .. }) if code == "output_exists"
+    ));
 
     append(
         &mut service,
@@ -619,6 +730,57 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
 
     service.close_all().unwrap();
     let _ = std::fs::remove_file(output);
+    let _ = std::fs::remove_file(xlsx);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
+
+#[test]
+fn xlsx_export_rejects_unrepresentable_workbooks_before_creating_output() {
+    let path = temp_document();
+    let output = path.with_extension("xlsx");
+    let mut service = Service::new(|| 1);
+    service
+        .handle(Request::Create {
+            path: path.clone(),
+            name: "Export boundary".into(),
+            actor: human("tom"),
+        })
+        .unwrap();
+    let empty = service.handle(Request::ExportXlsx {
+        path: path.clone(),
+        branch: None,
+        output: output.clone(),
+    });
+    assert!(matches!(
+        empty,
+        Err(ServiceError { ref code, .. }) if code == "empty_workbook"
+    ));
+    assert!(!output.exists());
+
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::AddSheet {
+            name: "Not/Excel".into(),
+        },
+    )
+    .unwrap();
+    let invalid_name = service.handle(Request::ExportXlsx {
+        path: path.clone(),
+        branch: None,
+        output: output.clone(),
+    });
+    assert!(matches!(
+        invalid_name,
+        Err(ServiceError { ref code, .. }) if code == "unsupported_sheet_name"
+    ));
+    assert!(!output.exists());
+
+    service.close_all().unwrap();
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
     }
