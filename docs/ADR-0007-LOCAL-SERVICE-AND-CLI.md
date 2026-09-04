@@ -25,9 +25,11 @@ grid, an agent bridge and a person's shell can share.
   `path`, optional `branch` and `actor` fields as `append`. All commands stage
   against one document clone and commit in one SQLite transaction; a rejected
   command leaves both cached and durable state unchanged. The response kind is
-  `appended_batch`, containing the ordered `events`. Actor restrictions are
-  identical to single-command appends. This API does not itself add clipboard
-  UI or undo.
+  `appended_batch`, containing the ordered `events` and resulting `digest`.
+  An optional `expected_digest` rejects a stale batch before staging commands,
+  allowing grid paste and undo to refuse conflicting intervening edits.
+  Actor restrictions are
+  identical to single-command appends.
 - **`Service` is the in-process form.** The CLI, tests and any embedding
   call `Service::handle` directly; the socket server wraps the same struct
   behind a mutex. Errors are `ServiceError { code, message, details }` with

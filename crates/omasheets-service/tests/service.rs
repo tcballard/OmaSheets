@@ -117,6 +117,7 @@ fn batches_are_atomic_bounded_and_preserve_actor_restrictions() {
         branch: None,
         actor,
         commands,
+        expected_digest: None,
     };
     let add = || Command::AddSheet {
         name: "Sheet".into(),
@@ -153,8 +154,19 @@ fn batches_are_atomic_bounded_and_preserve_actor_restrictions() {
             ],
         ))
         .unwrap();
-    assert!(matches!(result, Response::AppendedBatch { ref events } if events.len() == 2));
+    assert!(matches!(result, Response::AppendedBatch { ref events, .. } if events.len() == 2));
     let after = summary(&mut service);
+    let stale = Request::AppendBatch {
+        path: path.clone(),
+        branch: None,
+        actor: human("tom"),
+        commands: vec![Command::AddSheet {
+            name: "Stale".into(),
+        }],
+        expected_digest: Some(before),
+    };
+    assert_eq!(service.handle(stale).unwrap_err().code, "document_changed");
+    assert_eq!(summary(&mut service).digest, after.digest);
     assert_eq!(after.sheets.len(), 2);
     service
         .handle(Request::Close { path: path.clone() })
