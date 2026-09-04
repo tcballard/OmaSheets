@@ -1,9 +1,9 @@
 # M0 exit review: native engine and corpus spike
 
-- Status: **Draft for the maintainer's go/no-go decision.** The measurements
-  below were taken on a hosted container, not on the eight-core x86 baseline
-  the roadmap declares. The decision is recorded at the end of this document
-  once the baseline numbers are pasted in.
+- Status: **Go approved by the maintainer.** The measurements below were taken
+  on a hosted container, not on the eight-core x86 baseline the roadmap
+  declares. That missing baseline remains release evidence to collect; it is
+  not represented as part of the approval.
 - Gate under review: `docs/ROADMAP.md`, "M0 — native engine and corpus
   spike". Targets: incremental recalculation below 10 ms p95 for one edit in
   a 100,000-formula document; full recalculation of one million simple
@@ -125,7 +125,7 @@ that uses them (29,000 formulas over one range).
   fixed before any M1 memory claim.
 - Cold start. All numbers are warm-process.
 
-## Draft recommendation
+## Recommendation
 
 **Go**, on the recalculation thesis specifically: the owned graph meets the
 incremental gate by a factor of about two on slower hardware, meets the
@@ -133,8 +133,8 @@ one-million re-evaluation gate by an order of magnitude, and opens more of
 the real corpus than the candidate library. Conditions the maintainer should
 attach to the decision:
 
-1. Paste baseline-hardware numbers into this document before recording the
-   decision.
+1. Paste baseline-hardware numbers into this document before making a public
+   v0.1.0 performance claim.
 2. Land shared range nodes so defined names stop inlining ranges, before
    any M1 memory target is claimed.
 3. Keep volatile functions excluded until ADR-0004's explicit-tick model is
@@ -158,6 +158,11 @@ output, and whether the process was pinned.
 
 ## Decision
 
-- Baseline numbers: _not yet recorded_
-- Decision: _pending_ (maintainer)
-- Date: _pending_
+- Baseline numbers: _not yet recorded; required before the v0.1.0 performance
+  claim and release gate can pass_
+- Decision: **Go** (maintainer)
+- Date: **2026-09-04**
+- Notes: The maintainer approved the native calculation-engine spike based on
+  the recorded hosted evidence and recommendation. This decision authorizes
+  continued native engineering; it does not relabel hosted measurements as the
+  declared baseline or waive the remaining release evidence.
