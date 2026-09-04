@@ -67,7 +67,7 @@ pub mod qobject {
 
         #[qinvokable]
         #[cxx_name = "copyRange"]
-        fn copy_range(self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) -> QString;
+        fn copy_range(self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) -> bool;
 
         #[qinvokable]
         #[cxx_name = "pasteCells"]
@@ -223,7 +223,7 @@ impl Default for GridModelRust {
 }
 
 impl qobject::GridModel {
-    pub fn copy_range(mut self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) -> QString {
+    pub fn copy_range(mut self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) -> bool {
         let result = (|| -> Result<String, String> {
             if row < 0 || column < 0 || rows <= 0 || columns <= 0
                 || rows.checked_mul(columns).is_none_or(|count| count > 1000)
@@ -254,9 +254,9 @@ impl qobject::GridModel {
             Ok(text) => {
                 let origin = serde_json::json!([row, column]).to_string();
                 qobject::write_grid_clipboard(&text.as_str().into(), &origin.as_str().into());
-                serde_json::to_string(&text).unwrap().as_str().into()
+                true
             }
-            Err(error) => { self.as_mut().set_source_status(error.as_str().into()); "null".into() }
+            Err(error) => { self.as_mut().set_source_status(error.as_str().into()); false }
         }
     }
 

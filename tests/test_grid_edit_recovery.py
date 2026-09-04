@@ -102,7 +102,7 @@ assert.equal(editor.text, '');
 assert.equal(editor.originalText, 'stored');
 assert.equal(saves, saved + 1);
 // Clipboard actions cannot replace a draft. Failed copies keep clipboard data.
-backend.copyRange = () => 'null';
+backend.copyRange = () => false;
 copySelection();
 assert.equal(systemClipboard, 'original');
 editor.visible = false;
@@ -114,7 +114,7 @@ assert.equal(systemClipboard, 'original');
 backend.copyRange = (r,c,rows,cols) => {
     assert.deepEqual([r,c,rows,cols], [1,1,3,2]);
     systemClipboard = 'a\\tb\\nc\\td';
-    return JSON.stringify('a\\tb\\nc\\td');
+    return true;
 };
 copySelection();
 assert.equal(systemClipboard, 'a\\tb\\nc\\td');

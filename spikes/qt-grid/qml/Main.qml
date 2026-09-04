@@ -318,11 +318,9 @@ ApplicationWindow {
             function copySelection() {
                 if (editor.visible)
                     return;
-                const text = JSON.parse(backend.copyRange(selectionRow, selectionColumn,
-                    selectionRows, selectionColumns));
-                if (text === null)
+                if (!backend.copyRange(selectionRow, selectionColumn,
+                        selectionRows, selectionColumns))
                     return;
-                // The backend publishes both text and spreadsheet origin MIME data.
                 body.forceActiveFocus();
             }
 
@@ -672,9 +670,9 @@ ApplicationWindow {
                         clipboardBuffer.text = "7\t=A1*3";
                         clipboardBuffer.selectAll();
                         clipboardBuffer.copy();
-                        grid.selectCell(2, 0);
+                        grid.selectCell(1, 0);
                         grid.pasteSelection();
-                        if (backend.cellInput(2, 1) !== "=A1*3") {
+                        if (backend.cellInput(1, 1) !== "=A1*3") {
                             Qt.exit(1);
                             return;
                         }
