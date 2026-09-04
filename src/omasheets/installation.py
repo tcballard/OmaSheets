@@ -136,6 +136,7 @@ def dependency_report() -> dict[str, Any]:
         ("Bubblewrap", _first_existing("/usr/bin/bwrap")),
         ("Qt Quick", _first_existing("/usr/lib/libQt6Quick.so", "/usr/lib/libQt6Quick.so.6")),
         ("Qt Wayland", _first_existing(
+            "/usr/lib/qt6/plugins/platforms/libqwayland.so",
             "/usr/lib/qt6/plugins/platforms/libqwayland-egl.so",
             "/usr/lib/qt6/plugins/platforms/libqwayland-generic.so",
         )),
