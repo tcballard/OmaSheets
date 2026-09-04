@@ -60,8 +60,8 @@ grid, an agent bridge and a person's shell can share.
   locked Rust workspace with remapped source/build paths, stripped, hashed in
   the native manifest and checked against the bundle's source identity through
   `--provenance`. The compiler-free Arch acceptance drives the installed
-  binary through import, edit, branch, check, refused and accepted merge, CSV
-  and XLSX export, close and digest-identical reopen.
+  binary through import, edit, branch, check, refused and accepted merge, CSV,
+  XLSX and Parquet export, close and digest-identical reopen.
 - **Native CSV export is a projection.** `export_csv` streams one stable sheet
   in current view order, refuses to replace an existing destination and returns
   a manifest tied to the branch and document digest. Formula source, styles,
@@ -75,6 +75,13 @@ grid, an agent bridge and a person's shell can share.
   changes made their original text stale are flattened and counted, because
   emitting stale source would silently change their meaning. Styles, formats,
   tables, checks, watches, lineage and branch history are named omissions.
+- **Native Parquet export is typed and tabular.** `export_parquet` writes one
+  selected sheet as nullable Arrow-compatible columns in bounded row groups,
+  without replacing an existing file. Number/date-serial, text and boolean
+  columns retain their inferred base type. Mixed columns are refused rather
+  than silently coerced; formulas become calculated values and error cells
+  become counted nulls. The digest-bound manifest records the stable column
+  IDs and field mapping plus every omitted semantic class.
 - **Native XLSX import is a bounded conversion.** The source package is limited
   to 50 MiB, 64 sheets, 100,000 formulas and 100,000 cells across occupied
   sheet rectangles. The service stages semantic commands against a cloned

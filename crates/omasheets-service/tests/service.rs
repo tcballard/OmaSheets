@@ -1,7 +1,9 @@
 use omasheets_core::{
     Actor, ActorKind, CellValue, ColumnType, Command, InferredColumnType, Literal, Severity,
 };
+use arrow_array::{Array, BooleanArray, Float64Array, StringArray};
 use omasheets_service::{Request, Response, Service, ServiceError};
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use std::path::{Path, PathBuf};
 use std::io::{Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -678,6 +680,48 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
         Err(ServiceError { ref code, .. }) if code == "output_exists"
     ));
 
+    let parquet = path.with_extension("parquet");
+    let exported = service
+        .handle(Request::ExportParquet {
+            path: path.clone(),
+            branch: None,
+            sheet: sheet_id.to_string(),
+            output: parquet.clone(),
+        })
+        .unwrap();
+    let Response::ExportedParquet(manifest) = exported else {
+        panic!("{exported:?}")
+    };
+    assert_eq!(manifest.format, "parquet-arrow-58.4");
+    assert_eq!(manifest.branch, "main");
+    assert_eq!(manifest.sheet, sheet_id);
+    assert_eq!(manifest.sheet_name, "Forecast");
+    assert_eq!(manifest.rows, 2);
+    assert_eq!(manifest.columns.len(), 4);
+    assert_eq!(manifest.columns[0].inferred, InferredColumnType::Text);
+    assert_eq!(manifest.columns[1].inferred, InferredColumnType::Boolean);
+    assert_eq!(manifest.columns[2].inferred, InferredColumnType::Number);
+    assert_eq!(manifest.formula_cells, 2);
+    assert_eq!(manifest.error_cells_as_null, 0);
+    let mut reader = ParquetRecordBatchReaderBuilder::try_new(
+        std::fs::File::open(&parquet).unwrap(),
+    )
+    .unwrap()
+    .build()
+    .unwrap();
+    let batch = reader.next().unwrap().unwrap();
+    assert_eq!(batch.num_rows(), 2);
+    assert_eq!(batch.schema().field(0).name(), "A");
+    let text = batch.column(0).as_any().downcast_ref::<StringArray>().unwrap();
+    assert_eq!(text.value(0), "hello, \"world\"");
+    let flags = batch.column(1).as_any().downcast_ref::<BooleanArray>().unwrap();
+    assert!(flags.is_null(0));
+    assert!(flags.value(1));
+    let numbers = batch.column(2).as_any().downcast_ref::<Float64Array>().unwrap();
+    assert_eq!(numbers.value(0), 2.0);
+    assert!(numbers.is_null(1));
+    assert!(reader.next().is_none());
+
     append(
         &mut service,
         &path,
@@ -731,6 +775,63 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
     service.close_all().unwrap();
     let _ = std::fs::remove_file(output);
     let _ = std::fs::remove_file(xlsx);
+    let _ = std::fs::remove_file(parquet);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
+
+#[test]
+fn parquet_export_refuses_mixed_columns_without_creating_output() {
+    let path = temp_document();
+    let output = path.with_extension("parquet");
+    let mut service = Service::new(|| 1);
+    service
+        .handle(Request::Create {
+            path: path.clone(),
+            name: "Mixed export".into(),
+            actor: human("tom"),
+        })
+        .unwrap();
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::AddSheet { name: "Data".into() },
+    )
+    .unwrap();
+    let sheet = match service
+        .handle(Request::Document { path: path.clone(), branch: None })
+        .unwrap()
+    {
+        Response::Document(summary) => summary.sheets[0].id,
+        other => panic!("{other:?}"),
+    };
+    for command in [
+        Command::AddColumns { sheet, count: 1, at: 0 },
+        Command::AddRows { sheet, count: 2, at: 0, table: None },
+        Command::SetValue {
+            sheet, a1: "A1".into(), value: Literal::Number(1.0),
+        },
+        Command::SetValue {
+            sheet, a1: "A2".into(), value: Literal::Text("one".into()),
+        },
+    ] {
+        append(&mut service, &path, None, human("tom"), command).unwrap();
+    }
+    let refused = service.handle(Request::ExportParquet {
+        path: path.clone(),
+        branch: None,
+        sheet: sheet.to_string(),
+        output: output.clone(),
+    });
+    assert!(matches!(
+        refused,
+        Err(ServiceError { ref code, .. }) if code == "mixed_column"
+    ));
+    assert!(!output.exists());
+    service.close_all().unwrap();
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
     }

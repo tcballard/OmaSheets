@@ -57,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     document = workdir / "workflow.omasheets"
     output = workdir / "workflow.csv"
     xlsx_output = workdir / "workflow.xlsx"
+    parquet_output = workdir / "workflow.parquet"
     write_fixture(source)
 
     server = subprocess.Popen(
@@ -135,6 +136,27 @@ def main(argv: list[str] | None = None) -> int:
             "kind": "merge", "path": str(document), "source": "review",
             "approver": human,
         })
+        append(None, human, {"command": "add_sheet", "name": "Analytics"})
+        summary = call(service, runtime, {
+            "kind": "document", "path": str(document),
+        })["response"]
+        analytics = summary["sheets"][1]["id"]
+        append(None, human, {
+            "command": "add_columns", "sheet": analytics, "count": 2, "at": 0,
+        })
+        append(None, human, {
+            "command": "add_rows", "sheet": analytics, "count": 2, "at": 0,
+            "table": None,
+        })
+        for a1, value in [
+            ("A1", {"type": "number", "value": 2}),
+            ("A2", {"type": "number", "value": 3}),
+            ("B1", {"type": "boolean", "value": True}),
+            ("B2", {"type": "boolean", "value": False}),
+        ]:
+            append(None, human, {
+                "command": "set_value", "sheet": analytics, "a1": a1, "value": value,
+            })
         exported = call(service, runtime, {
             "kind": "export_csv", "path": str(document), "sheet": sheet,
             "output": str(output),
@@ -151,6 +173,17 @@ def main(argv: list[str] | None = None) -> int:
         with zipfile.ZipFile(xlsx_output) as package:
             worksheet = package.read("xl/worksheets/sheet1.xml")
         assert b"<f>IF(A1,4,0)</f><v>4</v>" in worksheet
+        parquet_exported = call(service, runtime, {
+            "kind": "export_parquet", "path": str(document), "sheet": analytics,
+            "output": str(parquet_output),
+        })["response"]
+        assert parquet_exported["formula_cells"] == 0
+        assert parquet_exported["error_cells_as_null"] == 0
+        assert [column["inferred"] for column in parquet_exported["columns"]] == [
+            "number", "boolean",
+        ]
+        parquet_bytes = parquet_output.read_bytes()
+        assert parquet_bytes[:4] == b"PAR1" and parquet_bytes[-4:] == b"PAR1"
 
         before = call(service, runtime, {
             "kind": "document", "path": str(document),
@@ -161,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
         })["response"]
         assert after["digest"] == before["digest"] == exported["document_digest"]
         assert after["digest"] == xlsx_exported["document_digest"]
+        assert after["digest"] == parquet_exported["document_digest"]
         call(service, runtime, {"kind": "close", "path": str(document)})
         print(json.dumps({
             "schema": 1,
@@ -171,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
             "merge_refusal_exercised": True,
             "csv_bytes": output.stat().st_size,
             "xlsx_bytes": xlsx_output.stat().st_size,
+            "parquet_bytes": parquet_output.stat().st_size,
         }, sort_keys=True))
         return 0
     finally:
