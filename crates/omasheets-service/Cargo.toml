@@ -7,10 +7,13 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+arrow-array = "=58.4.0"
+arrow-schema = "=58.4.0"
 omasheets-calc = { path = "../omasheets-calc" }
 omasheets-core = { path = "../omasheets-core" }
 omasheets-store = { path = "../omasheets-store" }
 omasheets-xlsx = { path = "../omasheets-xlsx" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+parquet = { version = "=58.4.0", default-features = false, features = ["arrow"] }
 zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }

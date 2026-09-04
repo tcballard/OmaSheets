@@ -17,6 +17,9 @@ use omasheets_core::{
 };
 use omasheets_store::{BranchDiff, LoadReport, MergeReport, Store, StoreError};
 use omasheets_xlsx::{ImportLimits, import_xlsx};
+use arrow_array::{ArrayRef, BooleanArray, Float64Array, RecordBatch, StringArray};
+use arrow_schema::{DataType, Field, Schema};
+use parquet::arrow::ArrowWriter;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -24,6 +27,7 @@ use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// Largest cell page one `cells` request returns.
 pub const MAX_CELL_PAGE: usize = 10_000;
@@ -33,6 +37,9 @@ pub const MAX_GRID_PAGE_CELLS: usize = 10_000;
 pub const MAX_CSV_EXPORT_CELLS: usize = 10_000_000;
 /// Largest native XLSX projection, checked before the package is created.
 pub const MAX_XLSX_EXPORT_CELLS: usize = 10_000_000;
+/// Largest native Parquet projection, checked before output is created.
+pub const MAX_PARQUET_EXPORT_CELLS: usize = 10_000_000;
+const PARQUET_BATCH_ROWS: usize = 65_536;
 /// Largest occupied rectangle accepted into one native alpha document.
 pub const MAX_NATIVE_IMPORT_CELLS: usize = 100_000;
 /// Largest source package read by the local import endpoint.
@@ -157,6 +164,15 @@ pub enum Request {
         path: PathBuf,
         #[serde(default)]
         branch: Option<String>,
+        output: PathBuf,
+    },
+    /// Project one native sheet to typed nullable Parquet columns. Mixed
+    /// columns are refused rather than silently coerced.
+    ExportParquet {
+        path: PathBuf,
+        #[serde(default)]
+        branch: Option<String>,
+        sheet: String,
         output: PathBuf,
     },
     /// Convert one bounded XLSX package into a new replayable native file.
@@ -284,6 +300,29 @@ pub struct XlsxExportManifest {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ParquetColumnManifest {
+    pub id: ColumnId,
+    pub position: usize,
+    pub name: String,
+    pub inferred: InferredColumnType,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ParquetExportManifest {
+    pub format: String,
+    pub output: PathBuf,
+    pub branch: String,
+    pub sheet: SheetId,
+    pub sheet_name: String,
+    pub rows: usize,
+    pub columns: Vec<ParquetColumnManifest>,
+    pub document_digest: String,
+    pub formula_cells: usize,
+    pub error_cells_as_null: usize,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImportedSheetManifest {
     pub id: SheetId,
     pub name: String,
@@ -343,6 +382,7 @@ pub enum Response {
     Merged(MergeReport),
     ExportedCsv(CsvExportManifest),
     ExportedXlsx(XlsxExportManifest),
+    ExportedParquet(ParquetExportManifest),
     ImportedXlsx(XlsxImportManifest),
     Snapshot {
         digest: String,
@@ -585,6 +625,219 @@ fn write_csv_field(writer: &mut impl Write, text: &str) -> io::Result<()> {
         writer.write_all(b"\"")
     } else {
         writer.write_all(text.as_bytes())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ParquetExportStats {
+    formula_cells: usize,
+    error_cells_as_null: usize,
+}
+
+fn parquet_error(error: impl fmt::Display) -> ServiceError {
+    ServiceError::new("parquet_export", error.to_string())
+}
+
+fn parquet_type(inferred: InferredColumnType) -> Result<DataType, ServiceError> {
+    match inferred {
+        InferredColumnType::Number | InferredColumnType::DateSerial => Ok(DataType::Float64),
+        InferredColumnType::Text | InferredColumnType::Empty => Ok(DataType::Utf8),
+        InferredColumnType::Boolean => Ok(DataType::Boolean),
+        InferredColumnType::Mixed => Err(ServiceError::new(
+            "mixed_column",
+            "Parquet export refuses mixed columns instead of coercing values",
+        )),
+    }
+}
+
+fn parquet_column_array(
+    document: &Document,
+    sheet: SheetId,
+    rows: &[omasheets_core::RowId],
+    column: ColumnId,
+    inferred: InferredColumnType,
+    stats: &mut ParquetExportStats,
+) -> Result<ArrayRef, ServiceError> {
+    let values = rows.iter().map(|row| {
+        let cell = CellRef { sheet, row: *row, column };
+        if matches!(
+            document.cell(cell).map(|state| &state.input),
+            Some(CellInput::Formula { .. })
+        ) {
+            stats.formula_cells += 1;
+        }
+        let value = document.value(cell);
+        if matches!(value, CellValue::Error(_)) {
+            stats.error_cells_as_null += 1;
+        }
+        value
+    });
+    match inferred {
+        InferredColumnType::Number | InferredColumnType::DateSerial => {
+            let values = values
+                .map(|value| match value {
+                    CellValue::Blank | CellValue::Error(_) => Ok(None),
+                    CellValue::Number(number) => Ok(Some(number)),
+                    _ => Err(ServiceError::new(
+                        "parquet_type_changed",
+                        "column type changed while building the Parquet projection",
+                    )),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Arc::new(Float64Array::from(values)))
+        }
+        InferredColumnType::Boolean => {
+            let values = values
+                .map(|value| match value {
+                    CellValue::Blank | CellValue::Error(_) => Ok(None),
+                    CellValue::Boolean(flag) => Ok(Some(flag)),
+                    _ => Err(ServiceError::new(
+                        "parquet_type_changed",
+                        "column type changed while building the Parquet projection",
+                    )),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Arc::new(BooleanArray::from(values)))
+        }
+        InferredColumnType::Text => {
+            let values = values
+                .map(|value| match value {
+                    CellValue::Blank | CellValue::Error(_) => Ok(None),
+                    CellValue::Text(text) => Ok(Some(text)),
+                    _ => Err(ServiceError::new(
+                        "parquet_type_changed",
+                        "column type changed while building the Parquet projection",
+                    )),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Arc::new(StringArray::from_iter(
+                values.iter().map(Option::as_deref),
+            )))
+        }
+        InferredColumnType::Empty => Ok(Arc::new(StringArray::new_null(rows.len()))),
+        InferredColumnType::Mixed => Err(ServiceError::new(
+            "mixed_column",
+            "Parquet export refuses mixed columns instead of coercing values",
+        )),
+    }
+}
+
+fn export_parquet(
+    document: &Document,
+    sheet: SheetId,
+    output: &Path,
+) -> Result<(PathBuf, Vec<ParquetColumnManifest>, ParquetExportStats), ServiceError> {
+    let output = canonical(output)?;
+    if output.exists() {
+        return Err(ServiceError::new(
+            "output_exists",
+            "Parquet output already exists",
+        ));
+    }
+    let rows = document.rows(sheet).unwrap_or(&[]);
+    let columns = document.columns(sheet).unwrap_or(&[]);
+    if columns.is_empty() {
+        return Err(ServiceError::new(
+            "empty_sheet",
+            "Parquet export needs at least one column",
+        ));
+    }
+    let cell_count = rows
+        .len()
+        .checked_mul(columns.len())
+        .ok_or_else(|| ServiceError::new("export_too_large", "Parquet dimensions overflow"))?;
+    if cell_count > MAX_PARQUET_EXPORT_CELLS {
+        return Err(ServiceError::new(
+            "export_too_large",
+            format!("Parquet export may cover at most {MAX_PARQUET_EXPORT_CELLS} cells"),
+        ));
+    }
+
+    let mut manifests = Vec::with_capacity(columns.len());
+    let mut fields = Vec::with_capacity(columns.len());
+    for (position, column) in columns.iter().enumerate() {
+        let inferred = document
+            .inferred_column_type(sheet, *column)
+            .ok_or_else(|| ServiceError::new("unknown_column", "Parquet column disappeared"))?;
+        let name = a1(0, position as u32).trim_end_matches('1').to_string();
+        fields.push(Field::new(&name, parquet_type(inferred)?, true));
+        manifests.push(ParquetColumnManifest {
+            id: *column,
+            position,
+            name,
+            inferred,
+        });
+    }
+    let schema = Arc::new(Schema::new(fields));
+
+    let parent = output.parent().expect("canonical output has a parent");
+    let file_name = output
+        .file_name()
+        .expect("canonical output has a file name")
+        .to_string_lossy();
+    let mut temporary = None;
+    for _ in 0..16 {
+        let nonce = EXPORT_NONCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(
+            ".{file_name}.{}.{}.part",
+            std::process::id(),
+            nonce
+        ));
+        match OpenOptions::new().write(true).create_new(true).open(&candidate) {
+            Ok(file) => {
+                temporary = Some((candidate, file));
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(export_io_error(error)),
+        }
+    }
+    let (temporary_path, file) = temporary.ok_or_else(|| {
+        ServiceError::new("export_io", "could not allocate a temporary Parquet file")
+    })?;
+
+    let written = (|| -> Result<ParquetExportStats, ServiceError> {
+        let mut stats = ParquetExportStats::default();
+        let mut writer = ArrowWriter::try_new(file, schema.clone(), None).map_err(parquet_error)?;
+        for batch_rows in rows.chunks(PARQUET_BATCH_ROWS) {
+            let arrays = columns
+                .iter()
+                .zip(&manifests)
+                .map(|(column, manifest)| {
+                    parquet_column_array(
+                        document,
+                        sheet,
+                        batch_rows,
+                        *column,
+                        manifest.inferred,
+                        &mut stats,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let batch = RecordBatch::try_new(schema.clone(), arrays).map_err(parquet_error)?;
+            writer.write(&batch).map_err(parquet_error)?;
+            writer.flush().map_err(parquet_error)?;
+        }
+        let file = writer.into_inner().map_err(parquet_error)?;
+        file.sync_all().map_err(export_io_error)?;
+        Ok(stats)
+    })();
+    let stats = match written {
+        Ok(stats) => stats,
+        Err(error) => {
+            let _ = std::fs::remove_file(&temporary_path);
+            return Err(error);
+        }
+    };
+    let linked = std::fs::hard_link(&temporary_path, &output);
+    let _ = std::fs::remove_file(&temporary_path);
+    match linked {
+        Ok(()) => Ok((output, manifests, stats)),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Err(ServiceError::new(
+            "output_exists",
+            "Parquet output already exists",
+        )),
+        Err(error) => Err(export_io_error(error)),
     }
 }
 
@@ -1671,6 +1924,40 @@ impl Service {
                         "tables_checks_watches_lineage_and_branch_history_omitted".into(),
                         "formulas_with_table_or_stale_positional_bindings_flattened".into(),
                         "date_serials_exported_as_unformatted_1900_system_numbers".into(),
+                    ],
+                }))
+            }
+            Request::ExportParquet {
+                path,
+                branch,
+                sheet,
+                output,
+            } => {
+                let store = self.store(&path)?;
+                let (branch_name, branch) = Self::branch(store, branch.as_deref())?;
+                let document = store.document(branch)?;
+                let sheet = Self::sheet(document, &sheet)?;
+                let sheet_name = document.sheet_name(sheet).unwrap_or("").to_string();
+                let rows = document.rows(sheet).map_or(0, <[_]>::len);
+                let document_digest = document.digest();
+                let (output, columns, stats) = export_parquet(document, sheet, &output)?;
+                Ok(Response::ExportedParquet(ParquetExportManifest {
+                    format: "parquet-arrow-58.4".into(),
+                    output,
+                    branch: branch_name,
+                    sheet,
+                    sheet_name,
+                    rows,
+                    columns,
+                    document_digest,
+                    formula_cells: stats.formula_cells,
+                    error_cells_as_null: stats.error_cells_as_null,
+                    limitations: vec![
+                        "one_sheet_per_file".into(),
+                        "formula_source_omitted".into(),
+                        "error_cells_exported_as_null".into(),
+                        "date_serials_are_1900_system_float64_values".into(),
+                        "styles_tables_checks_watches_lineage_and_branch_history_omitted".into(),
                     ],
                 }))
             }

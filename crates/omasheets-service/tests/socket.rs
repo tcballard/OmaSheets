@@ -138,6 +138,18 @@ fn the_cli_drives_the_service_through_the_socket_with_a_session_token() {
     assert_eq!(exported["response"]["kind"], "exported_xlsx");
     assert_eq!(exported["response"]["sheets"][0]["rows"], 1);
     assert!(xlsx.is_file());
+    let parquet = server.runtime.join("plan.parquet");
+    let (code, exported) = call(
+        &server,
+        &format!(
+            r#"{{"kind":"export_parquet","path":"{path}","sheet":"{sheet}","output":"{}"}}"#,
+            parquet.display()
+        ),
+    );
+    assert_eq!(code, 0, "{exported}");
+    assert_eq!(exported["response"]["kind"], "exported_parquet");
+    assert_eq!(exported["response"]["columns"][0]["inferred"], "text");
+    assert!(parquet.is_file());
 
     // A refusal is a JSON error with a stable code and exit status 2.
     let (code, refused) = call(
