@@ -109,7 +109,8 @@ class MinisignFormatTests(unittest.TestCase):
             verify_file(self.archive, self.signature, self.public, expected_name="other.tar.gz")
 
     def test_modified_archive_wrong_key_and_forged_comment_are_rejected(self):
-        self.archive.write_bytes(self.archive.read_bytes()[:-1] + b"\0")
+        original = self.archive.read_bytes()
+        self.archive.write_bytes(original[:-1] + bytes([original[-1] ^ 1]))
         with self.assertRaisesRegex(SignatureError, "does not verify"):
             verify_file(self.archive, self.signature, self.public)
         self.archive.write_bytes(os.urandom(70_000))
