@@ -56,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     source = workdir / "source.xlsx"
     document = workdir / "workflow.omasheets"
     output = workdir / "workflow.csv"
+    xlsx_output = workdir / "workflow.xlsx"
     write_fixture(source)
 
     server = subprocess.Popen(
@@ -140,6 +141,16 @@ def main(argv: list[str] | None = None) -> int:
         })["response"]
         assert exported["formula_cells"] == 1
         assert output.read_text() == "TRUE,4\n3,8" or output.read_bytes() == b"TRUE,4\r\n3,8"
+        xlsx_exported = call(service, runtime, {
+            "kind": "export_xlsx", "path": str(document),
+            "output": str(xlsx_output),
+        })["response"]
+        assert xlsx_exported["formula_cells"] == 1
+        assert xlsx_exported["formula_cells_preserved"] == 1
+        assert xlsx_exported["formula_cells_flattened"] == 0
+        with zipfile.ZipFile(xlsx_output) as package:
+            worksheet = package.read("xl/worksheets/sheet1.xml")
+        assert b"<f>IF(A1,4,0)</f><v>4</v>" in worksheet
 
         before = call(service, runtime, {
             "kind": "document", "path": str(document),
@@ -149,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
             "kind": "document", "path": str(document),
         })["response"]
         assert after["digest"] == before["digest"] == exported["document_digest"]
+        assert after["digest"] == xlsx_exported["document_digest"]
         call(service, runtime, {"kind": "close", "path": str(document)})
         print(json.dumps({
             "schema": 1,
@@ -158,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
             "checks_exercised": 2,
             "merge_refusal_exercised": True,
             "csv_bytes": output.stat().st_size,
+            "xlsx_bytes": xlsx_output.stat().st_size,
         }, sort_keys=True))
         return 0
     finally:
