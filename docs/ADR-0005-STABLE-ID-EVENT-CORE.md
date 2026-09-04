@@ -41,8 +41,20 @@ introduce structured table references first.
   identities in the engine's traversal order (ranges materialise into bounded
   lists). Replay re-parses the source purely for structure and rebinds each
   reference by position to engine cells addressed by creation ordinals, never
-  by view position. Deleting a row, column or sheet that another formula
-  still references fails; the caller must clear the dependents first.
+  by view position. Structured table references use the same path: table and
+  column names bind to stable `TableId` and `ColumnId` values, while the event
+  records the stable cells selected at that point. Adding table rows carries
+  the deterministic replacement bindings for existing structured ranges.
+  Deleting a row, column or sheet that another formula still references
+  fails; the caller must clear the dependents first.
+- **Tables and computed columns.** A table records ordered stable columns,
+  case-insensitive unique column names, an optional header row and ordered
+  data rows. A computed-column operation stores one formula template against
+  a stable `ColumnId` and materialises a compiled formula for every current
+  row. A later table-row insertion carries the new row identities, the
+  computed cells derived from the template and all structured-range
+  rebindings in the same content-addressed event. Application verifies those
+  derivations and rolls the entire operation back if any formula fails.
 - **Transactions.** `Document::apply` validates an event completely before
   mutating anything. The calculation engine's own transactional cycle
   rejection runs before the core mutation, so an invalid event leaves both the
@@ -63,8 +75,10 @@ introduce structured table references first.
   entered and is not rewritten. Rendering a formula back to current A1 text is
   future work that needs an AST printer in the calculation crate.
 - Range references are stored as explicit identity lists, bounded at 10,000
-  references per formula. Whole-column semantics and structured table
-  references remain open.
+  references per formula. Whole-column semantics remain open. The first
+  structured-reference slice covers data, header, all, this-row and inclusive
+  column-span selectors; totals-row and escaped-column-name syntax remain
+  future compatibility work.
 - Branch creation, merge, checks and watched outputs are represented only by
   reserved identity types; their operations belong to the store and safety
   runbook.
