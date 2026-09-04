@@ -14,6 +14,7 @@ ApplicationWindow {
     visible: true
     title: backend.documentName + " — OmaSheets"
     color: palette.window
+    onClosing: close => { close.accepted = grid.commitEdit(); }
 
     function blend(from, to, amount) {
         return Qt.rgba(from.r + (to.r - from.r) * amount,
@@ -203,10 +204,13 @@ ApplicationWindow {
             readonly property int visibleDelegates: Math.max(0, visibleRowCount * visibleColumnCount)
 
             function selectCell(row, column) {
+                if (!commitEdit())
+                    return false;
                 currentRow = Math.max(0, Math.min(backend.rowCount - 1, row));
                 currentColumn = Math.max(0, Math.min(backend.columnCount - 1, column));
                 ensureVisible();
                 body.forceActiveFocus();
+                return true;
             }
 
             function ensureVisible() {
@@ -225,6 +229,10 @@ ApplicationWindow {
             }
 
             function beginEdit() {
+                if (editor.visible) {
+                    editor.forceActiveFocus();
+                    return;
+                }
                 editor.text = backend.cellInput(currentRow, currentColumn);
                 editor.visible = true;
                 editor.forceActiveFocus();
@@ -233,16 +241,21 @@ ApplicationWindow {
 
             function commitEdit() {
                 if (!editor.visible)
-                    return;
-                backend.setCellText(currentRow, currentColumn, editor.text);
+                    return true;
+                if (!backend.setCellText(currentRow, currentColumn, editor.text)) {
+                    editor.forceActiveFocus();
+                    return false;
+                }
                 editor.visible = false;
                 body.forceActiveFocus();
+                return true;
             }
 
             function switchSheet(index) {
                 if (index < 0 || index >= backend.sheetCount || index === backend.currentSheet)
                     return;
-                editor.visible = false;
+                if (!commitEdit())
+                    return;
                 backend.selectSheet(index);
                 currentRow = 0;
                 currentColumn = 0;
