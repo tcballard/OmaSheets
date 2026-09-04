@@ -3,6 +3,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -25,6 +26,7 @@ class InstallationTests(unittest.TestCase):
             app=root / "data/omasheets/app",
             build=root / "cache/omasheets/native-build",
             launcher=root / "home/.local/bin/omasheets",
+            service_launcher=root / "home/.local/bin/omasheets-service",
             codex_plugin=root / "home/.codex/plugins/omasheets",
             codex_marketplace=root / "home/.agents/plugins/marketplace.json",
             journal=root / "state/omasheets/installation.json",
@@ -67,7 +69,9 @@ class InstallationTests(unittest.TestCase):
     def test_install_and_uninstall_cover_all_owned_surfaces(self):
         result = install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
         self.assertTrue(result["changed"])
+        self.assertEqual(result["service_launcher"], str(self.paths.service_launcher))
         self.assertTrue(self.paths.launcher.is_file())
+        self.assertTrue(self.paths.service_launcher.is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-window").is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-service").is_file())
         mcp = json.loads((self.paths.codex_plugin / ".mcp.json").read_text())
@@ -86,8 +90,21 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(removed["conflicts"], [])
         self.assertEqual(json.loads(self.paths.codex_marketplace.read_text())["plugins"], [{"name": "keep-me"}])
         self.assertFalse(self.paths.launcher.exists())
+        self.assertFalse(self.paths.service_launcher.exists())
         self.assertFalse(self.paths.codex_plugin.exists())
         self.assertFalse(self.paths.app.exists())
+
+    def test_uninstall_accepts_a_journal_from_before_the_service_launcher(self):
+        install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        journal = json.loads(self.paths.journal.read_text())
+        journal.pop("service_launcher_sha256")
+        self.paths.journal.write_text(json.dumps(journal))
+        self.paths.service_launcher.unlink()
+
+        removed = uninstall(self.paths)
+
+        self.assertEqual(removed["conflicts"], [])
+        self.assertFalse(self.paths.journal.exists())
 
     def test_explicit_environment_bundle_bypasses_automatic_release_download(self):
         with patch.dict(
@@ -104,10 +121,10 @@ class InstallationTests(unittest.TestCase):
 
     def test_uninstall_preserves_a_modified_owned_file(self):
         install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
-        self.paths.launcher.write_text("user changed this")
+        self.paths.service_launcher.write_text("user changed this")
         result = uninstall(self.paths)
         self.assertEqual(len(result["conflicts"]), 1)
-        self.assertTrue(self.paths.launcher.exists())
+        self.assertTrue(self.paths.service_launcher.exists())
         self.assertTrue(self.paths.journal.exists())
 
     def test_launcher_quotes_shell_metacharacters_in_install_path(self):
@@ -115,6 +132,7 @@ class InstallationTests(unittest.TestCase):
             app=self.paths.app.with_name("app $(touch nope) 'quoted'"),
             build=self.paths.build,
             launcher=self.paths.launcher,
+            service_launcher=self.paths.service_launcher,
             codex_plugin=self.paths.codex_plugin,
             codex_marketplace=self.paths.codex_marketplace,
             journal=self.paths.journal,
@@ -124,6 +142,28 @@ class InstallationTests(unittest.TestCase):
         launcher = paths.launcher.read_text()
         self.assertIn("'\"'\"'", launcher)
         self.assertNotIn('PYTHONPATH="', launcher)
+
+    def test_native_service_launcher_quotes_the_private_binary_path(self):
+        paths = InstallPaths(
+            app=self.paths.app.with_name("app $(touch nope) 'quoted'"),
+            build=self.paths.build,
+            launcher=self.paths.launcher,
+            service_launcher=self.paths.service_launcher,
+            codex_plugin=self.paths.codex_plugin,
+            codex_marketplace=self.paths.codex_marketplace,
+            journal=self.paths.journal,
+            integration=self.paths.integration,
+        )
+        install(ROOT, paths, check_dependencies=False, bundle_path=self.bundle)
+        launcher = paths.service_launcher.read_text()
+        self.assertIn("'\"'\"'", launcher)
+        self.assertIn('"$@"', launcher)
+        report = json.loads(subprocess.check_output(
+            [paths.service_launcher, "--provenance"], text=True,
+        ))
+        identity = source_identity(ROOT)
+        self.assertEqual(report["source_commit"], identity["commit"])
+        self.assertEqual(report["source_sha256"], identity["sha256"])
 
     def test_bundle_must_match_the_exact_plugin_source(self):
         wrong = self.bundle.with_name("wrong.tar.gz")
