@@ -239,6 +239,18 @@ ApplicationWindow {
                 body.forceActiveFocus();
             }
 
+            function switchSheet(index) {
+                if (index < 0 || index >= backend.sheetCount || index === backend.currentSheet)
+                    return;
+                editor.visible = false;
+                backend.selectSheet(index);
+                currentRow = 0;
+                currentColumn = 0;
+                body.contentX = 0;
+                body.contentY = 0;
+                body.forceActiveFocus();
+            }
+
             Rectangle {
                 width: window.rowHeaderWidth
                 height: window.columnHeaderHeight
@@ -439,7 +451,11 @@ ApplicationWindow {
 
                 Keys.onPressed: event => {
                     const control = (event.modifiers & Qt.ControlModifier) !== 0;
-                    if (event.key === Qt.Key_Left)
+                    if (event.key === Qt.Key_PageUp && control)
+                        grid.switchSheet(backend.currentSheet - 1);
+                    else if (event.key === Qt.Key_PageDown && control)
+                        grid.switchSheet(backend.currentSheet + 1);
+                    else if (event.key === Qt.Key_Left)
                         grid.selectCell(grid.currentRow, grid.currentColumn - 1);
                     else if (event.key === Qt.Key_Right)
                         grid.selectCell(grid.currentRow, grid.currentColumn + 1);
@@ -480,6 +496,8 @@ ApplicationWindow {
                 onTriggered: {
                     frameNumber += 1;
                     if (frameNumber === 1 && backend.documentMode) {
+                        if (backend.sheetCount > 1)
+                            grid.switchSheet(1);
                         backend.setCellText(0, 0, "7");
                         backend.setCellText(0, 1, "=A1*3");
                     }
@@ -500,6 +518,71 @@ ApplicationWindow {
                         backend.reportBenchmark(samples.length, elapsedTime - measuredStart,
                             samples[p95Index], samples[samples.length - 1], grid.visibleDelegates);
                         Qt.quit();
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 34
+            color: window.headerColor
+            border.color: window.gridLineColor
+
+            Flickable {
+                anchors.fill: parent
+                anchors.leftMargin: window.rowHeaderWidth
+                anchors.rightMargin: 8
+                contentWidth: sheetTabs.width
+                contentHeight: height
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                Row {
+                    id: sheetTabs
+                    height: parent.height
+                    spacing: 2
+
+                    Repeater {
+                        model: backend.sheetCount
+
+                        delegate: Rectangle {
+                            id: sheetTab
+                            required property int index
+                            readonly property bool selectedTab: index === backend.currentSheet
+
+                            width: Math.max(96, sheetLabel.implicitWidth + 30)
+                            height: sheetTabs.height
+                            color: selectedTab ? window.selectedHeaderColor : "transparent"
+
+                            Accessible.role: Accessible.Button
+                            Accessible.name: "Sheet " + sheetLabel.text
+                            Accessible.description: selectedTab ? "Current sheet" : "Switch to sheet"
+                            Accessible.selected: selectedTab
+
+                            Label {
+                                id: sheetLabel
+                                anchors.centerIn: parent
+                                text: backend.sheetLabel(sheetTab.index)
+                                color: sheetTab.selectedTab ? window.accentColor : window.mutedColor
+                                font.family: "monospace"
+                                font.pixelSize: 11
+                                font.bold: sheetTab.selectedTab
+                            }
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                height: 2
+                                color: sheetTab.selectedTab ? window.accentColor : "transparent"
+                            }
+
+                            TapHandler {
+                                acceptedButtons: Qt.LeftButton
+                                onTapped: grid.switchSheet(sheetTab.index)
+                            }
+                        }
                     }
                 }
             }

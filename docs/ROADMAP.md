@@ -116,7 +116,8 @@ public compatibility claims.
   dependencies until the customization and accessibility review in
   `docs/M1-GRID-SPIKE.md` passes. The candidate inherits Omarchy's active
   semantic palette rather than maintaining a separate application theme, and
-  pages native document cells through the authenticated local service.
+  pages native document cells through the authenticated local service with
+  stable-ID sheet switching.
 - Keep the current LibreOfficeKit window available for compatibility documents
   while the native grid is incomplete.
 

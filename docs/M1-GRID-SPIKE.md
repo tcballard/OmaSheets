@@ -22,16 +22,18 @@ packaging, and the ongoing Qt dependency cost.
 - Accessible grid and visible-cell names, descriptions, focus, and selection.
 - Live inheritance of Omarchy's active semantic palette, with a standalone
   fallback, using standard Qt Quick controls.
-- First-sheet native-document loading through the authenticated local service,
-  using a bounded eight-tile cache over sparse 64 × 16 grid pages.
+- Multi-sheet native-document loading through the authenticated local service,
+  with themed tabs, Ctrl+Page Up/Down switching and a bounded eight-tile cache
+  over sparse 64 × 16 grid pages.
 - Native value/formula editing appended through the service; calculated display
   values remain separate from editable formula source.
 - Repeatable headless wiring smoke plus a manual on-device evidence run.
 
 The spike now connects to `.omasheets` documents without making a Unix-socket
-round trip for every painted cell. This slice deliberately opens the first
-sheet only. Sheet switching, row/column insertion and production error recovery
-remain outside the candidate integration.
+round trip for every painted cell. Reads and edits use the selected sheet's
+stable ID, and switching clears the page cache before repainting. Row/column
+insertion and production error recovery remain outside the candidate
+integration.
 
 ## Non-gating CI observation
 
@@ -53,11 +55,13 @@ Qt version, Omarchy revision, renderer, and whether each run is cold or warm.
 
 Check all of the following with the keyboard and then a screen reader:
 
-1. Move with arrows, Page Up/Down, Home/End, and Ctrl+Home/End.
+1. Move with arrows, Page Up/Down, Home/End, and Ctrl+Home/End; switch tabs with
+   Ctrl+Page Up/Down.
 2. Start editing with Enter and F2; commit with Enter and cancel with Escape.
 3. Select and edit with the mouse without losing keyboard focus.
-4. Open a native document, edit a literal and a formula, restart the window and
-   verify both edits persisted and the formula bar retained formula source.
+4. Open a multi-sheet native document, switch by keyboard and mouse, edit a
+   literal and formula on the second sheet, restart the window and verify both
+   edits persisted on that sheet and the formula bar retained formula source.
 5. Verify the grid name, current cell address/value/type, selection, and edit
    state are announced.
 6. Switch between the maintainer's normal dark, light and one customized
@@ -74,6 +78,7 @@ Check all of the following with the keyboard and then a screen reader:
 | Customization review | _not run_ |
 | Active-theme review | _not run_ |
 | Native document read/edit persistence | _not run_ |
+| Multi-sheet switching and cache isolation | _not run_ |
 | Keyboard-only review | _not run_ |
 | Screen-reader review | _not run_ |
 | Warm scroll, synthetic 1,000,000 × 64 | _not measured_ |

@@ -30,6 +30,8 @@ class QtGridSpikeTests(unittest.TestCase):
             "theme_source": "omarchy",
             "source": "synthetic",
             "service_requests": 0,
+            "sheet_count": 1,
+            "current_sheet": 0,
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "report.txt"
@@ -57,12 +59,21 @@ class QtGridSpikeTests(unittest.TestCase):
             "theme_source": "omarchy",
             "source": "native-document",
             "service_requests": 7,
+            "sheet_count": 2,
+            "current_sheet": 1,
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "report.txt"
             path.write_text("OMASHEETS_GRID_BENCHMARK " + json.dumps(report) + "\n")
             subprocess.run(
-                [sys.executable, CHECKER, "--report", path, "--require-native-document"],
+                [
+                    sys.executable,
+                    CHECKER,
+                    "--report",
+                    path,
+                    "--require-native-document",
+                    "--require-multi-sheet",
+                ],
                 cwd=ROOT,
                 check=True,
             )
