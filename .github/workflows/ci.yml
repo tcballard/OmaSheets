@@ -421,6 +421,10 @@ jobs:
           test -n "$OMASHEETS_NATIVE_BUNDLE_PATH"
           "$plugin/bin/omasheets-plugin" install
           "$HOME/.local/bin/omasheets" doctor
+          "$HOME/.local/bin/omasheets" setup --omarchy > "$RUNNER_TEMP/omarchy-setup.json"
+          jq -e '.omarchy == true and .user_service.requested == false' \
+            "$RUNNER_TEMP/omarchy-setup.json"
+          test ! -e "$XDG_CONFIG_HOME/systemd/user/omasheets-native.service"
           for command in c++ gcc cmake make pkg-config; do
             ! command -v "$command"
           done

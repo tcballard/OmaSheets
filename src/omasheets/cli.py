@@ -77,6 +77,13 @@ def build_parser() -> argparse.ArgumentParser:
     integrate_commands = integrate.add_subparsers(dest="integrate_command", required=True)
     integrate_commands.add_parser("install", help="Install the desktop entry and MIME associations")
     integrate_commands.add_parser("uninstall", help="Restore or remove OmaSheets integration")
+    setup = commands.add_parser("setup", help="Configure explicit desktop integration")
+    setup.add_argument("--omarchy", action="store_true", required=True)
+    setup.add_argument(
+        "--enable-service",
+        action="store_true",
+        help="Install and start the optional systemd user service",
+    )
     commands.add_parser("uninstall", help="Remove the user-local OmaSheets product installation")
     lok = commands.add_parser("lok", help="Inspect the installed LibreOfficeKit engine")
     lok_commands = lok.add_subparsers(dest="lok_command", required=True)
@@ -216,6 +223,23 @@ def main(argv: list[str] | None = None) -> int:
         from .integration import install, uninstall
 
         result = install() if arguments.integrate_command == "install" else uninstall()
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+    if arguments.command == "setup" and arguments.omarchy:
+        from .installation import InstallPaths
+        from .integration import install as install_integration
+        from .user_service import install as install_user_service
+
+        paths = InstallPaths.discover()
+        result = {
+            "omarchy": True,
+            "integration": install_integration(paths.integration, executable=paths.launcher),
+            "user_service": (
+                install_user_service(paths.user_service, enable=True)
+                if arguments.enable_service
+                else {"requested": False, "enabled": False}
+            ),
+        }
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     if arguments.command == "uninstall":

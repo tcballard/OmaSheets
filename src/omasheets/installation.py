@@ -19,6 +19,7 @@ from .errors import ConflictError
 from .integration import IntegrationPaths, install as install_integration, uninstall as uninstall_integration
 from .native_bundle import download_native_bundle, install_native_bundle
 from .store import read_json, write_json_atomic
+from .user_service import UserServicePaths, uninstall as uninstall_user_service
 
 PLUGIN_NAME = "omasheets"
 PLUGIN_ENTRY = {
@@ -42,6 +43,7 @@ class InstallPaths:
     codex_marketplace: Path
     journal: Path
     integration: IntegrationPaths
+    user_service: UserServicePaths
 
     @classmethod
     def discover(cls) -> "InstallPaths":
@@ -62,6 +64,11 @@ class InstallPaths:
                 data / "applications/io.github.tcballard.OmaSheets.desktop",
                 config / "mimeapps.list",
                 state / "omasheets/desktop-integration.json",
+            ),
+            user_service=UserServicePaths(
+                data / "omasheets/app/bin/omasheets-service",
+                config / "systemd/user/omasheets-native.service",
+                state / "omasheets/user-service.json",
             ),
         )
 
@@ -330,8 +337,16 @@ def _remove_marketplace_entry(path: Path, journal: dict[str, Any]) -> None:
 
 def uninstall(paths: InstallPaths | None = None) -> dict[str, Any]:
     paths = paths or InstallPaths.discover()
+    try:
+        service_result = uninstall_user_service(paths.user_service)
+    except (ConflictError, RuntimeError) as error:
+        return {"installed": True, "changed": False, "conflicts": [str(error)]}
     if not paths.journal.is_file():
-        return {"installed": False, "changed": False, "conflicts": []}
+        return {
+            "installed": False,
+            "changed": service_result["changed"],
+            "conflicts": [],
+        }
     journal = read_json(paths.journal)
     conflicts: list[str] = []
     try:
