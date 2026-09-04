@@ -31,6 +31,24 @@ unsupported-function distribution and the failure kinds), and
 baseline engine that first scored the sample. Both are aggregate only. Scored
 on 2026-09-01 on a 4-vCPU Linux container:
 
+Generate both files from a measured schema-2 scorer report with
+`scripts/update_corpus_summary.py`. The command validates the manifest digest,
+successful performance wrapper result and baseline identity, then emits only
+aggregate failure classes and metrics. Use `--help` for the complete evidence
+metadata and resolved-class options; the baseline summary may be the checked-in
+summary copied aside before a new score.
+
+```bash
+cp corpus/sources/enron-figshare.score-summary.json /tmp/enron-before.json
+python scripts/update_corpus_summary.py \
+  --score OUT/score.json --performance OUT/performance.json \
+  --manifest corpus/sources/enron-figshare.jsonl \
+  --baseline-summary /tmp/enron-before.json \
+  --summary corpus/sources/enron-figshare.score-summary.json \
+  --delta corpus/sources/enron-figshare.score-delta.json \
+  --runner "linux x86_64, eight-core baseline, cold run"
+```
+
 | Owned M0 engine lane | Baseline (`08f38d1`) | After formula gaps (`0eccaff`) |
 |---|---|---|
 | Workbooks opened | 971 / 1000 | 971 / 1000 |
