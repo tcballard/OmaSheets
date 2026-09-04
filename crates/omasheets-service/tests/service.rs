@@ -539,7 +539,19 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
         Command::SetValue {
             sheet: sheet_id,
             a1: "A1".into(),
-            value: Literal::Text("x".repeat(1_000_001)),
+            value: Literal::Text("🧪".repeat(omasheets_core::MAX_TEXT_CHARS)),
+        },
+    )
+    .unwrap();
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::SetFormula {
+            sheet: sheet_id,
+            a1: "B1".into(),
+            source: "=A1&A1&A1&A1&A1&A1&A1&A1".into(),
         },
     )
     .unwrap();
