@@ -14,6 +14,10 @@ cells. Typing starts a replacement value; Enter saves and moves down, Shift+Ente
 moves up, and Tab/Shift+Tab save and move horizontally. Ctrl+S saves without
 moving. Delete or Backspace clears the selected cell. Escape cancels a draft.
 Opening and leaving an unchanged editor does not append a document event.
+Prefix input with an apostrophe to keep it as literal text, such as `'00123`,
+`'TRUE` or `'=1+1`. The apostrophe is an editing marker, not part of the stored
+value. Existing text that resembles a number, boolean or formula uses this
+marker in the editor so it retains its type; the grid displays the literal value.
 
 Failed saves retain the draft and block navigation and window closure until
 the user saves successfully or explicitly cancels. A failed initial read blocks
