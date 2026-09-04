@@ -1,9 +1,10 @@
-# Qt grid spike
+# Native Qt grid
 
-This is an isolated, unreleased M1 experiment for a keyboard-first native grid.
-It uses Qt 6 / Qt Quick with a Rust model through CXX-Qt. It is deliberately
-excluded from the root Cargo workspace: passing the spike does not make Qt a
-product dependency or change the current LibreOfficeKit compatibility window.
+This is the keyboard-first production grid for native `.omasheets` documents.
+It uses Qt 6 / Qt Quick with a Rust model through CXX-Qt. Its dependency graph
+and lockfile remain isolated from the calculation workspace, while the release
+builder now compiles, provenance-binds and packages `omasheets-grid`. The
+LibreOfficeKit window remains the compatibility path for XLS, XLSX, XLSM and ODS.
 
 The synthetic fixture exposes 1,000,000 rows by 64 columns without allocating a
 cell object for every coordinate. QML creates only the delegates around the
@@ -25,24 +26,22 @@ muted and semantic colours feed Qt/QML theme properties; panel, grid and
 selection shades are derived from them. The window checks for a changed palette
 every 1.5 seconds, so an Omarchy theme switch is reflected without restarting.
 Missing files or individual invalid colours use the built-in OmaSheets palette,
-which also keeps the spike runnable away from Omarchy.
+which also keeps the grid runnable away from Omarchy.
 
 ## Arch / Omarchy build
 
 ```sh
-sudo pacman -S --needed base-devel qt6-base qt6-declarative
+sudo pacman -S --needed base-devel qt6-base qt6-declarative qt6-wayland
 cargo test --locked --manifest-path spikes/qt-grid/Cargo.toml
 cargo build --locked --release --manifest-path spikes/qt-grid/Cargo.toml
-spikes/qt-grid/target/release/omasheets-qt-grid-spike
+spikes/qt-grid/target/release/omasheets-grid
 ```
 
-To open a real native document, start the service in another terminal and pass
-the document path:
+An installed product starts the authenticated service on demand and dispatches
+native files through the production launcher:
 
 ```sh
-cargo run --release -p omasheets-service -- serve
-OMASHEETS_ACTOR="$USER" \
-  spikes/qt-grid/target/release/omasheets-qt-grid-spike document.omasheets
+omasheets launch document.omasheets
 ```
 
 The document must already contain at least one sheet, row and column. Select a
@@ -58,7 +57,7 @@ and cold/warm state with the result.
 mkdir -p out/qt-grid
 /usr/bin/time -v -o out/qt-grid/resource.txt \
   env OMASHEETS_GRID_BENCHMARK=1 \
-  spikes/qt-grid/target/release/omasheets-qt-grid-spike \
+  spikes/qt-grid/target/release/omasheets-grid \
   > out/qt-grid/report.txt 2> out/qt-grid/stderr.txt
 python scripts/check_qt_grid_spike.py --report out/qt-grid/report.txt
 ```

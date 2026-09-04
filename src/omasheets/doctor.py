@@ -10,6 +10,7 @@ from typing import Any
 from .integration import DESKTOP_ID, IntegrationPaths
 from .lok_spike import status as lok_status
 from .native_window import status as window_status
+from .native_grid import status as grid_status
 
 
 def _executable(name: str, expected: Path | None = None) -> dict[str, Any]:
@@ -63,6 +64,13 @@ def diagnose() -> dict[str, Any]:
         "name": "omasheets-window",
         "ok": native["ready"],
         "detail": native["detail"],
+        "required": True,
+    })
+    grid = grid_status()
+    checks.append({
+        "name": "omasheets-grid",
+        "ok": grid["ready"],
+        "detail": grid["detail"],
         "required": True,
     })
     required = [check for check in checks if check.get("required", True)]

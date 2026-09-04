@@ -18,6 +18,7 @@ from .transactions import exclusive_lock
 
 DESKTOP_ID = "io.github.tcballard.OmaSheets.desktop"
 MIME_TYPES = (
+    "application/x-omasheets",
     "application/vnd.ms-excel",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/vnd.ms-excel.sheet.macroEnabled.12",
@@ -27,14 +28,23 @@ MIME_TYPES = (
 DESKTOP_ENTRY = """[Desktop Entry]
 Type=Application
 Name=OmaSheets
-Comment=Open spreadsheets in the native OmaSheets window
-Exec=omasheets window %F
+Comment=Open compatibility and native OmaSheets documents
+Exec=omasheets launch %f
 Icon=x-office-spreadsheet
 Terminal=false
 StartupNotify=true
 Categories=Office;Spreadsheet;
-MimeType=application/vnd.ms-excel;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.ms-excel.sheet.macroEnabled.12;application/vnd.oasis.opendocument.spreadsheet;
-Keywords=spreadsheet;xls;xlsx;ods;calc;
+MimeType=application/x-omasheets;application/vnd.ms-excel;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.ms-excel.sheet.macroEnabled.12;application/vnd.oasis.opendocument.spreadsheet;
+Keywords=spreadsheet;omasheets;xls;xlsx;ods;calc;
+"""
+
+MIME_PACKAGE = b"""<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-omasheets">
+    <comment>OmaSheets native document</comment>
+    <glob pattern="*.omasheets"/>
+  </mime-type>
+</mime-info>
 """
 
 
@@ -43,6 +53,7 @@ class IntegrationPaths:
     desktop: Path
     mimeapps: Path
     journal: Path
+    mime_package: Path | None = None
 
     @classmethod
     def discover(cls) -> "IntegrationPaths":
@@ -54,6 +65,7 @@ class IntegrationPaths:
             desktop=data / "applications" / DESKTOP_ID,
             mimeapps=config / "mimeapps.list",
             journal=state / "omasheets" / "desktop-integration.json",
+            mime_package=data / "mime/packages/io.github.tcballard.OmaSheets.xml",
         )
 
 
@@ -143,6 +155,17 @@ def _refresh_desktop_database(desktop: Path) -> None:
         subprocess.run([executable, str(desktop.parent)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def _refresh_mime_database(mime_package: Path | None) -> None:
+    executable = shutil.which("update-mime-database")
+    if executable and mime_package is not None:
+        subprocess.run(
+            [executable, str(mime_package.parent.parent)],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+
 def desktop_entry(executable: Path | None = None) -> bytes:
     if executable is None:
         command = "omasheets"
@@ -150,7 +173,7 @@ def desktop_entry(executable: Path | None = None) -> bytes:
         command = str(executable.resolve(strict=True)).replace("%", "%%")
         if any(character.isspace() for character in command):
             command = '"' + command.replace('"', '\\"') + '"'
-    return DESKTOP_ENTRY.replace("Exec=omasheets window %F", f"Exec={command} window %F").encode()
+    return DESKTOP_ENTRY.replace("Exec=omasheets launch %f", f"Exec={command} launch %f").encode()
 
 
 def install(paths: IntegrationPaths | None = None, *, executable: Path | None = None) -> dict[str, Any]:
@@ -165,17 +188,34 @@ def _install_locked(paths: IntegrationPaths, executable: Path | None = None) -> 
         journal = read_json(paths.journal)
         desktop_ok = paths.desktop.exists() and _sha(paths.desktop.read_bytes()) == journal.get("desktop_after_sha256")
         mime_ok = paths.mimeapps.exists() and _sha(paths.mimeapps.read_bytes()) == journal.get("mimeapps_after_sha256")
-        if desktop_ok and mime_ok:
+        package_ok = paths.mime_package is None or (
+            paths.mime_package.exists()
+            and _sha(paths.mime_package.read_bytes()) == journal.get("mime_package_after_sha256")
+        )
+        if desktop_ok and mime_ok and package_ok:
             return {"installed": True, "changed": False, "desktop_id": DESKTOP_ID}
         raise ConflictError("desktop integration changed since installation; uninstall or resolve it first")
     if paths.desktop.exists() and paths.desktop.read_bytes() != desired_desktop:
         raise ConflictError(f"refusing to overwrite existing desktop entry: {paths.desktop}")
+    if (
+        paths.mime_package is not None
+        and paths.mime_package.exists()
+        and paths.mime_package.read_bytes() != MIME_PACKAGE
+    ):
+        raise ConflictError(f"refusing to overwrite existing MIME package: {paths.mime_package}")
 
     desktop_before = paths.desktop.read_bytes() if paths.desktop.exists() else None
     mime_before = paths.mimeapps.read_bytes() if paths.mimeapps.exists() else None
+    package_before = (
+        paths.mime_package.read_bytes()
+        if paths.mime_package is not None and paths.mime_package.exists()
+        else None
+    )
     mime_after = _integrated_mimeapps(mime_before or b"")
     _atomic_bytes(paths.desktop, desired_desktop, 0o644)
     _atomic_bytes(paths.mimeapps, mime_after)
+    if paths.mime_package is not None:
+        _atomic_bytes(paths.mime_package, MIME_PACKAGE, 0o644)
     journal = {
         "schema": 1,
         "desktop_id": DESKTOP_ID,
@@ -183,9 +223,14 @@ def _install_locked(paths: IntegrationPaths, executable: Path | None = None) -> 
         "desktop_after_sha256": _sha(desired_desktop),
         "mimeapps_before": base64.b64encode(mime_before).decode() if mime_before is not None else None,
         "mimeapps_after_sha256": _sha(mime_after),
+        "mime_package_before": (
+            base64.b64encode(package_before).decode() if package_before is not None else None
+        ),
+        "mime_package_after_sha256": _sha(MIME_PACKAGE) if paths.mime_package is not None else None,
     }
     write_json_atomic(paths.journal, journal)
     _refresh_desktop_database(paths.desktop)
+    _refresh_mime_database(paths.mime_package)
     return {"installed": True, "changed": True, "desktop_id": DESKTOP_ID}
 
 
@@ -229,8 +274,19 @@ def _uninstall_locked(paths: IntegrationPaths) -> dict[str, Any]:
                         remaining = [value for value in values if value != DESKTOP_ID]
                         text = _set_mime_values(text, section, mime, remaining or None)
             _atomic_bytes(paths.mimeapps, text.encode())
+    package_sha = journal.get("mime_package_after_sha256")
+    if paths.mime_package is not None and package_sha and paths.mime_package.exists():
+        if _sha(paths.mime_package.read_bytes()) == package_sha:
+            previous = journal.get("mime_package_before")
+            if previous is None:
+                paths.mime_package.unlink()
+            else:
+                _atomic_bytes(paths.mime_package, base64.b64decode(previous), 0o644)
+        else:
+            conflicts.append(str(paths.mime_package))
     if conflicts:
         raise ConflictError("modified integration file was preserved: " + ", ".join(conflicts))
     paths.journal.unlink()
     _refresh_desktop_database(paths.desktop)
+    _refresh_mime_database(paths.mime_package)
     return {"installed": False, "changed": True, "desktop_id": DESKTOP_ID}

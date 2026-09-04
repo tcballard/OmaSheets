@@ -46,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     window = commands.add_parser("window", help="Open a workbook in the native OmaSheets window")
     window.add_argument("path", type=Path)
     commands.add_parser("window-current", help="Open the selected workbook in the OmaSheets window")
+    launch = commands.add_parser("launch", help="Open a compatibility or native OmaSheets document")
+    launch.add_argument("path", type=Path)
     convert = commands.add_parser("convert", help="Convert .xls to a new adjacent .xlsx")
     convert.add_argument("path", type=Path)
     doctor = commands.add_parser("doctor", help="Check the local OmaSheets runtime")
@@ -128,6 +130,32 @@ def main(argv: list[str] | None = None) -> int:
             session = service.current_resource()
             if not session.get("selected"):
                 raise SystemExit("No workbook is selected.")
+        path = service.current_local_path()
+        context = service.prepare_window_context(session["session_id"])
+        pid = open_window(
+            path,
+            context_path=context,
+            session_id=session["session_id"],
+            revision=session["revision"],
+            bridge_path=bridge_path(service.paths),
+            diff_path=overlay_path(service.paths.runtime),
+            cli_path=Path(sys.argv[0]).resolve(),
+        )
+        print(json.dumps({"pid": pid, "session_id": session["session_id"], "window": "omasheets"}, sort_keys=True))
+        return 0
+    if arguments.command == "launch":
+        if arguments.path.suffix.lower() == ".omasheets":
+            from .native_grid import open_grid
+
+            pid = open_grid(arguments.path)
+            print(json.dumps({"pid": pid, "window": "native-grid"}, sort_keys=True))
+            return 0
+        from .diff_overlay import overlay_path
+        from .live_bridge import bridge_path
+        from .native_window import open_window
+
+        service = _service()
+        session = service.select_workbook(arguments.path)
         path = service.current_local_path()
         context = service.prepare_window_context(session["session_id"])
         pid = open_window(

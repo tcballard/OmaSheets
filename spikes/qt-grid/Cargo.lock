@@ -674,8 +674,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "omasheets-qt-grid-spike"
-version = "0.0.0"
+name = "omasheets-grid"
+version = "0.0.2"
 dependencies = [
  "cxx",
  "cxx-qt",

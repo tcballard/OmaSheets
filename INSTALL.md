@@ -78,10 +78,12 @@ The bootstrap installs these surfaces together:
 - Python package and native binaries under
   `$XDG_DATA_HOME/omasheets/app/` (normally `~/.local/share/omasheets/app/`);
 - the stable `~/.local/bin/omasheets` launcher;
+- the source-bound `omasheets-grid` Qt executable for native documents;
 - the Codex plugin under `~/.codex/plugins/omasheets/`, with an absolute MCP
   command and a personal marketplace entry in
   `~/.agents/plugins/marketplace.json`;
-- the desktop entry under `$XDG_DATA_HOME/applications/`; and
+- the desktop entry under `$XDG_DATA_HOME/applications/`;
+- the native MIME declaration under `$XDG_DATA_HOME/mime/packages/`; and
 - OmaSheets MIME associations in `$XDG_CONFIG_HOME/mimeapps.list`.
 
 Private workbook state, receipts and installation journals live under
@@ -100,8 +102,8 @@ omasheets doctor
 omasheets --version
 ```
 
-`doctor` must report Bubblewrap, LibreOffice, Python UNO, the native window,
-desktop integration and the Omarchy plugin. Restart or refresh Codex after the
+`doctor` must report Bubblewrap, LibreOffice, Python UNO, the compatibility
+window, native Qt grid, desktop integration and the Omarchy plugin. Restart or refresh Codex after the
 first installation so it discovers the new personal plugin and MCP server.
 
 Open or select a workbook, then choose **Ask Agent** from either the native

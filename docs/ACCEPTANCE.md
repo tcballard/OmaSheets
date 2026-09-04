@@ -19,12 +19,40 @@ omarchy plugin validate ~/.config/omarchy/plugins/io.github.tcballard.omasheets
 ```
 
 `doctor` must report Bubblewrap, LibreOffice, Python UNO, the native engine,
-desktop integration and the Omarchy plugin as ready. Confirm Codex lists the
+the Qt grid, desktop integration and the Omarchy plugin as ready. Confirm Codex lists the
 OmaSheets personal plugin after a refresh/restart and can start its MCP server.
 
 Use disposable workbooks containing formulas, formatting, a chart, multiple
 sheets, and one filename with spaces and shell punctuation. Record SHA-256
 hashes before every mutation test.
+
+## Native Qt grid on Wayland
+
+1. Create or import a disposable `.omasheets` document with at least two sheets,
+   formulas, text, numbers and enough rows and columns to scroll in both axes.
+2. Run `omasheets launch sample.omasheets`. Confirm the Qt grid opens, shows the
+   document's sheets and cells, and does not open LibreOffice Calc.
+3. Double-click the same document in the file manager. Confirm the
+   `application/x-omasheets` association routes it through the same grid.
+4. Edit a value and formula, switch sheets, close the grid, reopen the document
+   and confirm deterministic replay preserved the edits. Retain the document
+   digest from before and after replay.
+5. Exercise keyboard navigation and editing with arrows, Enter, F2, Escape,
+   Page Up, Page Down, Home and End. Repeat at 100%, 150% and 200% display scale.
+6. With an Omarchy theme active, confirm grid chrome and semantic colors follow
+   the resolved theme without making selection, errors or focus ambiguous.
+7. Test keyboard-only operation with the accessibility inspector enabled.
+   Record the exposed roles, names, focus order and any blockers; do not infer
+   accessibility from appearance alone.
+8. Measure the roadmap fixtures on the declared hardware: cold open of 10 MB /
+   100k cells, keystroke-to-paint p95, one-million-row continuous scroll, and
+   idle RSS. Record cold/warm state and the exact metric for each result.
+9. Close the grid and confirm a transient native service exits. Repeat while the
+   opt-in user service is already running and confirm the grid reuses it and
+   leaves it running.
+
+Passing this section supplies the hands-on Wayland, input, theme and
+accessibility evidence that CI's Xvfb launch cannot provide.
 
 ## Native LibreOfficeKit window on Wayland
 

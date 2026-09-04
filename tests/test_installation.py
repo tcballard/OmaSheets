@@ -36,6 +36,7 @@ class InstallationTests(unittest.TestCase):
                 root / "data/applications" / DESKTOP_ID,
                 root / "config/mimeapps.list",
                 root / "state/omasheets/desktop-integration.json",
+                root / "data/mime/packages/io.github.tcballard.OmaSheets.xml",
             ),
             user_service=UserServicePaths(
                 root / "data/omasheets/app/bin/omasheets-service",
@@ -81,6 +82,7 @@ class InstallationTests(unittest.TestCase):
         self.assertTrue(self.paths.service_launcher.is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-window").is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-service").is_file())
+        self.assertTrue((self.paths.app / "bin/omasheets-grid").is_file())
         mcp = json.loads((self.paths.codex_plugin / ".mcp.json").read_text())
         self.assertEqual(mcp["mcpServers"]["omasheets"]["command"], str(self.paths.launcher))
         marketplace = json.loads(self.paths.codex_marketplace.read_text())
@@ -122,7 +124,10 @@ class InstallationTests(unittest.TestCase):
         download.assert_not_called()
 
     def test_user_dependencies_are_runtime_only(self):
-        self.assertEqual(ARCH_PACKAGES, ("gtk3", "libreoffice-fresh", "bubblewrap"))
+        self.assertEqual(ARCH_PACKAGES, (
+            "gtk3", "libreoffice-fresh", "bubblewrap",
+            "qt6-base", "qt6-declarative", "qt6-wayland",
+        ))
         for build_tool in ("gcc", "make", "cmake", "pkgconf", "libreoffice-fresh-sdk"):
             self.assertNotIn(build_tool, ARCH_PACKAGES)
 

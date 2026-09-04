@@ -110,16 +110,15 @@ public compatibility claims.
 - Add inferred base column types without silently coercing mixed data.
 - Expose one loopback-only local service with per-session authentication and a
   CLI over the same API.
-- Spike a keyboard-first virtualised grid, including provenance indicators,
+- Ship a keyboard-first virtualised grid, including provenance indicators,
   formula-range overlays, half-tile layouts and full mouse-optional operation.
-  Qt 6, Qt Quick and CXX-Qt are the selected spike candidate, not accepted
-  dependencies until the customization and accessibility review in
-  `docs/M1-GRID-SPIKE.md` passes. The candidate inherits Omarchy's active
+  Qt 6, Qt Quick and CXX-Qt were accepted by the maintainer on 2026-09-04.
+  The production grid inherits Omarchy's active
   semantic palette rather than maintaining a separate application theme, and
   pages native document cells through the authenticated local service with
   stable-ID sheet switching.
 - Keep the current LibreOfficeKit window available for compatibility documents
-  while the native grid is incomplete.
+  while the native document format remains an alpha surface.
 
 **Exit gate:** the maintainer uses a native document for at least one recurring
 dogfood workload, every native edit replays bit-identically, and the grid spike

@@ -18,9 +18,10 @@ installs the native window and local agent service without requiring a compiler
 or LibreOffice SDK. See [installation and reversible removal](INSTALL.md).
 
 **Current boundary:** LibreOffice Calc remains the compatibility and calculation
-engine in v0.0.2. Agents can read and stage changes; only an explicit local
-OmaSheets approval can publish them. The native event store, formula engine, and
-virtualised grid remain measured [roadmap](docs/ROADMAP.md) work.
+engine in the released v0.0.2 product. Agents can read and stage changes; only
+an explicit local OmaSheets approval can publish them. Development builds also
+ship the native event store, formula engine, local service, and virtualised Qt
+grid for `.omasheets` documents on the measured [v0.1.0 roadmap](docs/ROADMAP.md).
 
 ## v0.0.2 scope
 
@@ -54,8 +55,8 @@ The product and safety contracts are in [`docs/`](docs/).
 The in-place native-core decision and its measured milestone gates are in
 [`ADR-0003`](docs/ADR-0003-EVENT-SOURCED-NATIVE-CORE.md) and the
 [`OmaSheets roadmap`](docs/ROADMAP.md). The v0.0.2 release remains the
-compatibility and agent-safety baseline; it does not claim that the native
-event store, formula engine, or virtualised grid already exists.
+compatibility and agent-safety baseline. The native document stack now exists
+on the development branch, but it is not a released compatibility claim.
 The evidence required before the first public native alpha is listed separately
 in the [`v0.1.0 native release gate`](docs/V0.1-RELEASE.md).
 The native service can also convert a bounded `.xlsx` source into a new
@@ -73,8 +74,9 @@ omarchy plugin add https://github.com/tcballard/OmaSheets.git --enable
 
 The command installs and enables the Omarchy bar surface. Choose **Install
 OmaSheets** there to run the privilege-free, user-local bootstrap for the native
-window, Python service, Codex plugin, MCP server, desktop entry and MIME
-associations. The bootstrap downloads the native executables built by the
+Qt grid, compatibility window, local services, Codex plugin, MCP server,
+desktop entry and MIME associations. The bootstrap downloads the native
+executables built by the
 matching GitHub release and verifies their maintainer signature against the
 key pinned in the checkout, then their checksum, version, architecture,
 source commit, tracked-source digest and individual file hashes, before
@@ -102,6 +104,8 @@ audit, and audit-backed management summaries with pivots and charts.
 
 ```bash
 omasheets doctor
+omasheets launch workbook.omasheets
+omasheets launch workbook.xlsx
 omasheets open workbook.xls
 omasheets window workbook.xlsx
 omasheets select workbook.xlsx
@@ -117,6 +121,12 @@ omasheets lok render workbook.xls --output /tmp/workbook-tile.ppm
 
 The real Omarchy, Wayland and LibreOffice release pass remains in
 [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).
+
+`omasheets launch` is the production desktop-entry boundary. It opens native
+`.omasheets` documents in the Qt grid and compatibility formats in the
+LibreOfficeKit window. The Qt grid starts an authenticated native service on
+demand, reuses an existing user service when one is already running, and stops
+only the transient service it owns when the launched grid closes.
 
 The native workbook window source is in
 [`native/libreofficekit/`](native/libreofficekit/). It embeds LibreOfficeKit's

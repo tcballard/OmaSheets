@@ -247,7 +247,7 @@ jobs:
           bash "$RUNNER_TEMP/omarchy-plugin-validate" .
 
   qt-grid-spike:
-    name: Qt native grid spike
+    name: Qt native grid
     runs-on: ubuntu-latest
     env:
       CARGO_INCREMENTAL: "0"
@@ -338,7 +338,7 @@ jobs:
             xvfb-run -a \
             /usr/bin/time -v -o "$evidence/resource.txt" \
             timeout 90 \
-            spikes/qt-grid/target/release/omasheets-qt-grid-spike \
+            spikes/qt-grid/target/release/omasheets-grid \
             > "$evidence/report.txt" 2> "$evidence/stderr.txt"
           python scripts/check_qt_grid_spike.py \
             --report "$evidence/report.txt" --require-omarchy-theme \
@@ -362,7 +362,7 @@ jobs:
     container:
       image: archlinux:base-devel
     steps:
-      - run: pacman -Syu --noconfirm --needed git cmake rust gtk3 libreoffice-fresh libreoffice-fresh-sdk
+      - run: pacman -Syu --noconfirm --needed git cmake rust gtk3 libreoffice-fresh libreoffice-fresh-sdk qt6-base qt6-declarative qt6-wayland
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Verify the release gate in Arch
         run: |
@@ -385,6 +385,7 @@ jobs:
           "$RUNNER_TEMP/native-smoke/bin/omasheets-window" --provenance
           "$RUNNER_TEMP/native-smoke/bin/omasheets-lok-render" --provenance
           "$RUNNER_TEMP/native-smoke/bin/omasheets-service" --provenance
+          "$RUNNER_TEMP/native-smoke/bin/omasheets-grid" --provenance
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: omasheets-native-linux-x86_64
@@ -409,7 +410,7 @@ jobs:
       XDG_CACHE_HOME: /tmp/omasheets-home/.cache
       XDG_RUNTIME_DIR: /tmp/omasheets-runtime
     steps:
-      - run: pacman -Syu --noconfirm --needed git gtk3 libreoffice-fresh bubblewrap jq ttf-dejavu xorg-server-xvfb
+      - run: pacman -Syu --noconfirm --needed git gtk3 libreoffice-fresh bubblewrap jq ttf-dejavu xorg-server-xvfb qt6-base qt6-declarative qt6-wayland
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -449,7 +450,7 @@ jobs:
           expected = source_identity(plugin)
           receipt = json.loads((app / "provenance.json").read_text())
           assert receipt["source"] == expected
-          for binary in ("omasheets-window", "omasheets-lok-render", "omasheets-service"):
+          for binary in ("omasheets-window", "omasheets-lok-render", "omasheets-service", "omasheets-grid"):
               report = json.loads(subprocess.check_output([app / "bin" / binary, "--provenance"], text=True))
               assert report["source_commit"] == expected["commit"]
               assert report["source_sha256"] == expected["sha256"]
@@ -464,6 +465,32 @@ jobs:
             --service "$service" \
             --workdir "$evidence" \
             > "$evidence/report.json"
+      - name: Open a native document through the installed production grid
+        run: |
+          evidence="$RUNNER_TEMP/native-service"
+          report="$evidence/installed-grid-report.txt"
+          env \
+            LIBGL_ALWAYS_SOFTWARE=1 \
+            QSG_RHI_BACKEND=opengl \
+            OMASHEETS_GRID_BENCHMARK=1 \
+            xvfb-run -a sh -ec '
+              "$HOME/.local/bin/omasheets" launch "$1" > "$2" &
+              wait "$!"
+              for _ in $(seq 1 400); do
+                if grep -q "^OMASHEETS_GRID_BENCHMARK " "$2"; then
+                  for _ in $(seq 1 100); do
+                    test -S "$XDG_RUNTIME_DIR/omasheets/native.sock" || exit 0
+                    sleep 0.05
+                  done
+                  exit 1
+                fi
+                sleep 0.05
+              done
+              exit 1
+            ' sh "$evidence/workflow.omasheets" "$report"
+          test ! -S "$XDG_RUNTIME_DIR/omasheets/native.sock"
+          python scripts/check_qt_grid_spike.py \
+            --report "$report" --require-native-document --require-multi-sheet
       - name: Create an Excel 97 fixture
         run: |
           mkdir -p "$RUNNER_TEMP/lok-input"
@@ -833,6 +860,7 @@ jobs:
           "$HOME/.local/bin/omasheets" uninstall
           test ! -e "$HOME/.local/bin/omasheets"
           test ! -e "$XDG_DATA_HOME/omasheets/app"
+          test ! -e "$XDG_DATA_HOME/mime/packages/io.github.tcballard.OmaSheets.xml"
           test ! -e "$HOME/.codex/plugins/omasheets"
           test -f "$HOME/.codex/plugins/keep-me/user.txt"
           test ! -e "$XDG_DATA_HOME/applications/io.github.tcballard.OmaSheets.desktop"

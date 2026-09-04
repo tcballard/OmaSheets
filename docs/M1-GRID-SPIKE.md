@@ -10,9 +10,11 @@ This fits Omarchy's Qt/QML shell environment while keeping OmaSheets a normal
 application window rather than adding long-running spreadsheet state to the
 desktop shell. The current LibreOfficeKit window remains the compatibility path.
 
-The spike is isolated from the release workspace. Promotion requires an explicit
-review of customization, accessibility, interaction latency, scrolling, memory,
-packaging, and the ongoing Qt dependency cost.
+The grid retains an isolated Rust dependency graph and lockfile, but is now a
+source-bound executable in the production native bundle. The installed launcher
+starts the authenticated local service on demand, and the desktop integration
+routes `.omasheets` documents to it. Customization, accessibility, interaction
+latency, scrolling and memory remain measured release-evidence gates.
 
 ## Scope
 
@@ -29,11 +31,11 @@ packaging, and the ongoing Qt dependency cost.
   values remain separate from editable formula source.
 - Repeatable headless wiring smoke plus a manual on-device evidence run.
 
-The spike now connects to `.omasheets` documents without making a Unix-socket
+The production grid connects to `.omasheets` documents without making a Unix-socket
 round trip for every painted cell. Reads and edits use the selected sheet's
 stable ID, and switching clears the page cache before repainting. Row/column
 insertion and production error recovery remain outside the candidate
-integration.
+integration. Row and column insertion remain outside the current grid surface.
 
 ## Non-gating CI observation
 
