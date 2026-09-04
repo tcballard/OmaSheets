@@ -610,7 +610,7 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
     assert_eq!(manifest.sheet, sheet_id);
     assert_eq!(manifest.sheet_name, "Forecast");
     assert_eq!((manifest.rows, manifest.columns), (2, 4));
-    assert_eq!(manifest.formula_cells, 1);
+    assert_eq!(manifest.formula_cells, 2);
     assert_eq!(manifest.potential_formula_injection_cells, 1);
     assert_eq!(manifest.limitations.len(), 3);
     assert_eq!(
