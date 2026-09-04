@@ -106,7 +106,7 @@ struct DocumentState {
     actor: String,
     pages: VecDeque<CachedPage>,
     requests: u64,
-    digest: String,
+    revision: String,
     undo: Vec<EditRecord>,
     redo: Vec<EditRecord>,
 }
@@ -166,7 +166,7 @@ impl GridDocument {
                 actor,
                 pages: VecDeque::new(),
                 requests: 2,
-                digest: summary["digest"].as_str().ok_or("document has no digest")?.to_string(),
+                revision: summary["revision"].as_str().ok_or("document has no revision")?.to_string(),
                 undo: Vec::new(),
                 redo: Vec::new(),
             }),
@@ -253,10 +253,10 @@ impl GridDocument {
 
     pub fn verify_revision(&self) -> Result<(), String> {
         let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
-        let request = json!({"kind": "document", "path": state.path, "branch": state.branch});
+        let request = json!({"kind": "revision", "path": state.path, "branch": state.branch});
         let summary = state.client.call(&request)?;
         state.requests += 1;
-        if summary["digest"].as_str() != Some(state.digest.as_str()) {
+        if summary["revision"].as_str() != Some(state.revision.as_str()) {
             return Err("document changed; reopen before copying or editing".into());
         }
         Ok(())
@@ -302,14 +302,14 @@ fn apply_commands(state: &mut DocumentState, commands: &[Value]) -> Result<(), S
     let request = json!({
         "kind": "append_batch", "path": state.path, "branch": state.branch,
         "actor": {"kind": "human", "id": state.actor},
-        "commands": commands, "expected_digest": state.digest,
+        "commands": commands, "expected_revision": state.revision,
     });
     let response = state.client.call(&request)?;
-    if response["kind"] != "appended_batch" || !response["digest"].is_string() {
+    if response["kind"] != "appended_batch" || !response["revision"].is_string() {
         state.client.usable = false;
         return Err("save response was invalid; copy the draft and reopen to verify saved state".into());
     }
-    state.digest = response["digest"].as_str().unwrap().to_string();
+    state.revision = response["revision"].as_str().unwrap().to_string();
     state.requests += 1;
     state.pages.clear();
     Ok(())
@@ -518,15 +518,15 @@ mod tests {
                         "row_start":0,"column_start":0,"rows":4,"columns":4,
                         "cells": if step == 8 { vec![json!({"row":0,"column":0,"value":{"type":"number","value":5}})] } else { vec![] }}})
                 } else if step == 9 {
-                    assert_eq!(request["kind"], "document");
-                    json!({"ok":true,"response":{"kind":"document","digest":"changed-elsewhere"}})
+                    assert_eq!(request["kind"], "revision");
+                    json!({"ok":true,"response":{"kind":"document","revision":"changed-elsewhere"}})
                 } else {
                     assert_eq!(request["kind"], "append_batch");
-                    let (digest, next) = match step {
+                    let (revision, next) = match step {
                         1 => ("d0", "d1"), 2 => ("d1", "d2"), 3 => ("d2", "d3"),
                         4 | 5 => ("d3", "d4"), 7 => ("d4", "d5"), _ => unreachable!(),
                     };
-                    assert_eq!(request["expected_digest"], digest);
+                    assert_eq!(request["expected_revision"], revision);
                     let commands = request["commands"].as_array().unwrap();
                     assert_eq!(commands.len(), if step == 7 { 1 } else { 4 });
                     if step == 2 || step == 4 || step == 5 {
@@ -537,7 +537,7 @@ mod tests {
                     }
                     if step == 4 {
                         json!({"ok":false,"error":{"code":"document_changed","message":"stale"}})
-                    } else { json!({"ok":true,"response":{"kind":"appended_batch","digest":next}}) }
+                    } else { json!({"ok":true,"response":{"kind":"appended_batch","revision":next}}) }
                 };
                 writeln!(writer, "{response}").unwrap();
             }
@@ -547,7 +547,7 @@ mod tests {
             sheets: vec![SheetInfo {id:"sheet-id".into(),name:"Sheet".into(),rows:4,columns:4}],
             state: Mutex::new(DocumentState {client,path:PathBuf::from("test.omasheets"),branch:None,
                 current_sheet:0,actor:"test".into(),pages:VecDeque::new(),requests:0,
-                digest:"d0".into(),undo:Vec::new(),redo:Vec::new()}),
+                revision:"d0".into(),undo:Vec::new(),redo:Vec::new()}),
         };
         document.set_matrix(0,0,&[vec!["1".into(),"2".into()],vec!["3".into(),"4".into()]]).unwrap();
         document.undo(false).unwrap();

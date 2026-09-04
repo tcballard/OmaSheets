@@ -446,7 +446,9 @@ impl Store {
             self.load_reports.remove(&branch);
             return Err(error);
         }
-        self.maybe_snapshot(branch)?;
+        // A checkpoint is only a cache. Its failure must not turn a durable
+        // append into an apparent failed save that a client might retry.
+        let _ = self.maybe_snapshot(branch);
         Ok(event)
     }
 
@@ -460,6 +462,16 @@ impl Store {
         timestamp: i64,
         commands: Vec<Command>,
     ) -> Result<Vec<Event>, StoreError> {
+        if commands.len() == 1 {
+            return self
+                .append(
+                    branch,
+                    actor,
+                    timestamp,
+                    commands.into_iter().next().expect("one command"),
+                )
+                .map(|event| vec![event]);
+        }
         self.document(branch)?;
         let mut staged = self.documents[&branch].clone();
         let mut events = Vec::with_capacity(commands.len());
@@ -1005,6 +1017,40 @@ mod tests {
             let cell = document.resolve_a1(sheet, a1).unwrap();
             document.value(cell)
         }
+    }
+
+    #[test]
+    fn single_batch_persistence_failure_reloads_and_checkpoint_failure_keeps_saved_event() {
+        let path = temp_path("single-batch-failure");
+        let mut setup = Setup::new(&path);
+        let main = setup.main;
+        let before = setup.store.document(main).unwrap().digest();
+        let command = Command::SetValue {
+            sheet: setup.sheet,
+            a1: "A1".into(),
+            value: Literal::Number(42.0),
+        };
+        setup.store.connection.execute_batch("CREATE TRIGGER refuse_event BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT, 'injected'); END;").unwrap();
+        assert!(
+            setup
+                .store
+                .append_batch(main, human(), 2_000, vec![command.clone()])
+                .is_err()
+        );
+        assert_eq!(setup.store.document(main).unwrap().digest(), before);
+        setup.store.connection.execute_batch("DROP TRIGGER refuse_event; CREATE TRIGGER refuse_snapshot BEFORE INSERT ON snapshots BEGIN SELECT RAISE(ABORT, 'injected'); END;").unwrap();
+        setup.store.set_snapshot_interval(1);
+        let events = setup
+            .store
+            .append_batch(main, human(), 2_001, vec![command])
+            .unwrap();
+        setup.store.evict();
+        assert_eq!(
+            setup.store.document(main).unwrap().head(),
+            Some(events[0].id)
+        );
+        assert_eq!(setup.value(main, "A1"), CellValue::Number(42.0));
+        cleanup(&path);
     }
 
     #[test]

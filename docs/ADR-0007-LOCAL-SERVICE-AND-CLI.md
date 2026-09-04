@@ -22,12 +22,20 @@ grid, an agent bridge and a person's shell can share.
   branch, check, diff, merge, bounded XLSX import, CSV export and snapshot. `Command` from the
   event core is serialisable so an append carries the same command the library
   takes. `append_batch` accepts 1–1,000 commands in `commands`, with the same
-  `path`, optional `branch` and `actor` fields as `append`. All commands stage
-  against one document clone and commit in one SQLite transaction; a rejected
+  `path`, optional `branch` and `actor` fields as `append`. Multiple commands stage
+  against one document clone and commit in one SQLite transaction; a single
+  command uses the existing append path without cloning. A rejected
   command leaves both cached and durable state unchanged. The response kind is
-  `appended_batch`, containing the ordered `events` and resulting `digest`.
+  `appended_batch`, containing the ordered `events` and resulting `revision`.
   An optional `expected_digest` rejects a stale batch before staging commands,
   allowing grid paste and undo to refuse conflicting intervening edits.
+  Revision-aware clients instead send `expected_revision`, a token identifying
+  the document, branch and event head. The `revision` request returns this token
+  without hashing or projecting the document. Responses include `digest` only
+  for legacy batches without `expected_revision`; if both guards are supplied,
+  both must match. Canonical digests remain in summaries, exports and checkpoints.
+  A failed automatic checkpoint cannot reject an already durable append; explicit
+  snapshot and close requests still report checkpoint failures.
   Actor restrictions are
   identical to single-command appends.
 - **`Service` is the in-process form.** The CLI, tests and any embedding

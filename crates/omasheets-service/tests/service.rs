@@ -62,6 +62,72 @@ fn agent(id: &str) -> Actor {
     Actor::new(ActorKind::Agent, id)
 }
 
+#[test]
+fn revision_guard_rejects_stale_and_wrong_document_tokens_without_hashing_response() {
+    let path = temp_document();
+    let mut service = Service::new(|| 1);
+    service
+        .handle(Request::Create {
+            path: path.clone(),
+            name: "Revisions".into(),
+            actor: human("tom"),
+        })
+        .unwrap();
+    let read = |service: &mut Service| match service
+        .handle(Request::Revision {
+            path: path.clone(),
+            branch: None,
+        })
+        .unwrap()
+    {
+        Response::Revision { revision } => revision,
+        other => panic!("{other:?}"),
+    };
+    let initial = read(&mut service);
+    let edit = |token: String, name: &str| Request::AppendBatch {
+        path: path.clone(),
+        branch: None,
+        actor: human("tom"),
+        commands: vec![Command::AddSheet { name: name.into() }],
+        expected_digest: None,
+        expected_revision: Some(token),
+    };
+    assert_eq!(
+        service
+            .handle(edit(format!("wrong:{initial}"), "Wrong"))
+            .unwrap_err()
+            .code,
+        "document_changed"
+    );
+    let response = service.handle(edit(initial.clone(), "First")).unwrap();
+    let after = read(&mut service);
+    assert_ne!(initial, after);
+    assert!(
+        matches!(&response, Response::AppendedBatch {events, digest: None, revision} if events.len() == 1 && *revision == after)
+    );
+    assert!(
+        serde_json::to_value(response)
+            .unwrap()
+            .get("digest")
+            .is_none()
+    );
+    assert_eq!(
+        service.handle(edit(initial, "Stale")).unwrap_err().code,
+        "document_changed"
+    );
+    // A rejected single-command fast path also leaves the head untouched.
+    assert!(service.handle(edit(after.clone(), "First")).is_err());
+    assert_eq!(read(&mut service), after);
+    service
+        .handle(Request::Close { path: path.clone() })
+        .unwrap();
+    assert_eq!(read(&mut service), after);
+    service
+        .handle(Request::Close { path: path.clone() })
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+}
+
 fn sheet_of(service: &mut Service, path: &Path, branch: Option<&str>) -> String {
     match service
         .handle(Request::Document {
@@ -118,6 +184,7 @@ fn batches_are_atomic_bounded_and_preserve_actor_restrictions() {
         actor,
         commands,
         expected_digest: None,
+        expected_revision: None,
     };
     let add = || Command::AddSheet {
         name: "Sheet".into(),
@@ -164,6 +231,7 @@ fn batches_are_atomic_bounded_and_preserve_actor_restrictions() {
             name: "Stale".into(),
         }],
         expected_digest: Some(before),
+        expected_revision: None,
     };
     assert_eq!(service.handle(stale).unwrap_err().code, "document_changed");
     assert_eq!(summary(&mut service).digest, after.digest);
