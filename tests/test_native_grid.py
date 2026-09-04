@@ -3,6 +3,7 @@ from io import StringIO
 import os
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
@@ -12,6 +13,98 @@ from omasheets.native_grid import open_grid, status
 
 
 class NativeGridTests(unittest.TestCase):
+    def test_startup_timeout_stops_the_owned_service(self):
+        from omasheets.native_grid import _ensure_native_service
+
+        service = Mock()
+        service.poll.return_value = None
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "omasheets.native_grid._service_socket_ready", return_value=False,
+        ), patch(
+            "omasheets.native_grid.service_executable", return_value=Path("/service"),
+        ), patch(
+            "omasheets.native_grid.subprocess.Popen", return_value=service,
+        ), patch("omasheets.native_grid.time.sleep"), self.assertRaisesRegex(
+            EngineError, "did not become ready",
+        ):
+            _ensure_native_service(Path(temporary))
+        service.terminate.assert_called_once_with()
+        service.wait.assert_called_once_with(timeout=5)
+
+    def test_missing_grid_does_not_start_a_service(self):
+        from omasheets.native_grid import _run_host
+
+        with patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/runtime"}), patch(
+            "omasheets.native_grid.grid_executable", return_value=None,
+        ), patch("omasheets.native_grid._ensure_native_service") as ensure:
+            with self.assertRaisesRegex(EngineError, "omasheets-grid"):
+                _run_host(Path("book.omasheets"))
+        ensure.assert_not_called()
+
+    def test_owner_keeps_service_alive_until_other_window_closes(self):
+        from omasheets.native_grid import _run_host
+
+        owner_ready = threading.Event()
+        peer_ready = threading.Event()
+        close_owner = threading.Event()
+        close_peer = threading.Event()
+        owner_window_closed = threading.Event()
+        stopped = threading.Event()
+        errors = []
+        service = Mock()
+
+        def ensure(_runtime):
+            return service if threading.current_thread().name == "owner" else None
+
+        def spawn(*args, **kwargs):
+            grid = Mock()
+            is_owner = threading.current_thread().name == "owner"
+            (owner_ready if is_owner else peer_ready).set()
+
+            def wait():
+                if not (close_owner if is_owner else close_peer).wait(5):
+                    raise AssertionError("test window was not closed")
+                if is_owner:
+                    owner_window_closed.set()
+                return 0
+
+            grid.wait.side_effect = wait
+            return grid
+
+        def host():
+            try:
+                _run_host(Path("book.omasheets"))
+            except BaseException as error:
+                errors.append(error)
+
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(
+            os.environ, {"XDG_RUNTIME_DIR": temporary},
+        ), patch("omasheets.native_grid.grid_executable", return_value=Path("/grid")), patch(
+            "omasheets.native_grid._ensure_native_service", side_effect=ensure,
+        ), patch("omasheets.native_grid.subprocess.Popen", side_effect=spawn), patch(
+            "omasheets.native_grid._stop_native_service", side_effect=lambda *_: stopped.set(),
+        ) as stop:
+            owner = threading.Thread(target=host, name="owner")
+            peer = threading.Thread(target=host, name="peer")
+            owner.start()
+            try:
+                self.assertTrue(owner_ready.wait(3))
+                peer.start()
+                self.assertTrue(peer_ready.wait(3))
+                close_owner.set()
+                self.assertTrue(owner_window_closed.wait(3))
+                self.assertFalse(stopped.wait(0.1))
+            finally:
+                close_owner.set()
+                close_peer.set()
+                owner.join(5)
+                if peer.ident is not None:
+                    peer.join(5)
+            self.assertFalse(owner.is_alive())
+            self.assertFalse(peer.is_alive())
+            self.assertEqual(errors, [])
+            stop.assert_called_once_with(Path(temporary), service)
+
     def test_status_reports_the_production_install_boundary(self):
         with patch("omasheets.native_grid.grid_executable", return_value=Path("/usr/bin/omasheets-grid")):
             result = status()

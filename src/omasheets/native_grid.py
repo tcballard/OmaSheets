@@ -62,11 +62,16 @@ def _service_socket_ready(path: Path) -> bool:
         return False
 
 
-def _ensure_native_service(runtime: Path) -> subprocess.Popen | None:
+def _service_directory(runtime: Path) -> Path:
     directory = runtime / "omasheets"
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
     if stat.S_IMODE(directory.stat().st_mode) & 0o077:
         raise EngineError(f"{directory} must not be readable by other users")
+    return directory
+
+
+def _ensure_native_service(runtime: Path) -> subprocess.Popen | None:
+    directory = _service_directory(runtime)
     socket_path = directory / "native.sock"
     if _service_socket_ready(socket_path):
         return None
@@ -95,6 +100,7 @@ def _ensure_native_service(runtime: Path) -> subprocess.Popen | None:
             if process.poll() is not None:
                 break
             time.sleep(0.05)
+    _stop_native_service(runtime, process)
     raise EngineError("the native document service did not become ready")
 
 
@@ -121,22 +127,31 @@ def _stop_native_service(runtime: Path, process: subprocess.Popen) -> None:
 
 def _run_host(source: Path) -> int:
     runtime = _runtime_base()
-    owned_service = _ensure_native_service(runtime)
     executable = grid_executable()
     if executable is None:
         raise EngineError("omasheets-grid is not installed; run OmaSheets setup from the Omarchy widget")
     environment = os.environ.copy()
     environment["OMASHEETS_DOCUMENT"] = str(source)
-    try:
-        grid = subprocess.Popen(
-            [str(executable), str(source)],
-            env=environment,
-            close_fds=True,
-        )
-        return grid.wait()
-    finally:
-        if owned_service is not None:
-            _stop_native_service(runtime, owned_service)
+    # Every grid holds a shared lease, including grids reusing a service.
+    # The owning supervisor survives its window until all leases are released.
+    # An exclusive lease also prevents a new window racing service shutdown.
+    lease_path = _service_directory(runtime) / "grid-clients.lock"
+    with lease_path.open("a+b") as lease:
+        os.chmod(lease_path, 0o600)
+        fcntl.flock(lease, fcntl.LOCK_SH)
+        owned_service = _ensure_native_service(runtime)
+        try:
+            grid = subprocess.Popen(
+                [str(executable), str(source)],
+                env=environment,
+                close_fds=True,
+            )
+            return grid.wait()
+        finally:
+            fcntl.flock(lease, fcntl.LOCK_UN)
+            if owned_service is not None:
+                fcntl.flock(lease, fcntl.LOCK_EX)
+                _stop_native_service(runtime, owned_service)
 
 
 def open_grid(path: Path) -> int:
