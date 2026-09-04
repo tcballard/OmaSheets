@@ -56,6 +56,8 @@ The in-place native-core decision and its measured milestone gates are in
 [`OmaSheets roadmap`](docs/ROADMAP.md). The v0.0.2 release remains the
 compatibility and agent-safety baseline; it does not claim that the native
 event store, formula engine, or virtualised grid already exists.
+The evidence required before the first public native alpha is listed separately
+in the [`v0.1.0 native release gate`](docs/V0.1-RELEASE.md).
 
 ## Install on Omarchy
 

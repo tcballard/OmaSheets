@@ -96,6 +96,36 @@ fn the_cli_drives_the_service_through_the_socket_with_a_session_token() {
     assert_eq!(code, 0);
     assert_eq!(summary["response"]["sheets"][0]["name"], "Model");
     assert_eq!(summary["response"]["event_count"], 2);
+    let sheet = summary["response"]["sheets"][0]["id"].as_str().unwrap();
+    for command in [
+        format!(r#"{{"command":"add_columns","sheet":"{sheet}","count":1,"at":0}}"#),
+        format!(
+            r#"{{"command":"add_rows","sheet":"{sheet}","count":1,"at":0,"table":null}}"#
+        ),
+        format!(
+            r#"{{"command":"set_value","sheet":"{sheet}","a1":"A1","value":{{"type":"text","value":"portable"}}}}"#
+        ),
+    ] {
+        let (code, appended) = call(
+            &server,
+            &format!(
+                r#"{{"kind":"append","path":"{path}","actor":{{"kind":"human","id":"tom"}},"command":{command}}}"#
+            ),
+        );
+        assert_eq!(code, 0, "{appended}");
+    }
+    let csv = server.runtime.join("plan.csv");
+    let (code, exported) = call(
+        &server,
+        &format!(
+            r#"{{"kind":"export_csv","path":"{path}","sheet":"{sheet}","output":"{}"}}"#,
+            csv.display()
+        ),
+    );
+    assert_eq!(code, 0, "{exported}");
+    assert_eq!(exported["response"]["kind"], "exported_csv");
+    assert_eq!(exported["response"]["rows"], 1);
+    assert_eq!(std::fs::read_to_string(csv).unwrap(), "portable");
 
     // A refusal is a JSON error with a stable code and exit status 2.
     let (code, refused) = call(

@@ -413,6 +413,182 @@ fn one_api_drives_the_whole_branch_workflow() {
 }
 
 #[test]
+fn csv_export_is_bounded_disclosed_and_never_overwrites() {
+    let path = temp_document();
+    let output = path.with_extension("csv");
+    let mut service = Service::new(|| 1);
+    service
+        .handle(Request::Create {
+            path: path.clone(),
+            name: "Export fixture".into(),
+            actor: human("tom"),
+        })
+        .unwrap();
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::AddSheet {
+            name: "Forecast".into(),
+        },
+    )
+    .unwrap();
+    let sheet = sheet_of(&mut service, &path, None);
+    let sheet_id = omasheets_core::SheetId(omasheets_core::ObjectId::parse(&sheet).unwrap());
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::AddColumns {
+            sheet: sheet_id,
+            count: 4,
+            at: 0,
+        },
+    )
+    .unwrap();
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::AddRows {
+            sheet: sheet_id,
+            count: 2,
+            at: 0,
+            table: None,
+        },
+    )
+    .unwrap();
+    for (a1, value) in [
+        ("A1", Literal::Text("hello, \"world\"".into())),
+        ("C1", Literal::Number(2.0)),
+        ("A2", Literal::Text("=not-a-formula".into())),
+        ("B2", Literal::Boolean(true)),
+    ] {
+        append(
+            &mut service,
+            &path,
+            None,
+            human("tom"),
+            Command::SetValue {
+                sheet: sheet_id,
+                a1: a1.into(),
+                value,
+            },
+        )
+        .unwrap();
+    }
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::SetFormula {
+            sheet: sheet_id,
+            a1: "D1".into(),
+            source: "=C1*2".into(),
+        },
+    )
+    .unwrap();
+
+    let exported = service
+        .handle(Request::ExportCsv {
+            path: path.clone(),
+            branch: None,
+            sheet: sheet.clone(),
+            output: output.clone(),
+        })
+        .unwrap();
+    let Response::ExportedCsv(manifest) = exported else {
+        panic!("{exported:?}")
+    };
+    assert_eq!(manifest.format, "csv-rfc4180");
+    assert_eq!(manifest.branch, "main");
+    assert_eq!(manifest.sheet, sheet_id);
+    assert_eq!(manifest.sheet_name, "Forecast");
+    assert_eq!((manifest.rows, manifest.columns), (2, 4));
+    assert_eq!(manifest.formula_cells, 1);
+    assert_eq!(manifest.potential_formula_injection_cells, 1);
+    assert_eq!(manifest.limitations.len(), 3);
+    assert_eq!(
+        std::fs::read_to_string(&output).unwrap(),
+        "\"hello, \"\"world\"\"\",,2,4\r\n=not-a-formula,TRUE,,"
+    );
+
+    let refused = service.handle(Request::ExportCsv {
+        path: path.clone(),
+        branch: None,
+        sheet,
+        output: output.clone(),
+    });
+    assert!(
+        matches!(refused, Err(ServiceError { ref code, .. }) if code == "output_exists")
+    );
+    assert_eq!(
+        std::fs::read_to_string(&output).unwrap(),
+        "\"hello, \"\"world\"\"\",,2,4\r\n=not-a-formula,TRUE,,"
+    );
+
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::SetValue {
+            sheet: sheet_id,
+            a1: "A1".into(),
+            value: Literal::Text("🧪".repeat(omasheets_core::MAX_TEXT_CHARS)),
+        },
+    )
+    .unwrap();
+    append(
+        &mut service,
+        &path,
+        None,
+        human("tom"),
+        Command::SetFormula {
+            sheet: sheet_id,
+            a1: "B1".into(),
+            source: "=A1&A1&A1&A1&A1&A1&A1&A1".into(),
+        },
+    )
+    .unwrap();
+    let oversized = path.with_extension("oversized.csv");
+    let refused = service.handle(Request::ExportCsv {
+        path: path.clone(),
+        branch: None,
+        sheet: sheet_id.to_string(),
+        output: oversized.clone(),
+    });
+    assert!(
+        matches!(refused, Err(ServiceError { ref code, .. }) if code == "field_too_large")
+    );
+    assert!(!oversized.exists(), "failed export must not leave output");
+    let part_prefix = format!(
+        ".{}.",
+        oversized.file_name().unwrap().to_string_lossy()
+    );
+    assert!(
+        std::fs::read_dir(oversized.parent().unwrap())
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&part_prefix)),
+        "failed export must clean its temporary file"
+    );
+
+    service.close_all().unwrap();
+    let _ = std::fs::remove_file(output);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
+
+#[test]
 fn requests_and_responses_round_trip_as_tagged_json() {
     let request = Request::Append {
         path: "/tmp/x.omasheets".into(),

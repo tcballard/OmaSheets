@@ -17,15 +17,22 @@ use omasheets_store::{BranchDiff, LoadReport, MergeReport, Store, StoreError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fs::OpenOptions;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Largest cell page one `cells` request returns.
 pub const MAX_CELL_PAGE: usize = 10_000;
 /// Largest rectangular grid page one `grid_page` request may inspect.
 pub const MAX_GRID_PAGE_CELLS: usize = 10_000;
+/// Largest native CSV projection, checked before the output file is created.
+pub const MAX_CSV_EXPORT_CELLS: usize = 10_000_000;
 const DEFAULT_CELL_PAGE: usize = 1_000;
 const MAX_ACTOR_CHARS: usize = 128;
+const MAX_CSV_FIELD_BYTES: usize = 1_000_000;
 const MAIN_BRANCH: &str = "main";
+static EXPORT_NONCE: AtomicU64 = AtomicU64::new(0);
 
 /// What a client asks for. Every request names the document by path, so
 /// one service can hold several documents open at once.
@@ -123,6 +130,15 @@ pub enum Request {
         target: Option<String>,
         approver: Actor,
     },
+    /// Project one native sheet's calculated values to a new CSV file. The
+    /// destination is never overwritten and formulas are disclosed as values.
+    ExportCsv {
+        path: PathBuf,
+        #[serde(default)]
+        branch: Option<String>,
+        sheet: String,
+        output: PathBuf,
+    },
     Snapshot {
         path: PathBuf,
         #[serde(default)]
@@ -203,6 +219,21 @@ pub struct GridPage {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CsvExportManifest {
+    pub format: String,
+    pub output: PathBuf,
+    pub branch: String,
+    pub sheet: SheetId,
+    pub sheet_name: String,
+    pub rows: usize,
+    pub columns: usize,
+    pub document_digest: String,
+    pub formula_cells: usize,
+    pub potential_formula_injection_cells: usize,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Response {
     Created {
@@ -230,6 +261,7 @@ pub enum Response {
     },
     Diff(BranchDiff),
     Merged(MergeReport),
+    ExportedCsv(CsvExportManifest),
     Snapshot {
         digest: String,
     },
@@ -327,6 +359,155 @@ fn canonical(path: &Path) -> Result<PathBuf, ServiceError> {
         ServiceError::new("invalid_path", format!("{}: {error}", path.display()))
     })?;
     Ok(parent.join(name))
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct CsvExportStats {
+    formula_cells: usize,
+    potential_formula_injection_cells: usize,
+}
+
+fn export_csv(
+    document: &omasheets_core::Document,
+    sheet: SheetId,
+    output: &Path,
+) -> Result<(PathBuf, CsvExportStats), ServiceError> {
+    let output = canonical(output)?;
+    if output.exists() {
+        return Err(ServiceError::new(
+            "output_exists",
+            "CSV output already exists",
+        ));
+    }
+    let rows = document.rows(sheet).unwrap_or(&[]);
+    let columns = document.columns(sheet).unwrap_or(&[]);
+    let cell_count = rows
+        .len()
+        .checked_mul(columns.len())
+        .ok_or_else(|| ServiceError::new("export_too_large", "CSV dimensions overflow"))?;
+    if cell_count > MAX_CSV_EXPORT_CELLS {
+        return Err(ServiceError::new(
+            "export_too_large",
+            format!("CSV export may cover at most {MAX_CSV_EXPORT_CELLS} cells"),
+        ));
+    }
+
+    let parent = output.parent().expect("canonical output has a parent");
+    let file_name = output
+        .file_name()
+        .expect("canonical output has a file name")
+        .to_string_lossy();
+    let mut temporary = None;
+    for _ in 0..16 {
+        let nonce = EXPORT_NONCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(
+            ".{file_name}.{}.{}.part",
+            std::process::id(),
+            nonce
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => {
+                temporary = Some((candidate, file));
+                break;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(export_io_error(error)),
+        }
+    }
+    let (temporary_path, mut file) = temporary.ok_or_else(|| {
+        ServiceError::new("export_io", "could not allocate a temporary CSV file")
+    })?;
+
+    let written = (|| -> Result<CsvExportStats, ServiceError> {
+        let mut stats = CsvExportStats::default();
+        for (row_index, row) in rows.iter().enumerate() {
+            for (column_index, column) in columns.iter().enumerate() {
+                if column_index != 0 {
+                    file.write_all(b",").map_err(export_io_error)?;
+                }
+                let cell = CellRef {
+                    sheet,
+                    row: *row,
+                    column: *column,
+                };
+                if matches!(
+                    document.cell(cell).map(|state| &state.input),
+                    Some(CellInput::Formula { .. })
+                ) {
+                    stats.formula_cells += 1;
+                }
+                let value = document.value(cell);
+                let text = csv_value(&value);
+                if text.len() > MAX_CSV_FIELD_BYTES {
+                    return Err(ServiceError::new(
+                        "field_too_large",
+                        format!("CSV fields may contain at most {MAX_CSV_FIELD_BYTES} bytes"),
+                    ));
+                }
+                if matches!(value, CellValue::Text(_))
+                    && text
+                        .chars()
+                        .next()
+                        .is_some_and(|first| matches!(first, '=' | '+' | '-' | '@' | '\t' | '\r'))
+                {
+                    stats.potential_formula_injection_cells += 1;
+                }
+                write_csv_field(&mut file, &text).map_err(export_io_error)?;
+            }
+            if row_index + 1 < rows.len() {
+                file.write_all(b"\r\n").map_err(export_io_error)?;
+            }
+        }
+        file.sync_all().map_err(export_io_error)?;
+        Ok(stats)
+    })();
+    drop(file);
+    let stats = match written {
+        Ok(stats) => stats,
+        Err(error) => {
+            let _ = std::fs::remove_file(&temporary_path);
+            return Err(error);
+        }
+    };
+    let linked = std::fs::hard_link(&temporary_path, &output);
+    let _ = std::fs::remove_file(&temporary_path);
+    match linked {
+        Ok(()) => Ok((output, stats)),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Err(ServiceError::new(
+            "output_exists",
+            "CSV output already exists",
+        )),
+        Err(error) => Err(export_io_error(error)),
+    }
+}
+
+fn csv_value(value: &CellValue) -> String {
+    match value {
+        CellValue::Blank => String::new(),
+        CellValue::Number(number) if *number == 0.0 => "0".into(),
+        CellValue::Number(number) => number.to_string(),
+        CellValue::Text(text) | CellValue::Error(text) => text.clone(),
+        CellValue::Boolean(true) => "TRUE".into(),
+        CellValue::Boolean(false) => "FALSE".into(),
+    }
+}
+
+fn write_csv_field(writer: &mut impl Write, text: &str) -> io::Result<()> {
+    if text.contains(|character| matches!(character, ',' | '"' | '\r' | '\n')) {
+        writer.write_all(b"\"")?;
+        writer.write_all(text.replace('"', "\"\"").as_bytes())?;
+        writer.write_all(b"\"")
+    } else {
+        writer.write_all(text.as_bytes())
+    }
+}
+
+fn export_io_error(error: io::Error) -> ServiceError {
+    ServiceError::new("export_io", error.to_string())
 }
 
 fn check_actor(actor: &Actor) -> Result<(), ServiceError> {
@@ -703,6 +884,40 @@ impl Service {
                 Ok(Response::Merged(
                     store.merge(source, target, approver, now)?,
                 ))
+            }
+            Request::ExportCsv {
+                path,
+                branch,
+                sheet,
+                output,
+            } => {
+                let store = self.store(&path)?;
+                let (branch_name, branch) = Self::branch(store, branch.as_deref())?;
+                let document = store.document(branch)?;
+                let sheet = Self::sheet(document, &sheet)?;
+                let sheet_name = document.sheet_name(sheet).unwrap_or("").to_string();
+                let rows = document.rows(sheet).map_or(0, <[_]>::len);
+                let columns = document.columns(sheet).map_or(0, <[_]>::len);
+                let document_digest = document.digest();
+                let (output, stats) = export_csv(document, sheet, &output)?;
+                Ok(Response::ExportedCsv(CsvExportManifest {
+                    format: "csv-rfc4180".into(),
+                    output,
+                    branch: branch_name,
+                    sheet,
+                    sheet_name,
+                    rows,
+                    columns,
+                    document_digest,
+                    formula_cells: stats.formula_cells,
+                    potential_formula_injection_cells: stats
+                        .potential_formula_injection_cells,
+                    limitations: vec![
+                        "formula_source_omitted".into(),
+                        "styles_tables_checks_lineage_omitted".into(),
+                        "potential_formula_injection_cells_are_not_rewritten".into(),
+                    ],
+                }))
             }
             Request::Snapshot { path, branch } => {
                 let store = self.store(&path)?;

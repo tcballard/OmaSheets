@@ -44,6 +44,11 @@ grid, an agent bridge and a person's shell can share.
 - **The CLI is the client.** `omasheets-service call REQUEST_JSON` reads
   the token, sends one request and prints the envelope; exit status 2 means
   the service refused, 1 means the client could not ask.
+- **Native CSV export is a projection.** `export_csv` streams one stable sheet
+  in current view order, refuses to replace an existing destination and returns
+  a manifest tied to the branch and document digest. Formula source, styles,
+  tables, checks and lineage are explicitly reported as omitted. Potential
+  spreadsheet-formula injection text is counted but never silently rewritten.
 
 ## Consequences
 
