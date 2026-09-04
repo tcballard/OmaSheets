@@ -322,10 +322,7 @@ ApplicationWindow {
                     selectionRows, selectionColumns));
                 if (text === null)
                     return;
-                clipboardBuffer.text = text;
-                clipboardBuffer.selectAll();
-                clipboardBuffer.copy();
-                clipboardBuffer.text = "";
+                // The backend publishes both text and spreadsheet origin MIME data.
                 body.forceActiveFocus();
             }
 
@@ -658,6 +655,26 @@ ApplicationWindow {
                         clipboardBuffer.text = "";
                         clipboardBuffer.paste();
                         if (clipboardBuffer.text !== "7\t=A1*3") {
+                            Qt.exit(1);
+                            return;
+                        }
+                        // Real MIME clipboard paste must translate B1's A1 to A2.
+                        grid.selectCell(1, 0);
+                        grid.pasteSelection();
+                        if (backend.cellInput(1, 1) !== "=A2*3"
+                                || backend.cellText(1, 1) !== "21"
+                                || !backend.undoEdit(false) || !backend.undoEdit(true)
+                                || backend.cellInput(1, 1) !== "=A2*3") {
+                            Qt.exit(1);
+                            return;
+                        }
+                        // Another application's identical plain text has no origin.
+                        clipboardBuffer.text = "7\t=A1*3";
+                        clipboardBuffer.selectAll();
+                        clipboardBuffer.copy();
+                        grid.selectCell(2, 0);
+                        grid.pasteSelection();
+                        if (backend.cellInput(2, 1) !== "=A1*3") {
                             Qt.exit(1);
                             return;
                         }

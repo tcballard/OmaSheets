@@ -3,6 +3,9 @@ pub mod qobject {
     unsafe extern "C++" {
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
+        include!("native_clipboard.h");
+        fn write_grid_clipboard(text: &QString, origin: &QString);
+        fn grid_clipboard_origin(text: &QString) -> QString;
     }
 
     extern "RustQt" {
@@ -248,7 +251,11 @@ impl qobject::GridModel {
             crate::clipboard::encode(&values)
         })();
         match result {
-            Ok(text) => serde_json::to_string(&text).unwrap().as_str().into(),
+            Ok(text) => {
+                let origin = serde_json::json!([row, column]).to_string();
+                qobject::write_grid_clipboard(&text.as_str().into(), &origin.as_str().into());
+                serde_json::to_string(&text).unwrap().as_str().into()
+            }
             Err(error) => { self.as_mut().set_source_status(error.as_str().into()); "null".into() }
         }
     }
@@ -256,7 +263,16 @@ impl qobject::GridModel {
     pub fn paste_cells(mut self: Pin<&mut Self>, row: i32, column: i32, text: &QString) -> bool {
         let result = (|| {
             if row < 0 || column < 0 { return Err("invalid paste position".into()); }
-            let values = crate::clipboard::parse(&text.to_string())?;
+            let mut values = crate::clipboard::parse(&text.to_string())?;
+            let origin = qobject::grid_clipboard_origin(text).to_string();
+            if !origin.is_empty() {
+                let [source_row, source_column]: [i32; 2] = serde_json::from_str(&origin)
+                    .map_err(|_| "invalid spreadsheet clipboard origin")?;
+                if !(0..1048576).contains(&source_row) || !(0..16384).contains(&source_column) {
+                    return Err("invalid spreadsheet clipboard origin".into());
+                }
+                crate::clipboard::translate(&mut values, row - source_row, column - source_column);
+            }
             self.document.as_ref().ok_or("paste requires a native document")?
                 .set_matrix(row as usize, column as usize, &values)
         })();

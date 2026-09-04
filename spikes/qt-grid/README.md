@@ -24,8 +24,13 @@ copies it and Ctrl+V pastes at its top-left cell. Delete clears the selection.
 Copy/paste supports quoted tab-separated text (including embedded tabs and line
 breaks), up to 1,000 cells and 1 MiB of clipboard text. Pasted rectangles must
 fit in the existing sheet; ragged or oversized input is rejected before writing.
-Formula source is copied literally: relative references are not translated to
-the destination. Numeric-looking text retains its apostrophe editing marker.
+Copies from an OmaSheets grid include source-position clipboard metadata, so
+relative A1 references move with the destination, including across windows and
+sheets. Absolute `$` axes stay fixed; out-of-grid references become `#REF!`.
+Strings, names and structured table selectors retain their source spelling.
+Plain text from other applications has no source position and is pasted literally.
+Clipboard managers that strip custom MIME data also use this plain-text fallback.
+Numeric-looking text retains its apostrophe editing marker.
 
 Ctrl+Z undoes a single edit, clear or entire paste. Ctrl+Shift+Z or Ctrl+Y redoes
 it. History is local to the open window, limited to 32 edits and 8 MiB, and is
