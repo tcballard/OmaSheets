@@ -9,11 +9,14 @@
 //! or grants an agent merge authority: merges need a human approver, and an
 //! agent may not append to the `main` branch at all.
 
+use omasheets_calc::Value;
 use omasheets_core::{
     Actor, ActorKind, CellInput, CellRef, CellState, CellValue, CheckResult, ColumnId, ColumnType,
-    Command, DocumentId, Event, InferredColumnType, Lineage, ObjectId, SheetId,
+    Command, Document, DocumentId, Event, InferredColumnType, Lineage, Literal, ObjectId,
+    Operation, SheetId, MAX_BATCH,
 };
 use omasheets_store::{BranchDiff, LoadReport, MergeReport, Store, StoreError};
+use omasheets_xlsx::{ImportLimits, import_xlsx};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -28,6 +31,12 @@ pub const MAX_CELL_PAGE: usize = 10_000;
 pub const MAX_GRID_PAGE_CELLS: usize = 10_000;
 /// Largest native CSV projection, checked before the output file is created.
 pub const MAX_CSV_EXPORT_CELLS: usize = 10_000_000;
+/// Largest occupied rectangle accepted into one native alpha document.
+pub const MAX_NATIVE_IMPORT_CELLS: usize = 100_000;
+/// Largest source package read by the local import endpoint.
+pub const MAX_NATIVE_IMPORT_BYTES: u64 = 50 * 1024 * 1024;
+pub const MAX_NATIVE_IMPORT_SHEETS: usize = 64;
+pub const MAX_NATIVE_IMPORT_FORMULAS: usize = 100_000;
 const DEFAULT_CELL_PAGE: usize = 1_000;
 const MAX_ACTOR_CHARS: usize = 128;
 const MAX_CSV_FIELD_BYTES: usize = 1_000_000;
@@ -139,6 +148,15 @@ pub enum Request {
         sheet: String,
         output: PathBuf,
     },
+    /// Convert one bounded XLSX package into a new replayable native file.
+    /// The destination is never overwritten.
+    ImportXlsx {
+        source: PathBuf,
+        output: PathBuf,
+        actor: Actor,
+        #[serde(default)]
+        name: Option<String>,
+    },
     Snapshot {
         path: PathBuf,
         #[serde(default)]
@@ -234,6 +252,36 @@ pub struct CsvExportManifest {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImportedSheetManifest {
+    pub id: SheetId,
+    pub name: String,
+    pub rows: usize,
+    pub columns: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct XlsxImportManifest {
+    pub format: String,
+    pub output: PathBuf,
+    pub document: DocumentId,
+    pub document_digest: String,
+    pub source_sha256: String,
+    pub date_system: String,
+    pub sheets: Vec<ImportedSheetManifest>,
+    pub occupied_rectangle_cells: usize,
+    pub value_cells_imported: usize,
+    pub formula_cells_observed: usize,
+    pub formula_cells_native: usize,
+    pub formula_cells_cached_only: usize,
+    pub formula_cells_omitted: usize,
+    pub owned_engine_unsupported_formulas: usize,
+    pub error_cells_omitted: usize,
+    pub rejected_value_cells_omitted: usize,
+    pub skipped_source_sheets: usize,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Response {
     Created {
@@ -262,6 +310,7 @@ pub enum Response {
     Diff(BranchDiff),
     Merged(MergeReport),
     ExportedCsv(CsvExportManifest),
+    ImportedXlsx(XlsxImportManifest),
     Snapshot {
         digest: String,
     },
@@ -508,6 +557,369 @@ fn write_csv_field(writer: &mut impl Write, text: &str) -> io::Result<()> {
 
 fn export_io_error(error: io::Error) -> ServiceError {
     ServiceError::new("export_io", error.to_string())
+}
+
+fn plan_required(
+    document: &mut Document,
+    actor: &Actor,
+    timestamp: i64,
+    commands: &mut Vec<Command>,
+    command: Command,
+) -> Result<Event, ServiceError> {
+    let event = document.command(actor.clone(), timestamp, command.clone())?;
+    commands.push(command);
+    Ok(event)
+}
+
+fn plan_optional(
+    document: &mut Document,
+    actor: &Actor,
+    timestamp: i64,
+    commands: &mut Vec<Command>,
+    command: Command,
+) -> bool {
+    match document.command(actor.clone(), timestamp, command.clone()) {
+        Ok(_) => {
+            commands.push(command);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn a1(row: u32, column: u32) -> String {
+    let mut value = column as usize + 1;
+    let mut letters = Vec::new();
+    while value != 0 {
+        value -= 1;
+        letters.push((b'A' + (value % 26) as u8) as char);
+        value /= 26;
+    }
+    letters.reverse();
+    format!("{}{}", letters.into_iter().collect::<String>(), row + 1)
+}
+
+fn source_literal(value: &Value) -> Option<Literal> {
+    match value {
+        Value::Blank => None,
+        Value::Number(number) => Some(Literal::Number(*number)),
+        Value::Text(text) => Some(Literal::Text(text.clone())),
+        Value::Boolean(flag) => Some(Literal::Boolean(*flag)),
+        Value::Error(_) => None,
+    }
+}
+
+fn cleanup_store_files(path: &Path) {
+    for suffix in ["", "-wal", "-shm"] {
+        let candidate = PathBuf::from(format!("{}{suffix}", path.display()));
+        let _ = std::fs::remove_file(candidate);
+    }
+}
+
+fn temporary_store_path(output: &Path) -> Result<PathBuf, ServiceError> {
+    let parent = output.parent().expect("canonical output has a parent");
+    let name = output
+        .file_name()
+        .expect("canonical output has a file name")
+        .to_string_lossy();
+    for _ in 0..16 {
+        let nonce = EXPORT_NONCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(
+            ".{name}.{}.{}.importing",
+            std::process::id(),
+            nonce
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => {
+                drop(file);
+                std::fs::remove_file(&candidate).map_err(export_io_error)?;
+                return Ok(candidate);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(export_io_error(error)),
+        }
+    }
+    Err(ServiceError::new(
+        "import_io",
+        "could not allocate a temporary native document",
+    ))
+}
+
+fn import_native_xlsx(
+    source: &Path,
+    output: &Path,
+    actor: Actor,
+    name: Option<String>,
+    timestamp: i64,
+) -> Result<(Store, XlsxImportManifest), ServiceError> {
+    let source = source.canonicalize().map_err(|error| {
+        ServiceError::new("invalid_source", format!("{}: {error}", source.display()))
+    })?;
+    let metadata = source.metadata().map_err(|error| {
+        ServiceError::new("invalid_source", format!("{}: {error}", source.display()))
+    })?;
+    if !metadata.is_file() {
+        return Err(ServiceError::new("invalid_source", "XLSX source is not a file"));
+    }
+    if metadata.len() > MAX_NATIVE_IMPORT_BYTES {
+        return Err(ServiceError::new(
+            "import_too_large",
+            format!("XLSX source may contain at most {MAX_NATIVE_IMPORT_BYTES} bytes"),
+        ));
+    }
+
+    let output = canonical(output)?;
+    if output.exists() {
+        return Err(ServiceError::new(
+            "output_exists",
+            "native output already exists",
+        ));
+    }
+    let imported = import_xlsx(
+        &source,
+        ImportLimits {
+            max_sheets: MAX_NATIVE_IMPORT_SHEETS,
+            max_cells: MAX_NATIVE_IMPORT_CELLS,
+            max_formulas: MAX_NATIVE_IMPORT_FORMULAS,
+        },
+    )
+    .map_err(|error| ServiceError::new("xlsx_import", error.to_string()))?;
+
+    let occupied_rectangle_cells = imported.sheets.iter().try_fold(0_usize, |total, sheet| {
+        sheet
+            .rows
+            .checked_mul(sheet.columns)
+            .and_then(|cells| total.checked_add(cells))
+    });
+    let Some(occupied_rectangle_cells) = occupied_rectangle_cells else {
+        return Err(ServiceError::new(
+            "import_too_large",
+            "XLSX dimensions overflow",
+        ));
+    };
+    if occupied_rectangle_cells > MAX_NATIVE_IMPORT_CELLS {
+        return Err(ServiceError::new(
+            "import_too_large",
+            format!(
+                "XLSX occupied rectangles may cover at most {MAX_NATIVE_IMPORT_CELLS} cells"
+            ),
+        ));
+    }
+
+    let document_name = name.unwrap_or_else(|| {
+        source
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .filter(|stem| !stem.trim().is_empty())
+            .unwrap_or("Imported workbook")
+            .to_string()
+    });
+    let seed = format!("{}:{}:{timestamp}", output.display(), imported.source_sha256);
+    let document_id = DocumentId(ObjectId::from_seed(&seed));
+    let (mut planning, _) =
+        Document::create(document_id, &document_name, actor.clone(), timestamp)?;
+    let branch = planning.branch();
+    let import_actor = Actor::new(ActorKind::Import, actor.id.clone());
+    let mut commands = Vec::new();
+    plan_required(
+        &mut planning,
+        &import_actor,
+        timestamp,
+        &mut commands,
+        Command::Import {
+            source_sha256: imported.source_sha256.clone(),
+            format: "xlsx".into(),
+        },
+    )?;
+
+    let mut sheet_ids = BTreeMap::new();
+    let mut sheets = Vec::with_capacity(imported.sheets.len());
+    for source_sheet in &imported.sheets {
+        let event = plan_required(
+            &mut planning,
+            &import_actor,
+            timestamp,
+            &mut commands,
+            Command::AddSheet {
+                name: source_sheet.name.clone(),
+            },
+        )?;
+        let Operation::AddSheet { sheet, .. } = event.operation else {
+            unreachable!("AddSheet resolves to AddSheet")
+        };
+        sheet_ids.insert(source_sheet.index, sheet);
+        for at in (0..source_sheet.columns).step_by(MAX_BATCH) {
+            plan_required(
+                &mut planning,
+                &import_actor,
+                timestamp,
+                &mut commands,
+                Command::AddColumns {
+                    sheet,
+                    count: (source_sheet.columns - at).min(MAX_BATCH),
+                    at,
+                },
+            )?;
+        }
+        for at in (0..source_sheet.rows).step_by(MAX_BATCH) {
+            plan_required(
+                &mut planning,
+                &import_actor,
+                timestamp,
+                &mut commands,
+                Command::AddRows {
+                    sheet,
+                    count: (source_sheet.rows - at).min(MAX_BATCH),
+                    at,
+                    table: None,
+                },
+            )?;
+        }
+        sheets.push(ImportedSheetManifest {
+            id: sheet,
+            name: source_sheet.name.clone(),
+            rows: source_sheet.rows,
+            columns: source_sheet.columns,
+        });
+    }
+
+    let mut value_cells_imported = 0;
+    let mut formula_cells_observed = 0;
+    let mut formula_cells_native = 0;
+    let mut formula_cells_cached_only = 0;
+    let mut formula_cells_omitted = 0;
+    let mut error_cells_omitted = 0;
+    let mut rejected_value_cells_omitted = 0;
+    for source_cell in imported.source_cells() {
+        let sheet = sheet_ids[&source_cell.cell.sheet];
+        let address = a1(source_cell.cell.row, source_cell.cell.column);
+        let cached_loaded = match source_literal(&source_cell.stored) {
+            Some(value) => {
+                let loaded = plan_optional(
+                    &mut planning,
+                    &import_actor,
+                    timestamp,
+                    &mut commands,
+                    Command::SetValue {
+                        sheet,
+                        a1: address.clone(),
+                        value,
+                    },
+                );
+                if loaded {
+                    value_cells_imported += 1;
+                } else {
+                    rejected_value_cells_omitted += 1;
+                }
+                loaded
+            }
+            None => {
+                if matches!(source_cell.stored, Value::Error(_)) {
+                    error_cells_omitted += 1;
+                }
+                false
+            }
+        };
+        if let Some(formula) = &source_cell.formula {
+            formula_cells_observed += 1;
+            if plan_optional(
+                &mut planning,
+                &import_actor,
+                timestamp,
+                &mut commands,
+                Command::SetFormula {
+                    sheet,
+                    a1: address,
+                    source: formula.clone(),
+                },
+            ) {
+                formula_cells_native += 1;
+            } else if cached_loaded {
+                formula_cells_cached_only += 1;
+            } else {
+                formula_cells_omitted += 1;
+            }
+        }
+    }
+
+    let expected_digest = planning.digest();
+    let temporary = temporary_store_path(&output)?;
+    let built = (|| -> Result<(), ServiceError> {
+        let mut store = Store::create(
+            &temporary,
+            document_id,
+            &document_name,
+            actor,
+            timestamp,
+        )?;
+        store.append_batch(branch, import_actor, timestamp, commands)?;
+        if store.document(branch)?.digest() != expected_digest {
+            return Err(ServiceError::new(
+                "import_replay_mismatch",
+                "planned and persisted native documents differ",
+            ));
+        }
+        store.close()?;
+        Ok(())
+    })();
+    if let Err(error) = built {
+        cleanup_store_files(&temporary);
+        return Err(error);
+    }
+    let linked = std::fs::hard_link(&temporary, &output);
+    cleanup_store_files(&temporary);
+    match linked {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            return Err(ServiceError::new(
+                "output_exists",
+                "native output already exists",
+            ));
+        }
+        Err(error) => return Err(ServiceError::new("import_io", error.to_string())),
+    }
+    let mut store = Store::open(&output)?;
+    let reopened_branch = store.branch_id(MAIN_BRANCH)?;
+    let reopened_digest = store.document(reopened_branch)?.digest();
+    if reopened_digest != expected_digest {
+        cleanup_store_files(&output);
+        return Err(ServiceError::new(
+            "import_replay_mismatch",
+            "reopened native document differs from the imported state",
+        ));
+    }
+    let owned_engine_unsupported_formulas = imported.unsupported.len();
+    let skipped_source_sheets = imported.skipped_sheets.len();
+    let manifest = XlsxImportManifest {
+        format: "omasheets-native-v1".into(),
+        output,
+        document: document_id,
+        document_digest: reopened_digest,
+        source_sha256: imported.source_sha256,
+        date_system: imported.date_system.into(),
+        sheets,
+        occupied_rectangle_cells,
+        value_cells_imported,
+        formula_cells_observed,
+        formula_cells_native,
+        formula_cells_cached_only,
+        formula_cells_omitted,
+        owned_engine_unsupported_formulas,
+        error_cells_omitted,
+        rejected_value_cells_omitted,
+        skipped_source_sheets,
+        limitations: vec![
+            "styles_tables_charts_pivots_macros_not_imported".into(),
+            "defined_names_not_imported".into(),
+            "unsupported_formulas_use_cached_values_when_available".into(),
+            "cached_error_values_not_imported".into(),
+        ],
+    };
+    Ok((store, manifest))
 }
 
 fn check_actor(actor: &Actor) -> Result<(), ServiceError> {
@@ -918,6 +1330,31 @@ impl Service {
                         "potential_formula_injection_cells_are_not_rewritten".into(),
                     ],
                 }))
+            }
+            Request::ImportXlsx {
+                source,
+                output,
+                actor,
+                name,
+            } => {
+                check_actor(&actor)?;
+                if actor.kind != ActorKind::Human {
+                    return Err(ServiceError::new(
+                        "unauthorized",
+                        "a human must authorize a native workbook import",
+                    ));
+                }
+                let key = canonical(&output)?;
+                if self.stores.contains_key(&key) {
+                    return Err(ServiceError::new(
+                        "output_exists",
+                        "native output is already open",
+                    ));
+                }
+                let (store, manifest) =
+                    import_native_xlsx(&source, &key, actor, name, now)?;
+                self.stores.insert(key, store);
+                Ok(Response::ImportedXlsx(manifest))
             }
             Request::Snapshot { path, branch } => {
                 let store = self.store(&path)?;

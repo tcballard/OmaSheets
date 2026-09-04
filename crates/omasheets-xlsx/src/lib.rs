@@ -36,6 +36,20 @@ impl Default for ImportLimits {
 pub struct SheetInfo {
     pub index: u32,
     pub name: String,
+    /// Last occupied source row plus one, including formula-only cells.
+    pub rows: usize,
+    /// Last occupied source column plus one, including formula-only cells.
+    pub columns: usize,
+}
+
+/// One occupied source cell, retained for bounded conversion into the native
+/// event model. `stored` is the cached workbook value; `formula` is present
+/// even when the owned calculation engine cannot compile it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImportedCell {
+    pub cell: CellId,
+    pub stored: Value,
+    pub formula: Option<String>,
 }
 
 /// Upper bound on distinct unsupported function names kept in a report, so a
@@ -124,12 +138,19 @@ pub struct ImportedWorkbook {
     /// Sheets named in `xl/workbook.xml` without a worksheet part, skipped by
     /// [`import_xlsx`]'s in-memory repair; empty for well-formed packages.
     pub skipped_sheets: Vec<String>,
+    source_cells: Vec<ImportedCell>,
     stored_formula_values: Vec<(CellId, Value)>,
     formula_cells_observed: usize,
     formula_cells_loaded: usize,
 }
 
 impl ImportedWorkbook {
+    /// Occupied source cells in sheet/row/column order. This projection is
+    /// bounded by the same import limits as the calculation workbook.
+    pub fn source_cells(&self) -> &[ImportedCell] {
+        &self.source_cells
+    }
+
     /// The compared formula cells whose recalculated value differs from the
     /// stored one, with both values, for tooling that investigates
     /// mismatches; the score report itself stays aggregate.
@@ -675,9 +696,15 @@ fn import_ranges_with_names(
     let sheets: Vec<SheetInfo> = ranges
         .iter()
         .enumerate()
-        .map(|(index, (name, _, _))| SheetInfo {
-            index: index as u32,
-            name: name.clone(),
+        .map(|(index, (name, values, formulas))| {
+            let (value_rows, value_columns) = range_extent(values.end());
+            let (formula_rows, formula_columns) = range_extent(formulas.end());
+            SheetInfo {
+                index: index as u32,
+                name: name.clone(),
+                rows: value_rows.max(formula_rows),
+                columns: value_columns.max(formula_columns),
+            }
         })
         .collect();
     let mut workbook = Workbook::default();
@@ -702,6 +729,7 @@ fn import_ranges_with_names(
         }
     }
     let mut formula_records = Vec::with_capacity(observed_formulas);
+    let mut source_cells = BTreeMap::new();
 
     for (sheet, (_, values, formulas)) in ranges.iter().enumerate() {
         let (value_row, value_column) = values.start().unwrap_or((0, 0));
@@ -712,6 +740,14 @@ fn import_ranges_with_names(
                 value_column + column as u32,
             );
             set_source_value(&mut workbook, cell, value);
+            source_cells.insert(
+                cell,
+                ImportedCell {
+                    cell,
+                    stored: source_value(value),
+                    formula: None,
+                },
+            );
         }
         let (formula_row, formula_column) = formulas.start().unwrap_or((0, 0));
         for (row, column, formula) in formulas.used_cells() {
@@ -724,6 +760,14 @@ fn import_ranges_with_names(
                 .get_value(absolute)
                 .map(source_value)
                 .unwrap_or(Value::Blank);
+            source_cells
+                .entry(cell)
+                .and_modify(|source: &mut ImportedCell| source.formula = Some(formula.clone()))
+                .or_insert_with(|| ImportedCell {
+                    cell,
+                    stored: stored.clone(),
+                    formula: Some(formula.clone()),
+                });
             formula_records.push((cell, stored, formula.clone()));
         }
     }
@@ -749,10 +793,17 @@ fn import_ranges_with_names(
         date_system: DATE_SYSTEM,
         unsupported,
         skipped_sheets: Vec::new(),
+        source_cells: source_cells.into_values().collect(),
         stored_formula_values,
         formula_cells_observed: observed_formulas,
         formula_cells_loaded,
     })
+}
+
+fn range_extent(end: Option<(u32, u32)>) -> (usize, usize) {
+    end
+        .map(|(row, column)| (row as usize + 1, column as usize + 1))
+        .unwrap_or((0, 0))
 }
 
 fn set_source_value(workbook: &mut Workbook, cell: CellId, value: &Data) {
@@ -987,6 +1038,15 @@ mod tests {
         );
         assert_eq!(imported.parity().stored_values_matched, 3);
         assert_eq!(imported.parity().stored_values_mismatched, 0);
+        assert_eq!((imported.sheets[0].rows, imported.sheets[0].columns), (3, 3));
+        assert_eq!(imported.source_cells().len(), 5);
+        let formula = imported
+            .source_cells()
+            .iter()
+            .find(|source| source.cell == CellId::new(0, 2, 0))
+            .unwrap();
+        assert_eq!(formula.stored, Value::Number(5.0));
+        assert_eq!(formula.formula.as_deref(), Some("A1+A2"));
     }
 
     #[test]

@@ -58,6 +58,9 @@ compatibility and agent-safety baseline; it does not claim that the native
 event store, formula engine, or virtualised grid already exists.
 The evidence required before the first public native alpha is listed separately
 in the [`v0.1.0 native release gate`](docs/V0.1-RELEASE.md).
+The native service can also convert a bounded `.xlsx` source into a new
+replayable `.omasheets` document. It never replaces an output file and returns
+a loss manifest; this is an alpha import path, not a full-fidelity Excel claim.
 
 ## Install on Omarchy
 
