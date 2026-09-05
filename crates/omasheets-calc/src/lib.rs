@@ -1563,6 +1563,19 @@ impl Workbook {
             return self.evaluate_correl(arguments);
         }
 
+        if matches!(
+            function,
+            Function::Sum
+                | Function::Average
+                | Function::Min
+                | Function::Max
+                | Function::Count
+                | Function::CountA
+                | Function::Product
+        ) {
+            return self.evaluate_simple_aggregate(function, arguments);
+        }
+
         let mut values = Vec::new();
         for argument in arguments {
             self.flatten_values(argument, &mut values);
@@ -1582,21 +1595,6 @@ impl Workbook {
             .collect();
 
         match function {
-            Function::Sum => number_value(numbers.iter().sum()),
-            Function::Average if !numbers.is_empty() => {
-                number_value(numbers.iter().sum::<f64>() / numbers.len() as f64)
-            }
-            Function::Average => Value::Error(CalcError::DivisionByZero),
-            Function::Min => Value::Number(numbers.into_iter().reduce(f64::min).unwrap_or(0.0)),
-            Function::Max => Value::Number(numbers.into_iter().reduce(f64::max).unwrap_or(0.0)),
-            Function::Count => Value::Number(numbers.len() as f64),
-            Function::CountA => Value::Number(
-                values
-                    .iter()
-                    .filter(|value| !matches!(value, Value::Blank))
-                    .count() as f64,
-            ),
-            Function::Product => Value::Number(numbers.into_iter().product()),
             Function::Median if !numbers.is_empty() => median(numbers),
             Function::NormDist => normal_distribution(&values),
             Function::AverageA => average_a(&values),
@@ -1670,7 +1668,14 @@ impl Workbook {
                 Ok(value) => Value::Boolean(!value),
                 Err(error) => Value::Error(error),
             },
-            Function::Not
+            Function::Sum
+            | Function::Average
+            | Function::Min
+            | Function::Max
+            | Function::Count
+            | Function::CountA
+            | Function::Product
+            | Function::Not
             | Function::If
             | Function::IfError
             | Function::Pi
@@ -2188,6 +2193,77 @@ impl Workbook {
         match correlation(&pairs) {
             Ok(value) => Value::Number(value),
             Err(error) => Value::Error(error),
+        }
+    }
+
+    /// These aggregates ignore blanks and need no positional array. Visit
+    /// existing range cells directly, borrowing values instead of cloning them.
+    /// Array expressions still use the established broadcasting evaluator.
+    fn evaluate_simple_aggregate(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+        let mut count = 0usize;
+        let mut nonblank = 0usize;
+        let mut accumulator = match function {
+            Function::Product => 1.0,
+            _ => 0.0,
+        };
+        let mut error = None;
+        let mut visit = |value: &Value| {
+            if !matches!(value, Value::Blank) {
+                nonblank += 1;
+            }
+            match value {
+                Value::Error(value) if error.is_none() => error = Some(value.clone()),
+                Value::Number(number) => {
+                    accumulator = match function {
+                        Function::Sum | Function::Average => accumulator + number,
+                        Function::Product => accumulator * number,
+                        Function::Min if count != 0 => accumulator.min(*number),
+                        Function::Max if count != 0 => accumulator.max(*number),
+                        Function::Min | Function::Max => *number,
+                        _ => accumulator,
+                    };
+                    count += 1;
+                }
+                _ => {}
+            }
+        };
+        for argument in arguments {
+            match argument {
+                Expr::RangeNode { node, .. } => match self.range_shape(*node) {
+                    RangeShape::Rectangle {
+                        anchor,
+                        rows,
+                        columns,
+                    } => {
+                        self.for_each_rectangle_cell(anchor, rows, columns, |_, index| {
+                            visit(&self.cells[index].value);
+                        });
+                    }
+                    RangeShape::Members { .. } => {
+                        for index in &self.cells[*node].dependencies {
+                            visit(&self.cells[*index].value);
+                        }
+                    }
+                },
+                Expr::Empty => {}
+                other if contains_array_operand(other) => match self.evaluate_array(other) {
+                    Ok(array) => array.values.iter().for_each(&mut visit),
+                    Err(error) => visit(&Value::Error(error)),
+                },
+                other => visit(&self.evaluate(other)),
+            }
+        }
+        if let Some(error) = error {
+            return Value::Error(error);
+        }
+        match function {
+            Function::Sum => number_value(accumulator),
+            Function::Average if count == 0 => Value::Error(CalcError::DivisionByZero),
+            Function::Average => number_value(accumulator / count as f64),
+            Function::Count => Value::Number(count as f64),
+            Function::CountA => Value::Number(nonblank as f64),
+            Function::Min | Function::Max | Function::Product => Value::Number(accumulator),
+            _ => unreachable!("simple aggregate only"),
         }
     }
 
@@ -4820,6 +4896,56 @@ mod tests {
             let target = cell(6, column as u32);
             workbook.set_formula(target, formula).unwrap();
             assert_eq!(workbook.value(target), Value::Number(expected), "{formula}");
+        }
+    }
+
+    #[test]
+    fn simple_aggregates_stream_sparse_ranges_and_preserve_error_order() {
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(0, 0), 2.0);
+        workbook.set_text(cell(1, 0), "");
+        workbook.set_boolean(cell(2, 0), true);
+        workbook.set_number(cell(999_999, 0), 6.0);
+        for (column, (name, expected)) in [
+            ("SUM", 8.0),
+            ("AVERAGE", 4.0),
+            ("MIN", 2.0),
+            ("MAX", 6.0),
+            ("COUNT", 2.0),
+            ("COUNTA", 4.0),
+            ("PRODUCT", 12.0),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let target = cell(0, column as u32 + 1);
+            workbook
+                .set_formula(target, &format!("={name}(A1:A1000000)"))
+                .unwrap();
+            assert_eq!(workbook.value(target), Value::Number(expected), "{name}");
+        }
+        // No cells are materialized for the 999,996 implicit blanks.
+        assert_eq!(workbook.indices.len(), 11);
+        workbook.set_error(cell(5, 0), CalcError::NotAvailable);
+        workbook.set_error(cell(4, 0), CalcError::DivisionByZero);
+        for column in 1..=7 {
+            assert_eq!(
+                workbook.value(cell(0, column)),
+                Value::Error(CalcError::DivisionByZero)
+            );
+        }
+        for (formula, expected) in [
+            ("=SUM(Z1:Z2)", Value::Number(0.0)),
+            ("=AVERAGE(Z1:Z2)", Value::Error(CalcError::DivisionByZero)),
+            ("=MIN(Z1:Z2)", Value::Number(0.0)),
+            ("=MAX(Z1:Z2)", Value::Number(0.0)),
+            ("=COUNT(Z1:Z2)", Value::Number(0.0)),
+            ("=COUNTA(Z1:Z2)", Value::Number(0.0)),
+            ("=PRODUCT(Z1:Z2)", Value::Number(1.0)),
+            ("=SUM(1E16,1,-1E16)", Value::Number(0.0)),
+        ] {
+            workbook.set_formula(cell(0, 8), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, 8)), expected, "{formula}");
         }
     }
 
