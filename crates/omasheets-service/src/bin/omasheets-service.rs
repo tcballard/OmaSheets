@@ -16,6 +16,7 @@
 
 use omasheets_service::{Request, Service};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -29,6 +30,54 @@ const USAGE: &str = "usage:\n  omasheets-service --provenance\n  omasheets-servi
 /// Largest request line accepted, so a client cannot exhaust memory.
 const MAX_LINE_BYTES: u64 = 4 * 1024 * 1024;
 const TOKEN_BYTES: usize = 32;
+
+/// A slow import/export or checkpoint holds only its document's service lock.
+/// Entries survive Close so already-queued clients cannot acquire a different
+/// lock for the same document and split the cache into competing writers.
+#[derive(Default)]
+struct ServicePool {
+    documents: Mutex<BTreeMap<PathBuf, Arc<Mutex<Service>>>>,
+}
+
+impl ServicePool {
+    fn service_for(
+        &self,
+        request: &Request,
+    ) -> Result<Arc<Mutex<Service>>, omasheets_service::ServiceError> {
+        let key = request.document_key()?;
+        Ok(Arc::clone(
+            self.documents
+                .lock()
+                .expect("service registry lock")
+                .entry(key)
+                .or_insert_with(|| Arc::new(Mutex::new(Service::default()))),
+        ))
+    }
+
+    fn handle(
+        &self,
+        request: Request,
+    ) -> Result<omasheets_service::Response, omasheets_service::ServiceError> {
+        self.service_for(&request)?
+            .lock()
+            .expect("document service lock")
+            .handle(request)
+    }
+
+    fn close_all(&self) -> Result<(), omasheets_service::ServiceError> {
+        let documents: Vec<_> = self
+            .documents
+            .lock()
+            .expect("service registry lock")
+            .values()
+            .cloned()
+            .collect();
+        for service in documents {
+            service.lock().expect("document service lock").close_all()?;
+        }
+        Ok(())
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -109,11 +158,7 @@ fn read_line_bounded(reader: &mut BufReader<UnixStream>) -> std::io::Result<Opti
     Ok(Some(line.trim_end().to_string()))
 }
 
-fn serve_connection(
-    stream: UnixStream,
-    token: &str,
-    service: &Mutex<Service>,
-) -> std::io::Result<()> {
+fn serve_connection(stream: UnixStream, token: &str, service: &ServicePool) -> std::io::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
     match read_line_bounded(&mut reader)? {
@@ -128,7 +173,7 @@ fn serve_connection(
             continue;
         }
         let envelope = match serde_json::from_str::<Request>(&line) {
-            Ok(request) => match service.lock().expect("service lock").handle(request) {
+            Ok(request) => match service.handle(request) {
                 Ok(response) => Envelope {
                     ok: true,
                     response: Some(response),
@@ -174,7 +219,7 @@ fn serve(directory: PathBuf, once: bool) -> Result<(), String> {
     let _ = fs::remove_file(&socket);
     let listener = UnixListener::bind(&socket)
         .map_err(|error| format!("cannot listen on {}: {error}", socket.display()))?;
-    let service = Arc::new(Mutex::new(Service::default()));
+    let service = Arc::new(ServicePool::default());
     let token = Arc::new(token);
     eprintln!("omasheets-service: listening on {}", socket.display());
     for connection in listener.incoming() {
@@ -200,7 +245,6 @@ fn serve(directory: PathBuf, once: bool) -> Result<(), String> {
             }
         });
     }
-    let mut service = service.lock().expect("service lock");
     service.close_all().map_err(|error| error.to_string())?;
     let _ = fs::remove_file(&socket);
     let _ = fs::remove_file(token_path(&directory));
@@ -306,5 +350,46 @@ fn main() -> ExitCode {
             eprintln!("omasheets-service: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omasheets_core::{Actor, ActorKind};
+
+    #[test]
+    fn independent_documents_do_not_wait_for_each_other() {
+        let root = env::temp_dir().join(format!("omasheets-pool-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let pool = Arc::new(ServicePool::default());
+        let first = Request::Open {
+            path: root.join("first.omasheets"),
+        };
+        let service = pool.service_for(&first).unwrap();
+        let alias = Request::Open {
+            path: root.join(".").join("first.omasheets"),
+        };
+        assert!(Arc::ptr_eq(&service, &pool.service_for(&alias).unwrap()));
+        let held = service.lock().unwrap();
+        let worker_pool = Arc::clone(&pool);
+        let second = root.join("second.omasheets");
+        let (send, receive) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let result = worker_pool.handle(Request::Create {
+                path: second.clone(),
+                name: "Independent".into(),
+                actor: Actor::new(ActorKind::Human, "test"),
+            });
+            send.send(result.is_ok()).unwrap();
+            worker_pool.handle(Request::Close { path: second }).unwrap();
+        });
+        let completed = receive.recv_timeout(std::time::Duration::from_secs(5));
+        drop(held);
+        worker.join().unwrap();
+        assert!(completed.unwrap());
+        assert!(Arc::ptr_eq(&service, &pool.service_for(&first).unwrap()));
+        pool.close_all().unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 }

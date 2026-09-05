@@ -211,6 +211,36 @@ pub enum Request {
     },
 }
 
+impl Request {
+    /// Canonical document key for serializing operations on the same file.
+    /// Imports are keyed by their native destination; exports by their source.
+    pub fn document_key(&self) -> Result<PathBuf, ServiceError> {
+        let path = match self {
+            Self::ImportXlsx { output, .. } => output,
+            Self::Create { path, .. }
+            | Self::Open { path }
+            | Self::Close { path }
+            | Self::Document { path, .. }
+            | Self::Revision { path, .. }
+            | Self::Cells { path, .. }
+            | Self::GridPage { path, .. }
+            | Self::Cell { path, .. }
+            | Self::Lineage { path, .. }
+            | Self::Append { path, .. }
+            | Self::AppendBatch { path, .. }
+            | Self::Branch { path, .. }
+            | Self::Check { path, .. }
+            | Self::Diff { path, .. }
+            | Self::Merge { path, .. }
+            | Self::ExportCsv { path, .. }
+            | Self::ExportXlsx { path, .. }
+            | Self::ExportParquet { path, .. }
+            | Self::Snapshot { path, .. } => path,
+        };
+        canonical(path)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SheetSummary {
     pub id: SheetId,
