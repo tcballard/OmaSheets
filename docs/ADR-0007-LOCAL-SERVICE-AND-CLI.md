@@ -40,7 +40,7 @@ grid, an agent bridge and a person's shell can share.
   identical to single-command appends.
 - **`Service` is the in-process form.** The CLI, tests and any embedding
   call `Service::handle` directly; the socket server wraps the same struct
-  behind a mutex. Errors are `ServiceError { code, message, details }` with
+  behind one mutex per document. Errors are `ServiceError { code, message, details }` with
   stable codes (`unknown_branch`, `agent_on_main`, `checks_failed`,
   `conflicts`, `unauthorized`, …) so clients branch on codes, not prose.
   Each sheet in the document summary includes its stable columns in view
@@ -115,8 +115,11 @@ grid, an agent bridge and a person's shell can share.
   is documented by the types.
 - Request lines are capped at 4 MiB and cell pages at 10,000 cells, so a
   client cannot exhaust the service; long documents page.
-- The service is single-threaded behind a mutex. That is deliberate at M1:
-  correctness and evidence first, concurrency when a workload needs it.
+- Requests for one document remain serialized, including imports into that
+  destination and exports from it. Different documents can progress independently,
+  so a long import or checkpoint does not block another document's grid. A short
+  registry lock selects the service by its normalized document path. Registry
+  entries survive close so queued clients retain the same lock and cache.
 - The grid spike may need a browser-reachable transport. That would be an
   adapter over the same `Service`, decided with the grid, not a second API.
 
