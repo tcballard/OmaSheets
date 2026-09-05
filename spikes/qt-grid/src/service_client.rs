@@ -30,6 +30,7 @@ struct CachedPage {
 struct ServiceClient {
     reader: BufReader<UnixStream>,
     writer: UnixStream,
+    usable: bool,
 }
 
 impl ServiceClient {
@@ -50,10 +51,17 @@ impl ServiceClient {
         Ok(Self {
             reader: BufReader::new(stream),
             writer,
+            usable: true,
         })
     }
 
     fn call(&mut self, request: &Value) -> Result<Value, String> {
+        if !self.usable {
+            return Err("service connection lost synchronization; copy your draft and reopen the document to verify whether the previous edit was saved".into());
+        }
+        // A failed exchange may leave a delayed response in the stream. Never
+        // send another request until this exchange has a complete valid reply.
+        self.usable = false;
         serde_json::to_writer(&mut self.writer, request).map_err(|error| error.to_string())?;
         self.writer
             .write_all(b"\n")
@@ -70,17 +78,23 @@ impl ServiceClient {
         }
         let mut envelope: Value =
             serde_json::from_str(answer.trim()).map_err(|error| error.to_string())?;
-        if envelope["ok"].as_bool() != Some(true) {
+        let ok = envelope["ok"]
+            .as_bool()
+            .ok_or("service response is missing its status")?;
+        if !ok {
             let code = envelope["error"]["code"].as_str().unwrap_or("service");
             let message = envelope["error"]["message"]
                 .as_str()
                 .unwrap_or("request failed");
+            self.usable = true;
             return Err(format!("{code}: {message}"));
         }
-        envelope
+        let response = envelope
             .get_mut("response")
             .map(Value::take)
-            .ok_or_else(|| "service response is missing its payload".into())
+            .ok_or_else(|| "service response is missing its payload".to_string())?;
+        self.usable = true;
+        Ok(response)
     }
 }
 
@@ -363,6 +377,41 @@ fn column_letters(column: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn connected_pair() -> (ServiceClient, UnixStream) {
+        let (stream, peer) = UnixStream::pair().unwrap();
+        stream.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
+        let writer = stream.try_clone().unwrap();
+        (ServiceClient { reader: BufReader::new(stream), writer, usable: true }, peer)
+    }
+
+    #[test]
+    fn incomplete_exchange_never_sends_a_second_edit() {
+        for reply in ["", "not-json\n", "{}\n", "{\"ok\":true}\n"] {
+            let (mut client, mut peer) = connected_pair();
+            peer.write_all(reply.as_bytes()).unwrap();
+            assert!(client.call(&json!({"edit": 1})).is_err());
+            let mut received = BufReader::new(peer.try_clone().unwrap());
+            let mut request = String::new();
+            received.read_line(&mut request).unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&request).unwrap()["edit"], 1);
+            // A late successful response must not acknowledge a new mutation.
+            peer.write_all(b"{\"ok\":true,\"response\":{}}\n").unwrap();
+            assert!(client.call(&json!({"edit": 2})).unwrap_err().contains("reopen"));
+            peer.set_nonblocking(true).unwrap();
+            let mut byte = [0];
+            assert_eq!(peer.read(&mut byte).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        }
+    }
+
+    #[test]
+    fn complete_rejection_keeps_connection_usable() {
+        let (mut client, mut peer) = connected_pair();
+        peer.write_all(b"{\"ok\":false,\"error\":{\"code\":\"validation\",\"message\":\"rejected\"}}\n").unwrap();
+        assert_eq!(client.call(&json!({})).unwrap_err(), "validation: rejected");
+        peer.write_all(b"{\"ok\":true,\"response\":{\"saved\":true}}\n").unwrap();
+        assert_eq!(client.call(&json!({})).unwrap()["saved"], true);
+    }
 
     #[test]
     fn parses_values_and_preserves_formula_input() {
