@@ -47,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     window.add_argument("path", type=Path)
     commands.add_parser("window-current", help="Open the selected workbook in the OmaSheets window")
     launch = commands.add_parser("launch", help="Open a compatibility or native OmaSheets document")
-    launch.add_argument("path", type=Path)
+    launch.add_argument("path", type=Path, nargs="?")
     convert = commands.add_parser("convert", help="Convert .xls to a new adjacent .xlsx")
     convert.add_argument("path", type=Path)
     doctor = commands.add_parser("doctor", help="Check the local OmaSheets runtime")
@@ -101,6 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
+    if arguments.command is None or (arguments.command == "launch" and arguments.path is None):
+        from .native_grid import open_app
+
+        print(json.dumps({"pid": open_app(), "window": "omasheets"}, sort_keys=True))
+        return 0
     if arguments.command == "mcp" and arguments.mcp_command == "serve":
         from .mcp import serve_stdio
 

@@ -118,6 +118,55 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(removed["conflicts"], [])
         self.assertFalse(self.paths.journal.exists())
 
+    def test_new_revision_updates_and_preserves_workbooks_and_marketplace(self):
+        install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        workbook = self.paths.app.parent / "my-work.omasheets"
+        workbook.write_bytes(b"user workbook")
+        original_journal = json.loads(self.paths.journal.read_text())
+        marketplace = json.loads(self.paths.codex_marketplace.read_text())
+        marketplace["plugins"].append({"name": "keep-me"})
+        self.paths.codex_marketplace.write_text(json.dumps(marketplace))
+        identity = {**source_identity(ROOT), "commit": "a" * 40}
+        self.make_bundle(self.bundle, source=identity)
+        with patch("omasheets.installation.source_identity", return_value=identity):
+            result = install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+            self.assertFalse(install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)["changed"])
+        self.assertTrue(result["updated"])
+        self.assertEqual(result["source"], identity)
+        self.assertEqual(workbook.read_bytes(), b"user workbook")
+        journal = json.loads(self.paths.journal.read_text())
+        self.assertEqual(journal["marketplace_before"], original_journal["marketplace_before"])
+        self.assertIn({"name": "keep-me"}, json.loads(self.paths.codex_marketplace.read_text())["plugins"])
+        self.assertEqual(uninstall(self.paths)["conflicts"], [])
+        self.assertEqual(workbook.read_bytes(), b"user workbook")
+
+    def test_failed_upgrade_restores_the_previous_working_installation(self):
+        install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        journal = self.paths.journal.read_bytes()
+        launcher = self.paths.launcher.read_bytes()
+        provenance = (self.paths.app / "provenance.json").read_bytes()
+        identity = {**source_identity(ROOT), "commit": "a" * 40}
+        self.make_bundle(self.bundle, source=identity)
+        with patch("omasheets.installation.source_identity", return_value=identity), patch(
+            "omasheets.installation.install_integration", side_effect=RuntimeError("integration failed"),
+        ), self.assertRaisesRegex(RuntimeError, "integration failed"):
+            install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        self.assertEqual(self.paths.journal.read_bytes(), journal)
+        self.assertEqual(self.paths.launcher.read_bytes(), launcher)
+        self.assertEqual((self.paths.app / "provenance.json").read_bytes(), provenance)
+        self.assertFalse(install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)["changed"])
+
+    def test_invalid_upgrade_bundle_leaves_current_app_untouched(self):
+        install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        journal = self.paths.journal.read_bytes()
+        self.bundle.write_bytes(b"broken archive")
+        identity = {**source_identity(ROOT), "commit": "a" * 40}
+        with patch("omasheets.installation.source_identity", return_value=identity), self.assertRaises(Exception):
+            install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        self.assertEqual(self.paths.journal.read_bytes(), journal)
+        self.assertTrue((self.paths.app / "bin/omasheets-grid").is_file())
+        self.assertEqual(uninstall(self.paths)["conflicts"], [])
+
     def test_explicit_environment_bundle_bypasses_automatic_release_download(self):
         with patch.dict(
             os.environ, {"OMASHEETS_NATIVE_BUNDLE_PATH": str(self.bundle)}, clear=False,

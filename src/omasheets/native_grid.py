@@ -125,13 +125,15 @@ def _stop_native_service(runtime: Path, process: subprocess.Popen) -> None:
             (directory / "native.token").unlink(missing_ok=True)
 
 
-def _run_host(source: Path) -> int:
+def _run_host(source: Path | None) -> int:
     runtime = _runtime_base()
     executable = grid_executable()
     if executable is None:
         raise EngineError("omasheets-grid is not installed; run OmaSheets setup from the Omarchy widget")
     environment = os.environ.copy()
-    environment["OMASHEETS_DOCUMENT"] = str(source)
+    environment.pop("OMASHEETS_DOCUMENT", None)
+    if source is not None:
+        environment["OMASHEETS_DOCUMENT"] = str(source)
     # Every grid holds a shared lease, including grids reusing a service.
     # The owning supervisor survives its window until all leases are released.
     # An exclusive lease also prevents a new window racing service shutdown.
@@ -142,7 +144,7 @@ def _run_host(source: Path) -> int:
         owned_service = _ensure_native_service(runtime)
         try:
             grid = subprocess.Popen(
-                [str(executable), str(source)],
+                [str(executable)] + ([str(source)] if source is not None else []),
                 env=environment,
                 close_fds=True,
             )
@@ -159,18 +161,29 @@ def open_grid(path: Path) -> int:
     if source.suffix.lower() != ".omasheets":
         raise PolicyError("the native grid opens .omasheets documents only")
     identify_regular_file(source)
+    return _open_host(source)
+
+
+def open_app() -> int:
+    return _open_host(None)
+
+
+def _open_host(source: Path | None) -> int:
     executable = grid_executable()
     if executable is None:
         raise EngineError("omasheets-grid is not installed; run OmaSheets setup from the Omarchy widget")
     environment = os.environ.copy()
-    environment["OMASHEETS_DOCUMENT"] = str(source)
+    environment.pop("OMASHEETS_DOCUMENT", None)
+    if source is not None:
+        environment["OMASHEETS_DOCUMENT"] = str(source)
     environment["OMASHEETS_GRID"] = str(executable)
     service = service_executable()
     if service is None:
         raise EngineError("omasheets-service is not installed; run OmaSheets setup from the Omarchy widget")
     environment["OMASHEETS_NATIVE_SERVICE"] = str(service)
     process = subprocess.Popen(
-        [sys.executable, "-m", "omasheets.native_grid", "--host", str(source)],
+        [sys.executable, "-m", "omasheets.native_grid", "--host"]
+        + ([str(source)] if source is not None else []),
         env=environment,
         close_fds=True,
         start_new_session=True,
@@ -180,9 +193,9 @@ def open_grid(path: Path) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if len(arguments) != 2 or arguments[0] != "--host":
-        raise SystemExit("usage: python -m omasheets.native_grid --host DOCUMENT.omasheets")
-    return _run_host(Path(arguments[1]).resolve(strict=True))
+    if len(arguments) not in {1, 2} or arguments[0] != "--host":
+        raise SystemExit("usage: python -m omasheets.native_grid --host [DOCUMENT.omasheets]")
+    return _run_host(Path(arguments[1]).resolve(strict=True) if len(arguments) == 2 else None)
 
 
 if __name__ == "__main__":

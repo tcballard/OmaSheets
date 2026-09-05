@@ -79,18 +79,24 @@ which also keeps the grid runnable away from Omarchy.
 sudo pacman -S --needed base-devel qt6-base qt6-declarative qt6-wayland
 cargo test --locked --manifest-path spikes/qt-grid/Cargo.toml
 cargo build --locked --release --manifest-path spikes/qt-grid/Cargo.toml
-spikes/qt-grid/target/release/omasheets-grid
+spikes/qt-grid/target/release/omasheets-grid --demo
 ```
 
-An installed product starts the authenticated service on demand and dispatches
-native files through the production launcher:
+An installed product starts the authenticated service on demand. Run `omasheets`
+without arguments for New/Open, or dispatch a native file directly:
 
 ```sh
 omasheets launch document.omasheets
 ```
 
-The document must already contain at least one sheet, row and column. Select a
-sheet with the tab strip or switch with Ctrl+Page Up and Ctrl+Page Down.
+Ctrl+N creates a real native document with one sheet, 1,000 rows and 26 columns.
+Ctrl+O opens an existing document. The File menu includes bounded XLSX import,
+XLSX/CSV/Parquet export with conversion reports, and the compatibility opener.
+File operations run off the UI thread. A rejected open keeps the current
+document; a failed save keeps its draft. Existing files are never overwritten
+by New, Import or Export. Select a sheet with the tab strip or switch with
+Ctrl+Page Up and Ctrl+Page Down. The synthetic fixture now requires `--demo`
+or the benchmark environment variable; the normal app never creates demo data.
 
 ## Evidence smoke
 

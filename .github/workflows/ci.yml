@@ -266,7 +266,8 @@ jobs:
             qml6-module-qtqml qml6-module-qtqml-models \
             qml6-module-qtqml-workerscript qml6-module-qtquick \
             qml6-module-qtquick-controls qml6-module-qtquick-layouts \
-            qml6-module-qtquick-templates qml6-module-qtquick-window
+            qml6-module-qtquick-templates qml6-module-qtquick-window \
+            qml6-module-qtquick-dialogs qml6-module-qtcore
       - name: Check the grid contract and Rust model
         run: |
           evidence="$RUNNER_TEMP/omasheets-qt-grid"
@@ -305,6 +306,9 @@ jobs:
             sleep 0.05
           done
           test -S "$runtime/omasheets/native.sock"
+          XDG_RUNTIME_DIR="$runtime" cargo test --locked --release \
+            --manifest-path spikes/qt-grid/Cargo.toml \
+            desktop_workflow_service_roundtrip -- --ignored
           call_service() {
             target/release/omasheets-service call --runtime-dir "$runtime" "$1"
           }

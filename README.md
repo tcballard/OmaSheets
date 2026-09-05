@@ -14,8 +14,10 @@ CSV, XLSX and Parquet export. Existing Excel and OpenDocument workbooks use the
 separate LibreOfficeKit compatibility window. Native import/export reports
 what cannot be preserved; it does not promise full Excel fidelity.
 
-**Try the native grid:** follow the [Arch / Omarchy build instructions](spikes/qt-grid/README.md#arch--omarchy-build).
-They include a synthetic grid to explore before opening a native document.
+**Open OmaSheets:** after installing a matching current build, choose OmaSheets
+from the app launcher or run `omasheets`. Create a workbook with **Ctrl+N**,
+open one with **Ctrl+O**, and press **F1** for the keyboard guide. Native edits
+save when you finish each cell; the File menu offers import and export.
 The current development checkout needs a source build or a matching development
 bundle; the published v0.0.2 download does not contain this native stack.
 
@@ -109,6 +111,7 @@ audit, and audit-backed management summaries with pivots and charts.
 ## Commands
 
 ```bash
+omasheets
 omasheets doctor
 omasheets launch workbook.omasheets
 omasheets launch workbook.xlsx
@@ -128,7 +131,15 @@ omasheets lok render workbook.xls --output /tmp/workbook-tile.ppm
 The real Omarchy, Wayland and LibreOffice release pass remains in
 [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).
 
-`omasheets launch` is the production desktop-entry boundary. It opens native
+`omasheets` and `omasheets launch` without a path open the start screen, with
+New, Open, Import Excel and compatibility-window actions. New workbooks start
+with one sheet, 1,000 rows and 26 columns, at the filename you choose. Enter,
+Tab or Ctrl+S commits a cell draft; Escape cancels it. Close and reopen the
+`.omasheets` file to continue working. File → Export writes a new XLSX workbook
+or the current sheet as CSV or Parquet and displays the conversion report.
+Creation and export refuse to overwrite existing files.
+
+`omasheets launch FILE` is the production desktop-entry boundary. It opens native
 `.omasheets` documents in the Qt grid and compatibility formats in the
 LibreOfficeKit window. The Qt grid starts an authenticated native service on
 demand, reuses an existing user service when one is already running, and stops

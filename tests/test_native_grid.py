@@ -13,6 +13,27 @@ from omasheets.native_grid import open_grid, status
 
 
 class NativeGridTests(unittest.TestCase):
+    def test_app_launcher_accepts_no_document(self):
+        for arguments in ([], ["launch"]):
+            with self.subTest(arguments=arguments), patch(
+                "omasheets.native_grid.open_app", return_value=123,
+            ) as launch, redirect_stdout(StringIO()) as output:
+                self.assertEqual(cli_main(arguments), 0)
+                launch.assert_called_once_with()
+                self.assertIn('"pid": 123', output.getvalue())
+
+    def test_home_supervisor_clears_inherited_document(self):
+        from omasheets.native_grid import open_app
+
+        with patch.dict(os.environ, {"OMASHEETS_DOCUMENT": "/old.omasheets"}), patch(
+            "omasheets.native_grid.grid_executable", return_value=Path("/grid"),
+        ), patch("omasheets.native_grid.service_executable", return_value=Path("/service")), patch(
+            "omasheets.native_grid.subprocess.Popen", return_value=Mock(pid=42),
+        ) as spawn:
+            self.assertEqual(open_app(), 42)
+        self.assertEqual(spawn.call_args.args[0][-1], "--host")
+        self.assertNotIn("OMASHEETS_DOCUMENT", spawn.call_args.kwargs["env"])
+
     def test_startup_timeout_stops_the_owned_service(self):
         from omasheets.native_grid import _ensure_native_service
 
