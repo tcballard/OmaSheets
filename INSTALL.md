@@ -1,4 +1,12 @@
-# Install OmaSheets v0.0.2 on Omarchy
+# Install OmaSheets on Omarchy
+
+**Development checkout:** the native Qt stack is not yet a tagged release.
+The commands below add the Omarchy surface, but the current checkout requires
+an explicitly built, source-matching bundle via `OMASHEETS_NATIVE_BUNDLE_PATH`
+for product installation. The published v0.0.2 assets lack the native Qt stack
+and the newer detached signature. The pinned release public key is also still
+absent. See [native grid source builds](spikes/qt-grid/README.md#arch--omarchy-build)
+and the [release gates](docs/V0.1-RELEASE.md).
 
 OmaSheets targets Omarchy `quattro`. Install and enable its Omarchy surface
 from the repository with:
@@ -19,7 +27,7 @@ user-local product bootstrap. The same action can be run in a terminal:
 ```
 
 The bootstrap checks runtime dependencies, downloads the native bundle from the
-matching `v0.0.2` GitHub release, verifies its maintainer signature against the
+matching tagged GitHub release, verifies its maintainer signature against the
 key pinned in the checkout, verifies it against the exact installed checkout,
 and installs only OmaSheets-owned files. No compiler, CMake, `pkgconf`, or
 LibreOffice SDK is installed or required on the user's machine. The bootstrap
@@ -28,7 +36,7 @@ are missing, it stops and prints this explicit Omarchy command for the user to
 approve and run:
 
 ```bash
-omarchy pkg add gtk3 libreoffice-fresh bubblewrap
+omarchy pkg add gtk3 libreoffice-fresh bubblewrap qt6-base qt6-declarative qt6-wayland
 ```
 
 This is a manual setup step by design: the standard `omarchy plugin add`
@@ -91,7 +99,7 @@ Private workbook state, receipts and installation journals live under
 `$XDG_CACHE_HOME/omasheets/`; sockets and live snapshots live under
 `$XDG_RUNTIME_DIR/omasheets/`. Runtime and state directories are mode `0700`.
 
-The v0.0.2 native bundle targets Omarchy's Linux `x86_64` platform.
+The native bundle targets Omarchy's Linux `x86_64` platform.
 Installation fails before changing product state on any architecture without a
 matching release bundle.
 

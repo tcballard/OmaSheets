@@ -1,27 +1,28 @@
 # OmaSheets
 
-**The spreadsheet agents can work on without silent writes.**
+**A spreadsheet for Omarchy, with agent changes you can review.**
 
-OmaSheets is an early-access spreadsheet app for Omarchy. Open an existing
-workbook, choose **Ask Agent**, and let your configured default agent inspect,
-explain, audit, and propose bounded changes to formulas, formatting, charts,
-pivots, or whole-workbook summaries. OmaSheets seals the evidence, recalculates
-and reopens staged output, and publishes nothing until you explicitly approve a
-local copy.
+OmaSheets gives you a local spreadsheet window and a way to let your configured
+agent inspect workbooks, explain formulas and propose changes. You review the
+evidence and approve the result. The native document stack adds a Qt grid,
+a Rust formula engine and replayable edit history, with branches for proposed
+work and checks before a human-approved merge.
 
-```bash
-omarchy plugin add https://github.com/tcballard/OmaSheets.git --enable
-```
+**Development preview:** native `.omasheets` documents support keyboard editing,
+range copy/paste with relative formulas, undo/redo, bounded XLSX import, and
+CSV, XLSX and Parquet export. Existing Excel and OpenDocument workbooks use the
+separate LibreOfficeKit compatibility window. Native import/export reports
+what cannot be preserved; it does not promise full Excel fidelity.
 
-Choose **Install OmaSheets** in the bar widget. The v0.0.2 release bundle
-installs the native window and local agent service without requiring a compiler
-or LibreOffice SDK. See [installation and reversible removal](INSTALL.md).
+**Try the native grid:** follow the [Arch / Omarchy build instructions](spikes/qt-grid/README.md#arch--omarchy-build).
+They include a synthetic grid to explore before opening a native document.
+The current development checkout needs a source build or a matching development
+bundle; the published v0.0.2 download does not contain this native stack.
 
-**Current boundary:** LibreOffice Calc remains the compatibility and calculation
-engine in the released v0.0.2 product. Agents can read and stage changes; only
-an explicit local OmaSheets approval can publish them. Development builds also
-ship the native event store, formula engine, local service, and virtualised Qt
-grid for `.omasheets` documents on the measured [v0.1.0 roadmap](docs/ROADMAP.md).
+The [CI workflow](https://github.com/tcballard/OmaSheets/actions/workflows/ci.yml)
+checks replay, rejected edits, clipboard round-trips and compiler-free Arch
+installation. Real Omarchy acceptance, refreshed corpus evidence and release
+signing remain [v0.1.0 release gates](docs/V0.1-RELEASE.md).
 
 ## v0.0.2 scope
 
@@ -67,6 +68,11 @@ the compiler-free Arch acceptance runs its complete local review workflow after
 installation.
 
 ## Install on Omarchy
+
+**Current checkout:** the command below adds the bar widget. Full installation
+requires an explicitly built, source-matching development bundle. Automatic
+download cannot use the older v0.0.2 bundle with this checkout, and the next
+release still needs its pinned signing key and detached signature.
 
 ```bash
 omarchy plugin add https://github.com/tcballard/OmaSheets.git --enable
