@@ -63,6 +63,22 @@ pub mod qobject {
         fn prepare_cell_edit(self: Pin<&mut Self>, row: i32, column: i32) -> bool;
 
         #[qinvokable]
+        #[cxx_name = "copyRange"]
+        fn copy_range(self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "pasteCells"]
+        fn paste_cells(self: Pin<&mut Self>, row: i32, column: i32, text: &QString) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "undoEdit"]
+        fn undo_edit(self: Pin<&mut Self>, redo: bool) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "clearCells"]
+        fn clear_cells(self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) -> bool;
+
+        #[qinvokable]
         #[cxx_name = "refreshTheme"]
         fn refresh_theme(self: Pin<&mut Self>);
 
@@ -204,6 +220,80 @@ impl Default for GridModelRust {
 }
 
 impl qobject::GridModel {
+    pub fn copy_range(mut self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) -> QString {
+        let result = (|| -> Result<String, String> {
+            if row < 0 || column < 0 || rows <= 0 || columns <= 0
+                || rows.checked_mul(columns).is_none_or(|count| count > 1000)
+                || row.checked_add(rows).is_none_or(|end| end > self.row_count)
+                || column.checked_add(columns).is_none_or(|end| end > self.column_count) {
+                return Err("copy must fit inside the sheet and contain at most 1,000 cells".into());
+            }
+            let document = self.document.as_ref().ok_or("copy requires a native document")?;
+            let mut values = Vec::new();
+            let mut bytes = 0;
+            for r in row..row + rows {
+                let mut line = Vec::new();
+                for c in column..column + columns {
+                    let cell = document.cell(r as usize, c as usize)?;
+                    let value = if cell.kind == "formula" && !cell.input.starts_with('=') {
+                        format!("={}", cell.input)
+                    } else { cell.input };
+                    bytes += value.len();
+                    if bytes > crate::clipboard::MAX_BYTES { return Err("copy exceeds 1 MiB".into()); }
+                    line.push(value);
+                }
+                values.push(line);
+            }
+            document.verify_revision()?;
+            crate::clipboard::encode(&values)
+        })();
+        match result {
+            Ok(text) => serde_json::to_string(&text).unwrap().as_str().into(),
+            Err(error) => { self.as_mut().set_source_status(error.as_str().into()); "null".into() }
+        }
+    }
+
+    pub fn paste_cells(mut self: Pin<&mut Self>, row: i32, column: i32, text: &QString) -> bool {
+        let result = (|| {
+            if row < 0 || column < 0 { return Err("invalid paste position".into()); }
+            let values = crate::clipboard::parse(&text.to_string())?;
+            self.document.as_ref().ok_or("paste requires a native document")?
+                .set_matrix(row as usize, column as usize, &values)
+        })();
+        self.as_mut().finish_change(result, "Pasted atomically — Ctrl+Z to undo")
+    }
+
+    pub fn undo_edit(mut self: Pin<&mut Self>, redo: bool) -> bool {
+        let result = self.document.as_ref().ok_or_else(|| "undo requires a native document".to_string())
+            .and_then(|document| document.undo(redo));
+        self.as_mut().finish_change(result, if redo { "Redone" } else { "Undone — Ctrl+Shift+Z to redo" })
+    }
+
+    pub fn clear_cells(mut self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) -> bool {
+        let result = (|| {
+            if row < 0 || column < 0 || rows <= 0 || columns <= 0
+                || rows.checked_mul(columns).is_none_or(|count| count > 1000) {
+                return Err("clear is limited to 1,000 cells".into());
+            }
+            let values = vec![vec![String::new(); columns as usize]; rows as usize];
+            self.document.as_ref().ok_or("range clear requires a native document")?
+                .set_matrix(row as usize, column as usize, &values)
+        })();
+        self.as_mut().finish_change(result, "Cleared atomically — Ctrl+Z to undo")
+    }
+
+    fn finish_change(mut self: Pin<&mut Self>, result: Result<(), String>, message: &str) -> bool {
+        match result {
+            Ok(()) => {
+                let revision = *self.revision();
+                self.as_mut().set_revision(revision.wrapping_add(1));
+                self.as_mut().set_source_status(message.into());
+                true
+            }
+            Err(error) => { self.as_mut().set_source_status(error.as_str().into()); false }
+        }
+    }
+
     pub fn prepare_cell_edit(mut self: Pin<&mut Self>, row: i32, column: i32) -> bool {
         if row < 0 || row >= self.row_count || column < 0 || column >= self.column_count {
             return false;

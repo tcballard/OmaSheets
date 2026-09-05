@@ -21,6 +21,12 @@ ApplicationWindow {
         onActivated: grid.commitEdit()
     }
 
+    TextEdit {
+        id: clipboardBuffer
+        visible: false
+        textFormat: TextEdit.PlainText
+    }
+
     function blend(from, to, amount) {
         return Qt.rgba(from.r + (to.r - from.r) * amount,
             from.g + (to.g - from.g) * amount,
@@ -216,6 +222,12 @@ ApplicationWindow {
 
             property int currentRow: 0
             property int currentColumn: 0
+            property int anchorRow: 0
+            property int anchorColumn: 0
+            readonly property int selectionRow: Math.min(currentRow, anchorRow)
+            readonly property int selectionColumn: Math.min(currentColumn, anchorColumn)
+            readonly property int selectionRows: Math.abs(currentRow - anchorRow) + 1
+            readonly property int selectionColumns: Math.abs(currentColumn - anchorColumn) + 1
             readonly property int rowCapacity: Math.min(backend.rowCount,
                 Math.ceil(Math.max(1, body.height) / window.rowHeight) + 2)
             readonly property int columnCapacity: Math.min(backend.columnCount,
@@ -228,11 +240,15 @@ ApplicationWindow {
             readonly property int visibleColumnCount: columnCapacity
             readonly property int visibleDelegates: Math.max(0, visibleRowCount * visibleColumnCount)
 
-            function selectCell(row, column) {
+            function selectCell(row, column, extend) {
                 if (!commitEdit())
                     return false;
                 currentRow = Math.max(0, Math.min(backend.rowCount - 1, row));
                 currentColumn = Math.max(0, Math.min(backend.columnCount - 1, column));
+                if (!extend) {
+                    anchorRow = currentRow;
+                    anchorColumn = currentColumn;
+                }
                 ensureVisible();
                 body.forceActiveFocus();
                 return true;
@@ -291,8 +307,43 @@ ApplicationWindow {
             function clearCell() {
                 if (editor.visible)
                     return;
+                if (selectionRows > 1 || selectionColumns > 1) {
+                    backend.clearCells(selectionRow, selectionColumn, selectionRows, selectionColumns);
+                    return;
+                }
                 beginEdit("");
                 commitEdit();
+            }
+
+            function copySelection() {
+                if (editor.visible)
+                    return;
+                const text = JSON.parse(backend.copyRange(selectionRow, selectionColumn,
+                    selectionRows, selectionColumns));
+                if (text === null)
+                    return;
+                clipboardBuffer.text = text;
+                clipboardBuffer.selectAll();
+                clipboardBuffer.copy();
+                clipboardBuffer.text = "";
+                body.forceActiveFocus();
+            }
+
+            function pasteSelection() {
+                if (editor.visible)
+                    return;
+                clipboardBuffer.text = "";
+                clipboardBuffer.paste();
+                const text = clipboardBuffer.text;
+                clipboardBuffer.text = "";
+                if (text.length > 0 && backend.pasteCells(selectionRow, selectionColumn, text))
+                    selectCell(selectionRow, selectionColumn);
+                body.forceActiveFocus();
+            }
+
+            function undoSelection(redo) {
+                if (!editor.visible)
+                    backend.undoEdit(redo);
             }
 
             function switchSheet(index) {
@@ -303,6 +354,8 @@ ApplicationWindow {
                 backend.selectSheet(index);
                 currentRow = 0;
                 currentColumn = 0;
+                anchorRow = 0;
+                anchorColumn = 0;
                 body.contentX = 0;
                 body.contentY = 0;
                 body.forceActiveFocus();
@@ -428,8 +481,10 @@ ApplicationWindow {
                             readonly property int columnOffset: index % grid.visibleColumnCount
                             readonly property int logicalRow: grid.firstVisibleRow + rowOffset
                             readonly property int logicalColumn: grid.firstVisibleColumn + columnOffset
-                            readonly property bool selectedCell: logicalRow === grid.currentRow
-                                && logicalColumn === grid.currentColumn
+                            readonly property bool selectedCell: logicalRow >= grid.selectionRow
+                                && logicalRow < grid.selectionRow + grid.selectionRows
+                                && logicalColumn >= grid.selectionColumn
+                                && logicalColumn < grid.selectionColumn + grid.selectionColumns
 
                             x: logicalColumn * window.cellWidth
                             y: logicalRow * window.rowHeight
@@ -526,18 +581,27 @@ ApplicationWindow {
 
                 Keys.onPressed: event => {
                     const control = (event.modifiers & Qt.ControlModifier) !== 0;
-                    if (event.key === Qt.Key_PageUp && control)
+                    const shift = (event.modifiers & Qt.ShiftModifier) !== 0;
+                    if (control && event.key === Qt.Key_C)
+                        grid.copySelection();
+                    else if (control && event.key === Qt.Key_V)
+                        grid.pasteSelection();
+                    else if (control && event.key === Qt.Key_Z)
+                        grid.undoSelection(shift);
+                    else if (control && event.key === Qt.Key_Y)
+                        grid.undoSelection(true);
+                    else if (event.key === Qt.Key_PageUp && control)
                         grid.switchSheet(backend.currentSheet - 1);
                     else if (event.key === Qt.Key_PageDown && control)
                         grid.switchSheet(backend.currentSheet + 1);
                     else if (event.key === Qt.Key_Left)
-                        grid.selectCell(grid.currentRow, grid.currentColumn - 1);
+                        grid.selectCell(grid.currentRow, grid.currentColumn - 1, shift);
                     else if (event.key === Qt.Key_Right)
-                        grid.selectCell(grid.currentRow, grid.currentColumn + 1);
+                        grid.selectCell(grid.currentRow, grid.currentColumn + 1, shift);
                     else if (event.key === Qt.Key_Up)
-                        grid.selectCell(grid.currentRow - 1, grid.currentColumn);
+                        grid.selectCell(grid.currentRow - 1, grid.currentColumn, shift);
                     else if (event.key === Qt.Key_Down)
-                        grid.selectCell(grid.currentRow + 1, grid.currentColumn);
+                        grid.selectCell(grid.currentRow + 1, grid.currentColumn, shift);
                     else if (event.key === Qt.Key_PageUp)
                         grid.selectCell(grid.currentRow - Math.max(1, grid.visibleRowCount - 2), grid.currentColumn);
                     else if (event.key === Qt.Key_PageDown)
@@ -583,8 +647,22 @@ ApplicationWindow {
                     if (frameNumber === 1 && backend.documentMode) {
                         if (backend.sheetCount > 1)
                             grid.switchSheet(1);
-                        backend.setCellText(0, 0, "7");
-                        backend.setCellText(0, 1, "=A1*3");
+                        if (!backend.pasteCells(0, 0, "7\t=A1*3")
+                                || !backend.undoEdit(false) || !backend.undoEdit(true)) {
+                            Qt.exit(1);
+                            return;
+                        }
+                        grid.selectCell(0, 0);
+                        grid.selectCell(0, 1, true);
+                        grid.copySelection();
+                        clipboardBuffer.text = "";
+                        clipboardBuffer.paste();
+                        if (clipboardBuffer.text !== "7\t=A1*3") {
+                            Qt.exit(1);
+                            return;
+                        }
+                        clipboardBuffer.text = "";
+                        grid.selectCell(0, 0);
                     }
                     const progress = Math.min(1, frameNumber / (warmupFrames + measuredFrames));
                     body.contentY = progress * Math.max(0, body.contentHeight - body.height);

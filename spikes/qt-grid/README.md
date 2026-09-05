@@ -19,6 +19,23 @@ Prefix input with an apostrophe to keep it as literal text, such as `'00123`,
 value. Existing text that resembles a number, boolean or formula uses this
 marker in the editor so it retains its type; the grid displays the literal value.
 
+For native documents, Shift+arrow keys extend a rectangular selection. Ctrl+C
+copies it and Ctrl+V pastes at its top-left cell. Delete clears the selection.
+Copy/paste supports quoted tab-separated text (including embedded tabs and line
+breaks), up to 1,000 cells and 1 MiB of clipboard text. Pasted rectangles must
+fit in the existing sheet; ragged or oversized input is rejected before writing.
+Formula source is copied literally: relative references are not translated to
+the destination. Numeric-looking text retains its apostrophe editing marker.
+
+Ctrl+Z undoes a single edit, clear or entire paste. Ctrl+Shift+Z or Ctrl+Y redoes
+it. History is local to the open window, limited to 32 edits and 8 MiB, and is
+cleared when the window closes. Undo writes compensating events, retaining the
+document's audit history. Each mutation checks its expected document digest;
+changes from another window or client cause a refusal until the document is
+reopened. A failed paste or undo leaves history and document state unchanged
+when the service reports a definitive rejection. Uncertain transport outcomes
+still require reopening to verify the saved state.
+
 Failed saves retain the draft and block navigation and window closure until
 the user saves successfully or explicitly cancels. A failed initial read blocks
 editing. After a transport or protocol failure, copy the draft, cancel it and

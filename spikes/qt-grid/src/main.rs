@@ -1,4 +1,5 @@
 mod grid_model;
+mod clipboard;
 mod service_client;
 mod theme;
 

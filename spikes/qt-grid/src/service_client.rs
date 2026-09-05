@@ -106,6 +106,15 @@ struct DocumentState {
     actor: String,
     pages: VecDeque<CachedPage>,
     requests: u64,
+    digest: String,
+    undo: Vec<EditRecord>,
+    redo: Vec<EditRecord>,
+}
+
+#[derive(Clone)]
+struct EditRecord {
+    before: Vec<Value>,
+    after: Vec<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -157,6 +166,9 @@ impl GridDocument {
                 actor,
                 pages: VecDeque::new(),
                 requests: 2,
+                digest: summary["digest"].as_str().ok_or("document has no digest")?.to_string(),
+                undo: Vec::new(),
+                redo: Vec::new(),
             }),
         })
     }
@@ -193,26 +205,60 @@ impl GridDocument {
     }
 
     pub fn set_text(&self, row: usize, column: usize, text: &str) -> Result<(), String> {
-        let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
-        let sheet = self
-            .sheets
-            .get(state.current_sheet)
-            .ok_or("the current sheet is unavailable")?;
-        if row >= sheet.rows || column >= sheet.columns {
-            return Err("cell is outside the document view".into());
+        self.set_matrix(row, column, &[vec![text.to_string()]])
+    }
+
+    pub fn set_matrix(&self, row: usize, column: usize, values: &[Vec<String>]) -> Result<(), String> {
+        let sheet = self.current_sheet()?;
+        let width = values.first().map_or(0, Vec::len);
+        if width == 0 || values.iter().any(|line| line.len() != width)
+            || values.len().checked_mul(width).is_none_or(|count| count > 1000)
+            || row.checked_add(values.len()).is_none_or(|end| end > sheet.rows)
+            || column.checked_add(width).is_none_or(|end| end > sheet.columns)
+        {
+            return Err("paste must be rectangular, at most 1,000 cells, and fit inside the sheet".into());
         }
-        let a1 = format!("{}{}", column_letters(column), row + 1);
-        let command = edit_command(&sheet.id, &a1, text);
-        let request = json!({
-            "kind": "append",
-            "path": &state.path,
-            "branch": state.branch.as_deref(),
-            "actor": { "kind": "human", "id": state.actor.as_str() },
-            "command": command,
-        });
-        state.client.call(&request)?;
+        let mut record = EditRecord { before: Vec::new(), after: Vec::new() };
+        for (dr, line) in values.iter().enumerate() {
+            for (dc, text) in line.iter().enumerate() {
+                let old = self.cell(row + dr, column + dc)?;
+                let a1 = format!("{}{}", column_letters(column + dc), row + dr + 1);
+                record.before.push(restore_command(&sheet.id, &a1, &old));
+                record.after.push(edit_command(&sheet.id, &a1, text));
+            }
+        }
+        if record.before == record.after { return self.verify_revision(); }
+        if record_bytes(&record) > 4 * 1024 * 1024 {
+            return Err("edit is too large to retain safe undo history".into());
+        }
+        let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
+        apply_commands(&mut state, &record.after)?;
+        state.redo.clear();
+        state.undo.push(record);
+        while state.undo.len() > 32 || state.undo.iter().map(record_bytes).sum::<usize>() > 8 * 1024 * 1024 {
+            state.undo.remove(0);
+        }
+        Ok(())
+    }
+
+    pub fn undo(&self, redo: bool) -> Result<(), String> {
+        let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
+        let record = if redo { state.redo.last() } else { state.undo.last() }
+            .cloned().ok_or(if redo { "nothing to redo" } else { "nothing to undo" })?;
+        apply_commands(&mut state, if redo { &record.after } else { &record.before })?;
+        if redo { state.redo.pop(); state.undo.push(record); }
+        else { state.undo.pop(); state.redo.push(record); }
+        Ok(())
+    }
+
+    pub fn verify_revision(&self) -> Result<(), String> {
+        let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
+        let request = json!({"kind": "document", "path": state.path, "branch": state.branch});
+        let summary = state.client.call(&request)?;
         state.requests += 1;
-        state.pages.clear();
+        if summary["digest"].as_str() != Some(state.digest.as_str()) {
+            return Err("document changed; reopen before copying or editing".into());
+        }
         Ok(())
     }
 
@@ -245,6 +291,28 @@ impl GridDocument {
     pub fn request_count(&self) -> u64 {
         self.state.lock().map_or(0, |state| state.requests)
     }
+}
+
+fn record_bytes(record: &EditRecord) -> usize {
+    serde_json::to_vec(&record.before).map_or(usize::MAX / 2, |bytes| bytes.len())
+        + serde_json::to_vec(&record.after).map_or(usize::MAX / 2, |bytes| bytes.len())
+}
+
+fn apply_commands(state: &mut DocumentState, commands: &[Value]) -> Result<(), String> {
+    let request = json!({
+        "kind": "append_batch", "path": state.path, "branch": state.branch,
+        "actor": {"kind": "human", "id": state.actor},
+        "commands": commands, "expected_digest": state.digest,
+    });
+    let response = state.client.call(&request)?;
+    if response["kind"] != "appended_batch" || !response["digest"].is_string() {
+        state.client.usable = false;
+        return Err("save response was invalid; copy the draft and reopen to verify saved state".into());
+    }
+    state.digest = response["digest"].as_str().unwrap().to_string();
+    state.requests += 1;
+    state.pages.clear();
+    Ok(())
 }
 
 fn fetch_page(
@@ -391,6 +459,14 @@ fn edit_command(sheet: &str, a1: &str, text: &str) -> Value {
     json!({ "command": "set_value", "sheet": sheet, "a1": a1, "value": value })
 }
 
+fn restore_command(sheet: &str, a1: &str, cell: &GridCell) -> Value {
+    match cell.kind.as_str() {
+        "formula" => json!({"command":"set_formula","sheet":sheet,"a1":a1,"source":cell.input}),
+        "blank" => json!({"command":"set_value","sheet":sheet,"a1":a1,"value":{"type":"blank"}}),
+        _ => edit_command(sheet, a1, &cell.input),
+    }
+}
+
 fn runtime_directory() -> Result<PathBuf, String> {
     std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
@@ -423,6 +499,66 @@ fn column_letters(column: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bulk_edit_undo_redo_and_failed_undo_preserve_history() {
+        let (client, peer) = connected_pair();
+        // This integration test uses a real local socket, not a timing timeout.
+        client.reader.get_ref().set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let server = std::thread::spawn(move || {
+            let mut reader = BufReader::new(peer.try_clone().unwrap());
+            let mut writer = peer;
+            for step in 0..10 {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let request: Value = serde_json::from_str(&line).unwrap();
+                let response = if step == 0 || step == 6 || step == 8 {
+                    assert_eq!(request["kind"], "grid_page");
+                    json!({"ok": true, "response": {"kind":"grid_page", "sheet":"sheet-id",
+                        "row_start":0,"column_start":0,"rows":4,"columns":4,
+                        "cells": if step == 8 { vec![json!({"row":0,"column":0,"value":{"type":"number","value":5}})] } else { vec![] }}})
+                } else if step == 9 {
+                    assert_eq!(request["kind"], "document");
+                    json!({"ok":true,"response":{"kind":"document","digest":"changed-elsewhere"}})
+                } else {
+                    assert_eq!(request["kind"], "append_batch");
+                    let (digest, next) = match step {
+                        1 => ("d0", "d1"), 2 => ("d1", "d2"), 3 => ("d2", "d3"),
+                        4 | 5 => ("d3", "d4"), 7 => ("d4", "d5"), _ => unreachable!(),
+                    };
+                    assert_eq!(request["expected_digest"], digest);
+                    let commands = request["commands"].as_array().unwrap();
+                    assert_eq!(commands.len(), if step == 7 { 1 } else { 4 });
+                    if step == 2 || step == 4 || step == 5 {
+                        assert!(commands.iter().all(|command| command["command"] == "clear_cell"));
+                    } else {
+                        assert_eq!(commands[0]["command"], "set_value");
+                        assert_eq!(commands[0]["value"]["value"], if step == 7 { 5.0 } else { 1.0 });
+                    }
+                    if step == 4 {
+                        json!({"ok":false,"error":{"code":"document_changed","message":"stale"}})
+                    } else { json!({"ok":true,"response":{"kind":"appended_batch","digest":next}}) }
+                };
+                writeln!(writer, "{response}").unwrap();
+            }
+        });
+        let document = GridDocument {
+            name: "Test".into(),
+            sheets: vec![SheetInfo {id:"sheet-id".into(),name:"Sheet".into(),rows:4,columns:4}],
+            state: Mutex::new(DocumentState {client,path:PathBuf::from("test.omasheets"),branch:None,
+                current_sheet:0,actor:"test".into(),pages:VecDeque::new(),requests:0,
+                digest:"d0".into(),undo:Vec::new(),redo:Vec::new()}),
+        };
+        document.set_matrix(0,0,&[vec!["1".into(),"2".into()],vec!["3".into(),"4".into()]]).unwrap();
+        document.undo(false).unwrap();
+        document.undo(true).unwrap();
+        assert!(document.undo(false).unwrap_err().contains("document_changed"));
+        document.undo(false).unwrap();
+        document.set_text(0,0,"5").unwrap();
+        assert!(document.undo(true).unwrap_err().contains("nothing to redo"));
+        assert!(document.set_text(0,0,"5").unwrap_err().contains("document changed"));
+        server.join().unwrap();
+    }
 
     fn connected_pair() -> (ServiceClient, UnixStream) {
         let (stream, peer) = UnixStream::pair().unwrap();
@@ -535,6 +671,17 @@ mod tests {
         assert_eq!(edit_command("sheet-id", "A1", "'00123")["value"]["value"], "00123");
         assert_eq!(edit_command("sheet-id", "A1", "'=1+1")["value"]["type"], "text");
         assert_eq!(edit_command("sheet-id", "A1", "'TRUE")["value"]["type"], "text");
+    }
+
+    #[test]
+    fn undo_retains_formula_and_explicit_blank_inputs() {
+        let formula = parse_cell(&json!({"formula":"A1+1","value":{"type":"number","value":2}})).unwrap();
+        let restored = restore_command("sheet", "B1", &formula);
+        assert_eq!(restored["command"], "set_formula");
+        assert_eq!(restored["source"], "A1+1");
+        let blank = parse_cell(&json!({"value":{"type":"blank"}})).unwrap();
+        assert_eq!(restore_command("sheet", "B1", &blank)["value"]["type"], "blank");
+        assert_eq!(restore_command("sheet", "B1", &GridCell::default())["command"], "clear_cell");
     }
 
     #[test]

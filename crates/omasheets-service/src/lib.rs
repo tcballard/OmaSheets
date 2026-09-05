@@ -131,6 +131,8 @@ pub enum Request {
         branch: Option<String>,
         actor: Actor,
         commands: Vec<Command>,
+        #[serde(default)]
+        expected_digest: Option<String>,
     },
     Branch {
         path: PathBuf,
@@ -382,6 +384,7 @@ pub enum Response {
     Appended(Event),
     AppendedBatch {
         events: Vec<Event>,
+        digest: String,
     },
     Branched {
         branch: String,
@@ -1881,6 +1884,7 @@ impl Service {
                 branch,
                 actor,
                 commands,
+                expected_digest,
             } => {
                 check_actor(&actor)?;
                 if commands.is_empty() || commands.len() > MAX_COMMAND_BATCH {
@@ -1897,8 +1901,17 @@ impl Service {
                         "agents append on their own branches; main changes through a human-approved merge",
                     ));
                 }
+                if let Some(expected) = expected_digest
+                    && store.document(branch)?.digest() != expected
+                {
+                    return Err(ServiceError::new(
+                        "document_changed",
+                        "the document changed; reopen it before applying this edit or undo",
+                    ));
+                }
                 let events = store.append_batch(branch, actor, now, commands)?;
-                Ok(Response::AppendedBatch { events })
+                let digest = store.document(branch)?.digest();
+                Ok(Response::AppendedBatch { events, digest })
             }
             Request::Branch {
                 path,
