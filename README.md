@@ -126,7 +126,9 @@ The real Omarchy, Wayland and LibreOffice release pass remains in
 `.omasheets` documents in the Qt grid and compatibility formats in the
 LibreOfficeKit window. The Qt grid starts an authenticated native service on
 demand, reuses an existing user service when one is already running, and stops
-only the transient service it owns when the launched grid closes.
+only the transient service it owns after the last launched grid closes. Closing
+the window that originally started the service does not interrupt other open
+grids. Failed service startup is bounded and cleans up the attempted process.
 
 The native workbook window source is in
 [`native/libreofficekit/`](native/libreofficekit/). It embeds LibreOfficeKit's
