@@ -66,6 +66,11 @@ Panel {
     close()
   }
 
+  function openApp() {
+    Quickshell.execDetached([root.pluginLauncher, "run", "launch"])
+    close()
+  }
+
   function openWorkbookInCalc() {
     Quickshell.execDetached([root.pluginLauncher, "run", "open-current"])
     close()
@@ -171,12 +176,12 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      onActivateRequested: root.reviewPending ? root.reviewChanges() : root.refresh()
+      onActivateRequested: root.reviewPending ? root.reviewChanges() : (root.installed ? root.openApp() : root.installProduct())
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(textValue) {
         if (textValue === "r" || textValue === "R") root.refresh()
-        else if ((textValue === "o" || textValue === "O") && root.selected) root.openWorkbook()
+        else if ((textValue === "o" || textValue === "O") && root.installed) root.openApp()
         else if ((textValue === "a" || textValue === "A") && root.selected) root.askAgent()
       }
 
@@ -254,6 +259,14 @@ Panel {
             foreground: root.foreground
             fontFamily: root.fontFamily
             onClicked: root.installProduct()
+          }
+
+          Button {
+            visible: root.installed
+            text: "Open OmaSheets"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.openApp()
           }
 
           Button {
