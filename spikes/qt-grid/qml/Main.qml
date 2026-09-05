@@ -16,6 +16,11 @@ ApplicationWindow {
     color: palette.window
     onClosing: close => { close.accepted = grid.commitEdit(); }
 
+    Shortcut {
+        sequence: StandardKey.Save
+        onActivated: grid.commitEdit()
+    }
+
     function blend(from, to, amount) {
         return Qt.rgba(from.r + (to.r - from.r) * amount,
             from.g + (to.g - from.g) * amount,
@@ -90,6 +95,7 @@ ApplicationWindow {
 
                 Label {
                     text: backend.documentName
+                    textFormat: Text.PlainText
                     color: window.textColor
                     font.pixelSize: 14
                     font.weight: Font.DemiBold
@@ -108,6 +114,7 @@ ApplicationWindow {
                 Label {
                     text: (backend.documentMode ? "LOCAL SERVICE" : "GRID SPIKE")
                         + "  ·  " + backend.themeName.toUpperCase()
+                    textFormat: Text.PlainText
                     color: window.mutedColor
                     font.family: "monospace"
                     font.pixelSize: 10
@@ -158,6 +165,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     leftPadding: 4
+                    textFormat: Text.PlainText
                     verticalAlignment: Text.AlignVCenter
                     elide: Text.ElideRight
                     text: {
@@ -176,6 +184,23 @@ ApplicationWindow {
                     horizontalAlignment: Text.AlignRight
                     verticalAlignment: Text.AlignVCenter
                     text: backend.sourceStatus
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    HoverHandler { id: statusHover }
+                    ToolTip {
+                        visible: statusHover.hovered
+                        width: 360
+                        contentItem: Text {
+                            text: backend.sourceStatus
+                            textFormat: Text.PlainText
+                            wrapMode: Text.WordWrap
+                            color: window.textColor
+                        }
+                        background: Rectangle {
+                            color: window.panelColor
+                            border.color: window.gridLineColor
+                        }
+                    }
                     color: window.mutedColor
                     font.pixelSize: 10
                 }
@@ -228,27 +253,46 @@ ApplicationWindow {
                     body.contentY = bottom - body.height;
             }
 
-            function beginEdit() {
+            function beginEdit(replacement) {
                 if (editor.visible) {
                     editor.forceActiveFocus();
                     return;
                 }
-                editor.text = backend.cellInput(currentRow, currentColumn);
+                if (!backend.prepareCellEdit(currentRow, currentColumn))
+                    return;
+                editor.originalText = backend.cellInput(currentRow, currentColumn);
+                editor.text = replacement === undefined ? editor.originalText : replacement;
                 editor.visible = true;
                 editor.forceActiveFocus();
-                editor.selectAll();
+                if (replacement === undefined)
+                    editor.selectAll();
+                else
+                    editor.cursorPosition = editor.text.length;
             }
 
             function commitEdit() {
                 if (!editor.visible)
                     return true;
-                if (!backend.setCellText(currentRow, currentColumn, editor.text)) {
+                if (editor.text !== editor.originalText
+                        && !backend.setCellText(currentRow, currentColumn, editor.text)) {
                     editor.forceActiveFocus();
                     return false;
                 }
                 editor.visible = false;
                 body.forceActiveFocus();
                 return true;
+            }
+
+            function finishEdit(rowDelta, columnDelta) {
+                if (commitEdit())
+                    selectCell(currentRow + rowDelta, currentColumn + columnDelta);
+            }
+
+            function clearCell() {
+                if (editor.visible)
+                    return;
+                beginEdit("");
+                commitEdit();
             }
 
             function switchSheet(index) {
@@ -406,6 +450,7 @@ ApplicationWindow {
 
                             Label {
                                 id: valueLabel
+                                textFormat: Text.PlainText
                                 anchors.fill: parent
                                 leftPadding: 7
                                 rightPadding: 7
@@ -429,8 +474,8 @@ ApplicationWindow {
                                 acceptedButtons: Qt.LeftButton
                                 onTapped: grid.selectCell(cell.logicalRow, cell.logicalColumn)
                                 onDoubleTapped: {
-                                    grid.selectCell(cell.logicalRow, cell.logicalColumn);
-                                    grid.beginEdit();
+                                    if (grid.selectCell(cell.logicalRow, cell.logicalColumn))
+                                        grid.beginEdit();
                                 }
                             }
                         }
@@ -454,7 +499,24 @@ ApplicationWindow {
                         Accessible.name: "Edit " + backend.columnLabel(grid.currentColumn) + (grid.currentRow + 1)
                         Accessible.description: "Type a new cell value. Enter commits and Escape cancels."
 
-                        onAccepted: grid.commitEdit()
+                        property string originalText: ""
+                        onAccepted: grid.finishEdit(1, 0)
+                        Keys.onReturnPressed: event => {
+                            grid.finishEdit((event.modifiers & Qt.ShiftModifier) ? -1 : 1, 0);
+                            event.accepted = true;
+                        }
+                        Keys.onEnterPressed: event => {
+                            grid.finishEdit((event.modifiers & Qt.ShiftModifier) ? -1 : 1, 0);
+                            event.accepted = true;
+                        }
+                        Keys.onTabPressed: event => {
+                            grid.finishEdit(0, 1);
+                            event.accepted = true;
+                        }
+                        Keys.onBacktabPressed: event => {
+                            grid.finishEdit(0, -1);
+                            event.accepted = true;
+                        }
                         Keys.onEscapePressed: {
                             visible = false;
                             body.forceActiveFocus();
@@ -490,6 +552,16 @@ ApplicationWindow {
                         grid.selectCell(grid.currentRow, backend.columnCount - 1);
                     else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_F2)
                         grid.beginEdit();
+                    else if (event.key === Qt.Key_Tab)
+                        grid.selectCell(grid.currentRow, grid.currentColumn + 1);
+                    else if (event.key === Qt.Key_Backtab)
+                        grid.selectCell(grid.currentRow, grid.currentColumn - 1);
+                    else if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace)
+                        grid.clearCell();
+                    else if (event.text.length > 0 && !control
+                            && (event.modifiers & (Qt.AltModifier | Qt.MetaModifier)) === 0
+                            && event.text.charCodeAt(0) >= 32)
+                        grid.beginEdit(event.text);
                     else
                         return;
                     event.accepted = true;
@@ -577,6 +649,7 @@ ApplicationWindow {
                                 id: sheetLabel
                                 anchors.centerIn: parent
                                 text: backend.sheetLabel(sheetTab.index)
+                                textFormat: Text.PlainText
                                 color: sheetTab.selectedTab ? window.accentColor : window.mutedColor
                                 font.family: "monospace"
                                 font.pixelSize: 11

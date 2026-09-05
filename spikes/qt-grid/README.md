@@ -10,7 +10,16 @@ The synthetic fixture exposes 1,000,000 rows by 64 columns without allocating a
 cell object for every coordinate. QML creates only the delegates around the
 visible viewport. It supports mouse selection, arrow/Page/Home/End navigation,
 editing with Enter or F2, and accessibility metadata for the grid and visible
-cells.
+cells. Typing starts a replacement value; Enter saves and moves down, Shift+Enter
+moves up, and Tab/Shift+Tab save and move horizontally. Ctrl+S saves without
+moving. Delete or Backspace clears the selected cell. Escape cancels a draft.
+Opening and leaving an unchanged editor does not append a document event.
+
+Failed saves retain the draft and block navigation and window closure until
+the user saves successfully or explicitly cancels. A failed initial read blocks
+editing. After a transport or protocol failure, copy the draft, cancel it and
+reopen the document to check whether the previous edit reached the service;
+the grid never automatically retries an uncertain write.
 
 When given a native `.omasheets` path, the grid connects to the authenticated
 local service, exposes its sheets as themed tabs and requests 64-row by
