@@ -139,7 +139,7 @@ pub struct ImportedWorkbook {
     /// [`import_xlsx`]'s in-memory repair; empty for well-formed packages.
     pub skipped_sheets: Vec<String>,
     source_cells: Vec<ImportedCell>,
-    stored_formula_values: Vec<(CellId, Value)>,
+    compiled_cells: Vec<usize>,
     formula_cells_observed: usize,
     formula_cells_loaded: usize,
 }
@@ -155,19 +155,27 @@ impl ImportedWorkbook {
     /// stored one, with both values, for tooling that investigates
     /// mismatches; the score report itself stays aggregate.
     pub fn mismatched_cells(&self) -> impl Iterator<Item = (CellId, &Value, Value)> {
-        self.stored_formula_values
+        self.compiled_cells
             .iter()
-            .map(|(cell, stored)| (*cell, stored, self.workbook.value(*cell)))
+            .map(|index| &self.source_cells[*index])
+            .map(|source| {
+                (
+                    source.cell,
+                    &source.stored,
+                    self.workbook.value(source.cell),
+                )
+            })
             .filter(|(_, stored, calculated)| !values_match(stored, calculated))
     }
 
     pub fn parity(&self) -> ParitySummary {
         let stored_values_matched = self
-            .stored_formula_values
+            .compiled_cells
             .iter()
-            .filter(|(cell, stored)| values_match(stored, &self.workbook.value(*cell)))
+            .map(|index| &self.source_cells[*index])
+            .filter(|source| values_match(&source.stored, &self.workbook.value(source.cell)))
             .count();
-        let formula_cells_compared = self.stored_formula_values.len();
+        let formula_cells_compared = self.compiled_cells.len();
         ParitySummary {
             formula_cells_observed: self.formula_cells_observed,
             formula_cells_loaded: self.formula_cells_loaded,
@@ -286,11 +294,33 @@ pub fn import_xlsx(path: &Path, limits: ImportLimits) -> Result<ImportedWorkbook
     // which drops each name's `localSheetId` scope.
     let defined_names = read_defined_names(path)?;
     let mut ranges = Vec::with_capacity(sheet_names.len());
+    let mut observed_cells = 0_usize;
+    let mut observed_formulas = 0_usize;
     for name in &sheet_names {
         let values = source
             .worksheet_range(name)
             .map_err(|error| ImportError::Read(error.to_string()))?;
+        observed_cells =
+            observed_cells.saturating_add(values.width().saturating_mul(values.height()));
+        if observed_cells > limits.max_cells {
+            return Err(ImportError::TooManyCells {
+                observed: observed_cells,
+                maximum: limits.max_cells,
+            });
+        }
         let formulas = read_formulas(&mut source, name)?;
+        observed_formulas = observed_formulas.saturating_add(
+            formulas
+                .used_cells()
+                .filter(|(_, _, formula)| !formula.is_empty())
+                .count(),
+        );
+        if observed_formulas > limits.max_formulas {
+            return Err(ImportError::TooManyFormulas {
+                observed: observed_formulas,
+                maximum: limits.max_formulas,
+            });
+        }
         ranges.push((name.clone(), values, formulas));
     }
     let mut imported = import_ranges_with_names(ranges, defined_names, source_sha256, limits)?;
@@ -728,10 +758,9 @@ fn import_ranges_with_names(
             }
         }
     }
-    let mut formula_records = Vec::with_capacity(observed_formulas);
     let mut source_cells = BTreeMap::new();
 
-    for (sheet, (_, values, formulas)) in ranges.iter().enumerate() {
+    for (sheet, (_, values, formulas)) in ranges.into_iter().enumerate() {
         let (value_row, value_column) = values.start().unwrap_or((0, 0));
         for (row, column, value) in values.used_cells() {
             let cell = CellId::new(
@@ -756,27 +785,30 @@ fn import_ranges_with_names(
             }
             let absolute = (formula_row + row as u32, formula_column + column as u32);
             let cell = CellId::new(sheet as u32, absolute.0, absolute.1);
-            let stored = values
-                .get_value(absolute)
-                .map(source_value)
-                .unwrap_or(Value::Blank);
             source_cells
                 .entry(cell)
-                .and_modify(|source: &mut ImportedCell| source.formula = Some(formula.clone()))
                 .or_insert_with(|| ImportedCell {
                     cell,
-                    stored: stored.clone(),
-                    formula: Some(formula.clone()),
-                });
-            formula_records.push((cell, stored, formula.clone()));
+                    stored: values
+                        .get_value(absolute)
+                        .map(source_value)
+                        .unwrap_or(Value::Blank),
+                    formula: None,
+                })
+                .formula = Some(formula.clone());
         }
     }
 
+    let source_cells: Vec<_> = source_cells.into_values().collect();
     let mut unsupported = Vec::new();
-    let mut stored_formula_values = Vec::new();
-    for (cell, stored, formula) in formula_records {
-        match workbook.set_formula(cell, &formula) {
-            Ok(_) => stored_formula_values.push((cell, stored)),
+    let mut compiled_cells = Vec::with_capacity(observed_formulas);
+    for (index, source) in source_cells.iter().enumerate() {
+        let Some(formula) = &source.formula else {
+            continue;
+        };
+        let cell = source.cell;
+        match workbook.set_formula(cell, formula) {
+            Ok(_) => compiled_cells.push(index),
             Err(error) => unsupported.push(UnsupportedFormula {
                 cell,
                 reason: bounded_formula_error(&error),
@@ -784,7 +816,7 @@ fn import_ranges_with_names(
             }),
         }
     }
-    let formula_cells_loaded = stored_formula_values.len();
+    let formula_cells_loaded = compiled_cells.len();
     workbook.end_bulk();
     Ok(ImportedWorkbook {
         workbook,
@@ -793,8 +825,8 @@ fn import_ranges_with_names(
         date_system: DATE_SYSTEM,
         unsupported,
         skipped_sheets: Vec::new(),
-        source_cells: source_cells.into_values().collect(),
-        stored_formula_values,
+        source_cells,
+        compiled_cells,
         formula_cells_observed: observed_formulas,
         formula_cells_loaded,
     })

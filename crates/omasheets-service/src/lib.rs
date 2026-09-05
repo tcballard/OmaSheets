@@ -1218,11 +1218,11 @@ fn plan_required(
     document: &mut Document,
     actor: &Actor,
     timestamp: i64,
-    commands: &mut Vec<Command>,
+    events: &mut Vec<Event>,
     command: Command,
 ) -> Result<Event, ServiceError> {
-    let event = document.command(actor.clone(), timestamp, command.clone())?;
-    commands.push(command);
+    let event = document.command(actor.clone(), timestamp, command)?;
+    events.push(event.clone());
     Ok(event)
 }
 
@@ -1230,12 +1230,12 @@ fn plan_optional(
     document: &mut Document,
     actor: &Actor,
     timestamp: i64,
-    commands: &mut Vec<Command>,
+    events: &mut Vec<Event>,
     command: Command,
 ) -> bool {
-    match document.command(actor.clone(), timestamp, command.clone()) {
-        Ok(_) => {
-            commands.push(command);
+    match document.command(actor.clone(), timestamp, command) {
+        Ok(event) => {
+            events.push(event);
             true
         }
         Err(_) => false,
@@ -1384,12 +1384,12 @@ fn import_native_xlsx(
         Document::create(document_id, &document_name, actor.clone(), timestamp)?;
     let branch = planning.branch();
     let import_actor = Actor::new(ActorKind::Import, actor.id.clone());
-    let mut commands = Vec::new();
+    let mut events = Vec::new();
     plan_required(
         &mut planning,
         &import_actor,
         timestamp,
-        &mut commands,
+        &mut events,
         Command::Import {
             source_sha256: imported.source_sha256.clone(),
             format: "xlsx".into(),
@@ -1403,7 +1403,7 @@ fn import_native_xlsx(
             &mut planning,
             &import_actor,
             timestamp,
-            &mut commands,
+            &mut events,
             Command::AddSheet {
                 name: source_sheet.name.clone(),
             },
@@ -1417,7 +1417,7 @@ fn import_native_xlsx(
                 &mut planning,
                 &import_actor,
                 timestamp,
-                &mut commands,
+                &mut events,
                 Command::AddColumns {
                     sheet,
                     count: (source_sheet.columns - at).min(MAX_BATCH),
@@ -1430,7 +1430,7 @@ fn import_native_xlsx(
                 &mut planning,
                 &import_actor,
                 timestamp,
-                &mut commands,
+                &mut events,
                 Command::AddRows {
                     sheet,
                     count: (source_sheet.rows - at).min(MAX_BATCH),
@@ -1447,6 +1447,7 @@ fn import_native_xlsx(
         });
     }
 
+    planning.begin_bulk();
     let mut value_cells_imported = 0;
     let mut formula_cells_observed = 0;
     let mut formula_cells_native = 0;
@@ -1463,7 +1464,7 @@ fn import_native_xlsx(
                     &mut planning,
                     &import_actor,
                     timestamp,
-                    &mut commands,
+                    &mut events,
                     Command::SetValue {
                         sheet,
                         a1: address.clone(),
@@ -1490,7 +1491,7 @@ fn import_native_xlsx(
                 &mut planning,
                 &import_actor,
                 timestamp,
-                &mut commands,
+                &mut events,
                 Command::SetFormula {
                     sheet,
                     a1: address,
@@ -1506,11 +1507,19 @@ fn import_native_xlsx(
         }
     }
 
+    planning.end_bulk();
     let expected_digest = planning.digest();
+    drop(planning);
+    let owned_engine_unsupported_formulas = imported.unsupported.len();
+    let skipped_source_sheets = imported.skipped_sheets.len();
+    let source_sha256 = imported.source_sha256.clone();
+    let date_system = imported.date_system;
+    drop(imported);
     let temporary = temporary_store_path(&output)?;
     let built = (|| -> Result<(), ServiceError> {
         let mut store = Store::create(&temporary, document_id, &document_name, actor, timestamp)?;
-        store.append_batch(branch, import_actor, timestamp, commands)?;
+        store.set_snapshot_interval(u64::MAX);
+        store.append_events(branch, events)?;
         if store.document(branch)?.digest() != expected_digest {
             return Err(ServiceError::new(
                 "import_replay_mismatch",
@@ -1546,15 +1555,13 @@ fn import_native_xlsx(
             "reopened native document differs from the imported state",
         ));
     }
-    let owned_engine_unsupported_formulas = imported.unsupported.len();
-    let skipped_source_sheets = imported.skipped_sheets.len();
     let manifest = XlsxImportManifest {
         format: "omasheets-native-v1".into(),
         output,
         document: document_id,
         document_digest: reopened_digest,
-        source_sha256: imported.source_sha256,
-        date_system: imported.date_system.into(),
+        source_sha256,
+        date_system: date_system.into(),
         sheets,
         occupied_rectangle_cells,
         value_cells_imported,
