@@ -78,6 +78,12 @@ pub enum Request {
         #[serde(default)]
         branch: Option<String>,
     },
+    /// Constant-size optimistic concurrency token, without a state projection.
+    Revision {
+        path: PathBuf,
+        #[serde(default)]
+        branch: Option<String>,
+    },
     /// A bounded page of the non-blank cells of one sheet in row-major
     /// view order.
     Cells {
@@ -133,6 +139,8 @@ pub enum Request {
         commands: Vec<Command>,
         #[serde(default)]
         expected_digest: Option<String>,
+        #[serde(default)]
+        expected_revision: Option<String>,
     },
     Branch {
         path: PathBuf,
@@ -231,6 +239,7 @@ pub struct DocumentSummary {
     pub head: Option<omasheets_core::EventId>,
     pub event_count: u64,
     pub digest: String,
+    pub revision: String,
     pub sheets: Vec<SheetSummary>,
     pub checks: usize,
     pub watches: usize,
@@ -377,6 +386,9 @@ pub enum Response {
     },
     Closed,
     Document(DocumentSummary),
+    Revision {
+        revision: String,
+    },
     Cells(CellPage),
     GridPage(GridPage),
     Cell(CellReport),
@@ -384,7 +396,10 @@ pub enum Response {
     Appended(Event),
     AppendedBatch {
         events: Vec<Event>,
-        digest: String,
+        /// Legacy clients receive a digest; revision-aware clients avoid hashing.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        digest: Option<String>,
+        revision: String,
     },
     Branched {
         branch: String,
@@ -1559,6 +1574,15 @@ fn import_native_xlsx(
     Ok((store, manifest))
 }
 
+fn revision(document: &Document) -> String {
+    format!(
+        "{}:{}:{}",
+        document.id(),
+        document.branch(),
+        document.head().expect("created document")
+    )
+}
+
 fn check_actor(actor: &Actor) -> Result<(), ServiceError> {
     if actor.id.trim().is_empty() || actor.id.chars().count() > MAX_ACTOR_CHARS {
         return Err(ServiceError::new(
@@ -1660,6 +1684,13 @@ impl Service {
                     None => Err(ServiceError::new("not_open", "document is not open")),
                 }
             }
+            Request::Revision { path, branch } => {
+                let store = self.store(&path)?;
+                let (_, branch) = Self::branch(store, branch.as_deref())?;
+                Ok(Response::Revision {
+                    revision: revision(store.document(branch)?),
+                })
+            }
             Request::Document { path, branch } => {
                 let store = self.store(&path)?;
                 let (branch_name, branch) = Self::branch(store, branch.as_deref())?;
@@ -1704,6 +1735,7 @@ impl Service {
                     head: document.head(),
                     event_count: document.event_count(),
                     digest: document.digest(),
+                    revision: revision(document),
                     sheets,
                     checks: document.checks().len(),
                     watches: document.watches().len(),
@@ -1885,6 +1917,7 @@ impl Service {
                 actor,
                 commands,
                 expected_digest,
+                expected_revision,
             } => {
                 check_actor(&actor)?;
                 if commands.is_empty() || commands.len() > MAX_COMMAND_BATCH {
@@ -1901,6 +1934,15 @@ impl Service {
                         "agents append on their own branches; main changes through a human-approved merge",
                     ));
                 }
+                let revision_aware = expected_revision.is_some();
+                if let Some(expected) = expected_revision
+                    && revision(store.document(branch)?) != expected
+                {
+                    return Err(ServiceError::new(
+                        "document_changed",
+                        "the document changed; reopen it before applying this edit or undo",
+                    ));
+                }
                 if let Some(expected) = expected_digest
                     && store.document(branch)?.digest() != expected
                 {
@@ -1910,8 +1952,13 @@ impl Service {
                     ));
                 }
                 let events = store.append_batch(branch, actor, now, commands)?;
-                let digest = store.document(branch)?.digest();
-                Ok(Response::AppendedBatch { events, digest })
+                let document = store.document(branch)?;
+                let digest = (!revision_aware).then(|| document.digest());
+                Ok(Response::AppendedBatch {
+                    events,
+                    digest,
+                    revision: revision(document),
+                })
             }
             Request::Branch {
                 path,
