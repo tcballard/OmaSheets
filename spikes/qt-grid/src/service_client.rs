@@ -131,6 +131,19 @@ pub struct GridDocument {
     state: Mutex<DocumentState>,
 }
 
+impl Drop for GridDocument {
+    fn drop(&mut self) {
+        // Checkpoint before the owning launcher stops the service. Do not close
+        // the shared store: another window may still be editing this document.
+        if let Ok(state) = self.state.get_mut() {
+            let request = json!({"kind": "snapshot", "path": state.path, "branch": state.branch});
+            if let Err(error) = state.client.call(&request) {
+                eprintln!("omasheets-grid: final checkpoint unavailable; durable edits will replay on reopen: {error}");
+            }
+        }
+    }
+}
+
 impl GridDocument {
     pub fn open(path: &Path, branch: Option<String>) -> Result<Self, String> {
         let mut client = ServiceClient::connect()?;
@@ -557,6 +570,26 @@ mod tests {
         document.set_text(0,0,"5").unwrap();
         assert!(document.undo(true).unwrap_err().contains("nothing to redo"));
         assert!(document.set_text(0,0,"5").unwrap_err().contains("document changed"));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn closing_grid_checkpoints_without_closing_shared_document() {
+        let (client, peer) = connected_pair();
+        let server = std::thread::spawn(move || {
+            let mut reader = BufReader::new(peer.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let request: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(request, json!({"kind":"snapshot","path":"test.omasheets","branch":"draft"}));
+            writeln!(&peer, "{}", json!({"ok":true,"response":{"kind":"snapshotted"}})).unwrap();
+        });
+        drop(GridDocument {
+            name: "Test".into(), sheets: Vec::new(),
+            state: Mutex::new(DocumentState {client,path:PathBuf::from("test.omasheets"),branch:Some("draft".into()),
+                current_sheet:0,actor:"test".into(),pages:VecDeque::new(),requests:0,
+                revision:"r0".into(),undo:Vec::new(),redo:Vec::new()}),
+        });
         server.join().unwrap();
     }
 

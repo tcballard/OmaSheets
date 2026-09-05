@@ -64,6 +64,14 @@ database:
 
 ## Consequences
 
+- Automatic checkpoints count events since the previous checkpoint, including
+  batches that cross the threshold. Only the latest checkpoint per branch is
+  retained. Snapshot loads query the verified boundary event and subsequent
+  events through each ancestry fork bound; older canonical event payloads are
+  not parsed. Invalid checkpoints still fall back to full replay. A grid window
+  requests a final snapshot before its launcher stops an owned service, without
+  closing a store shared with other windows.
+
 - Durability is SQLite's: committed events survive a killed process; WAL
   files sit beside the document until `close` checkpoints them.
 - Loading a long branch costs one snapshot rebuild plus the tail; corrupt or
