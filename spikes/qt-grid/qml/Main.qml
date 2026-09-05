@@ -18,7 +18,135 @@ ApplicationWindow {
 
     Shortcut {
         sequence: StandardKey.Save
+        enabled: !keyboardHelp.visible
         onActivated: grid.commitEdit()
+    }
+
+    Shortcut {
+        sequence: "F1"
+        enabled: !keyboardHelp.visible
+        onActivated: keyboardHelp.open()
+    }
+
+    Dialog {
+        id: keyboardHelp
+        anchors.centerIn: parent
+        width: Math.min(window.width - 32, 620)
+        height: Math.min(window.height - 32, 640)
+        title: "Keyboard help"
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape
+        standardButtons: Dialog.Close
+        Shortcut {
+            sequence: "F1"
+            enabled: keyboardHelp.visible
+            onActivated: keyboardHelp.close()
+        }
+        onOpened: helpScroll.forceActiveFocus()
+        onClosed: {
+            if (editor.visible)
+                editor.forceActiveFocus();
+            else
+                body.forceActiveFocus();
+        }
+
+        contentItem: ScrollView {
+            id: helpScroll
+            clip: true
+            contentWidth: availableWidth
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+            ColumnLayout {
+                width: helpScroll.availableWidth
+                spacing: 14
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Select a cell, type a value or formula, then press Enter. "
+                        + "Press F1 or Escape to close this guide and pick up where you left off."
+                    wrapMode: Text.WordWrap
+                    color: window.textColor
+                }
+
+                Repeater {
+                    model: [
+                        { heading: "Move around", shortcuts: [
+                            ["Arrow keys", "Move one cell"],
+                            ["Tab / Shift+Tab", "Move right / left"],
+                            ["Page Up / Page Down", "Move up / down a screen"],
+                            ["Home / End", "First / last column in the row"],
+                            ["Ctrl+Home / Ctrl+End", "First / last cell in the grid"],
+                            ["Ctrl+Page Up / Page Down", "Previous / next sheet"]
+                        ] },
+                        { heading: "Edit a cell", shortcuts: [
+                            ["Enter / F2", "Edit the selected cell"],
+                            ["Start typing", "Replace the selected cell"],
+                            ["Enter / Shift+Enter", "Save draft and move down / up"],
+                            ["Tab / Shift+Tab", "Save draft and move right / left"],
+                            ["Ctrl+S", "Save draft without moving"],
+                            ["Escape", "Cancel the cell draft"],
+                            ["Delete / Backspace", "Clear selected cells (outside the editor)"]
+                        ] },
+                        { heading: "Select and reuse", shortcuts: [
+                            ["Shift+Arrow keys", "Extend a rectangular selection"],
+                            ["Ctrl+C / Ctrl+V", "Copy selection / paste at its top-left cell"],
+                            ["Ctrl+Z", "Undo an edit, clear or paste"],
+                            ["Ctrl+Shift+Z / Ctrl+Y", "Redo"]
+                        ] }
+                    ]
+
+                    delegate: ColumnLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        Label {
+                            text: modelData.heading
+                            font.bold: true
+                            color: window.accentColor
+                        }
+
+                        Repeater {
+                            model: modelData.shortcuts
+                            delegate: RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                spacing: 12
+                                Label {
+                                    Layout.preferredWidth: 220
+                                    text: modelData[0]
+                                    color: window.textColor
+                                    font.family: "monospace"
+                                    wrapMode: Text.WordWrap
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: modelData[1]
+                                    color: window.textColor
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Start formulas with =. Prefix literal text with an apostrophe: '00123 or '=1+1."
+                    wrapMode: Text.WordWrap
+                    color: window.mutedColor
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: backend.documentMode
+                        ? "Native document edits save when committed. Selection clipboard and undo shortcuts apply outside the cell editor."
+                        : "Demo grid: edits are not saved. Selection clipboard and undo require a native document."
+                    wrapMode: Text.WordWrap
+                    color: window.mutedColor
+                }
+            }
+        }
     }
 
     TextEdit {
@@ -714,7 +842,7 @@ ApplicationWindow {
             Flickable {
                 anchors.fill: parent
                 anchors.leftMargin: window.rowHeaderWidth
-                anchors.rightMargin: 8
+                anchors.rightMargin: helpButton.width + 16
                 contentWidth: sheetTabs.width
                 contentHeight: height
                 clip: true
@@ -768,6 +896,18 @@ ApplicationWindow {
                         }
                     }
                 }
+            }
+
+            Button {
+                id: helpButton
+                anchors.right: parent.right
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                height: parent.height - 4
+                text: "F1 Help"
+                focusPolicy: Qt.NoFocus
+                Accessible.name: "Keyboard help (F1)"
+                onClicked: keyboardHelp.open()
             }
         }
     }
