@@ -56,7 +56,7 @@ pub mod qobject {
 
         #[qinvokable]
         #[cxx_name = "setCellText"]
-        fn set_cell_text(self: Pin<&mut Self>, row: i32, column: i32, value: &QString);
+        fn set_cell_text(self: Pin<&mut Self>, row: i32, column: i32, value: &QString) -> bool;
 
         #[qinvokable]
         #[cxx_name = "refreshTheme"]
@@ -306,9 +306,9 @@ impl qobject::GridModel {
         row: i32,
         column: i32,
         value: &QString,
-    ) {
+    ) -> bool {
         if row < 0 || row >= self.row_count || column < 0 || column >= self.column_count {
-            return;
+            return false;
         }
         if let Some(document) = &self.document {
             let result = document.set_text(row as usize, column as usize, &value.to_string());
@@ -318,13 +318,14 @@ impl qobject::GridModel {
                     self.as_mut().set_revision(revision.wrapping_add(1));
                     self.as_mut()
                         .set_source_status("Saved through the local service".into());
+                    return true;
                 }
                 Err(error) => self.as_mut().set_source_status(error.as_str().into()),
             }
-            return;
+            return false;
         }
         if self.document_mode {
-            return;
+            return false;
         }
         self.as_mut()
             .rust_mut()
@@ -332,6 +333,7 @@ impl qobject::GridModel {
             .insert((row, column), value.to_string());
         let revision = *self.revision();
         self.set_revision(revision.wrapping_add(1));
+        true
     }
 
     pub fn refresh_theme(mut self: Pin<&mut Self>) {
