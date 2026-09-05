@@ -217,6 +217,18 @@ enum Expr<R = CellId> {
     Function(Function, Vec<Expr<R>>),
 }
 
+/// Reference occurrences without expanding rectangular ranges into cells.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReferenceGroup {
+    Cell(CellId),
+    Range {
+        anchor: CellId,
+        members: Option<Vec<CellId>>,
+        rows: usize,
+        columns: usize,
+    },
+}
+
 /// Cells of a rectangle in row-major order.
 fn rectangle_cells(anchor: CellId, rows: usize, columns: usize) -> impl Iterator<Item = CellId> {
     (0..rows).flat_map(move |row| {
@@ -447,11 +459,64 @@ impl ParsedFormula {
         output
     }
 
+    pub fn reference_groups(&self) -> Vec<ReferenceGroup> {
+        let mut groups = Vec::new();
+        visit_reference_groups(&self.expression, &mut groups);
+        groups
+    }
+
+    pub fn reference_count(&self) -> usize {
+        count_references(&self.expression)
+    }
+
     /// Rebinds every reference in the order [`ParsedFormula::references`]
     /// reports them.
     pub fn map_references(mut self, mut map: impl FnMut(CellId) -> CellId) -> Self {
         rebind_references(&mut self.expression, &mut map);
         self
+    }
+}
+
+fn count_references(expression: &Expr<CellId>) -> usize {
+    match expression {
+        Expr::Reference(_) => 1,
+        Expr::Range { rows, columns, .. } => rows.saturating_mul(*columns),
+        Expr::UnaryMinus(inner) | Expr::Percent(inner) => count_references(inner),
+        Expr::Binary(_, left, right) => {
+            count_references(left).saturating_add(count_references(right))
+        }
+        Expr::Function(_, arguments) => arguments.iter().fold(0_usize, |count, expression| {
+            count.saturating_add(count_references(expression))
+        }),
+        _ => 0,
+    }
+}
+
+fn visit_reference_groups(expression: &Expr<CellId>, groups: &mut Vec<ReferenceGroup>) {
+    match expression {
+        Expr::Reference(cell) => groups.push(ReferenceGroup::Cell(*cell)),
+        Expr::Range {
+            anchor,
+            members,
+            rows,
+            columns,
+        } => groups.push(ReferenceGroup::Range {
+            anchor: *anchor,
+            members: members.clone(),
+            rows: *rows,
+            columns: *columns,
+        }),
+        Expr::UnaryMinus(inner) | Expr::Percent(inner) => visit_reference_groups(inner, groups),
+        Expr::Binary(_, left, right) => {
+            visit_reference_groups(left, groups);
+            visit_reference_groups(right, groups);
+        }
+        Expr::Function(_, arguments) => {
+            for argument in arguments {
+                visit_reference_groups(argument, groups);
+            }
+        }
+        _ => {}
     }
 }
 

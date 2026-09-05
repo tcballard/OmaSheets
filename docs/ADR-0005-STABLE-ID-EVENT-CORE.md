@@ -38,8 +38,12 @@ introduce structured table references first.
 - **Formulas.** `Document::command` accepts A1 text, parses it with the M0
   engine's parser against the current view, and records the source, the sheet
   names it used and every reference as stable `(sheet, row, column)`
-  identities in the engine's traversal order (ranges materialise into bounded
-  lists). Replay re-parses the source purely for structure and rebinds each
+  identities in the engine's traversal order. New range formulas store compact
+  `bindings`: direct cells plus ranges represented by ordered stable row and
+  column IDs. The event core interns equal ranges for dependency checks, avoiding
+  a reverse edge for every member of every formula. The 10,000-reference bound
+  still counts the expanded membership and is checked before expansion.
+  Replay re-parses the source purely for structure and rebinds each
   reference by position to engine cells addressed by creation ordinals, never
   by view position. Structured table references use the same path: table and
   column names bind to stable `TableId` and `ColumnId` values, while the event
@@ -47,6 +51,12 @@ introduce structured table references first.
   the deterministic replacement bindings for existing structured ranges.
   Deleting a row, column or sheet that another formula still references
   fails; the caller must clear the dependents first.
+  Legacy per-cell `references` remain readable and are not rewritten. Empty
+  `bindings` are omitted from canonical JSON, preserving existing signatures
+  and snapshot digests. Historical table rebindings compare resolved membership
+  across either representation. New compact events require a reader supporting
+  these bindings; older native binaries cannot verify them. Lineage and export
+  projections expand references only when requested, within the same bound.
 - **Tables and computed columns.** A table records ordered stable columns,
   case-insensitive unique column names, an optional header row and ordered
   data rows. A computed-column operation stores one formula template against
