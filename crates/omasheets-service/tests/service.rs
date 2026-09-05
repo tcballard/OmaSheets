@@ -91,6 +91,85 @@ fn append(
 }
 
 #[test]
+fn batches_are_atomic_bounded_and_preserve_actor_restrictions() {
+    let path = temp_document();
+    let mut service = Service::new(|| 1);
+    service
+        .handle(Request::Create {
+            path: path.clone(),
+            name: "Batch test".into(),
+            actor: human("tom"),
+        })
+        .unwrap();
+    let summary = |service: &mut Service| match service
+        .handle(Request::Document {
+            path: path.clone(),
+            branch: None,
+        })
+        .unwrap()
+    {
+        Response::Document(summary) => summary,
+        other => panic!("{other:?}"),
+    };
+    let before = summary(&mut service).digest;
+    let batch = |actor, commands| Request::AppendBatch {
+        path: path.clone(),
+        branch: None,
+        actor,
+        commands,
+    };
+    let add = || Command::AddSheet {
+        name: "Sheet".into(),
+    };
+    for commands in [
+        Vec::new(),
+        (0..=omasheets_service::MAX_COMMAND_BATCH)
+            .map(|_| add())
+            .collect(),
+    ] {
+        let error = service.handle(batch(human("tom"), commands)).unwrap_err();
+        assert_eq!(error.code, "invalid_command_batch");
+    }
+    let error = service
+        .handle(batch(agent("planner"), vec![add()]))
+        .unwrap_err();
+    assert_eq!(error.code, "agent_on_main");
+    // Duplicate sheet names make the second command fail after staging the first.
+    assert!(
+        service
+            .handle(batch(human("tom"), vec![add(), add()]))
+            .is_err()
+    );
+    assert_eq!(summary(&mut service).digest, before);
+    assert!(summary(&mut service).sheets.is_empty());
+    let result = service
+        .handle(batch(
+            human("tom"),
+            vec![
+                add(),
+                Command::AddSheet {
+                    name: "Other".into(),
+                },
+            ],
+        ))
+        .unwrap();
+    assert!(matches!(result, Response::AppendedBatch { ref events } if events.len() == 2));
+    let after = summary(&mut service);
+    assert_eq!(after.sheets.len(), 2);
+    service
+        .handle(Request::Close { path: path.clone() })
+        .unwrap();
+    service
+        .handle(Request::Open { path: path.clone() })
+        .unwrap();
+    assert_eq!(summary(&mut service).digest, after.digest);
+    service
+        .handle(Request::Close { path: path.clone() })
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn one_api_drives_the_whole_branch_workflow() {
     let path = temp_document();
     let clock = std::sync::atomic::AtomicI64::new(0);
