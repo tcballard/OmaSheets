@@ -6,6 +6,12 @@ and lockfile remain isolated from the calculation workspace, while the release
 builder now compiles, provenance-binds and packages `omasheets-grid`. The
 LibreOfficeKit window remains the compatibility path for XLS, XLSX, XLSM and ODS.
 
+Press **F1** or click **F1 Help** beside the sheet tabs for the in-app keyboard
+guide. Press F1 or Escape, or use Close, to dismiss it. Opening help preserves
+any cell draft; closing it returns focus to the editor or grid. The guide covers
+navigation, editing, selection, clipboard and undo, and identifies the demo's
+persistence limits.
+
 The synthetic fixture exposes 1,000,000 rows by 64 columns without allocating a
 cell object for every coordinate. QML creates only the delegates around the
 visible viewport. It supports mouse selection, arrow/Page/Home/End navigation,
