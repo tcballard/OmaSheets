@@ -489,9 +489,21 @@ impl Store {
         }
         self.document(branch)?;
         let mut staged = self.documents[&branch].clone();
+        let defer = commands.iter().all(|command| {
+            matches!(
+                command,
+                Command::SetValue { .. } | Command::SetFormula { .. } | Command::ClearCell { .. }
+            )
+        });
+        if defer {
+            staged.begin_bulk();
+        }
         let mut events = Vec::with_capacity(commands.len());
         for command in commands {
             events.push(staged.command(actor.clone(), timestamp, command)?);
+        }
+        if defer {
+            staged.end_bulk();
         }
         if events.is_empty() {
             return Ok(events);
@@ -592,7 +604,7 @@ impl Store {
             return Err(StoreError::DuplicateBranch(name.into()));
         }
         self.document(from)?;
-        let mut document = clone_document(&self.documents[&from])?;
+        let mut document = self.documents[&from].clone();
         let fork = document.fork(name, actor, timestamp);
         document.apply(&fork)?;
         let branch = document.branch();
@@ -769,7 +781,7 @@ impl Store {
             .head()
             .ok_or(StoreError::NothingToMerge)?;
         self.document(target)?;
-        let mut candidate = clone_document(&self.documents[&target])?;
+        let mut candidate = self.documents[&target].clone();
         let mut replayed = Vec::with_capacity(source_events.len());
         for original in &source_events {
             let event = Event::new(
@@ -808,18 +820,6 @@ impl Store {
             digest,
         })
     }
-}
-
-/// Documents are rebuilt from their canonical snapshot rather than cloned,
-/// which also exercises the same path snapshots use.
-fn clone_document(document: &Document) -> Result<Document, StoreError> {
-    let copy = Document::from_snapshot(&document.snapshot())?;
-    if copy.digest() != document.digest() {
-        return Err(StoreError::CorruptLog(
-            "snapshot round-trip changed the digest".into(),
-        ));
-    }
-    Ok(copy)
 }
 
 fn conflicts_between(source: &[Event], target: &[Event]) -> Vec<Touch> {
@@ -1077,6 +1077,72 @@ mod tests {
             Some(events[0].id)
         );
         assert_eq!(setup.value(main, "A1"), CellValue::Number(42.0));
+        cleanup(&path);
+    }
+
+    #[test]
+    fn deferred_edit_batch_and_snapshot_restore_preserve_overlapping_formula_results() {
+        let path = temp_path("deferred-calculation");
+        let mut setup = Setup::new(&path);
+        let main = setup.main;
+        let sheet = setup.sheet;
+        setup.run(
+            main,
+            human(),
+            Command::AddColumns {
+                sheet,
+                count: 1,
+                at: 2,
+            },
+        );
+        setup.run(
+            main,
+            human(),
+            Command::SetFormula {
+                sheet,
+                a1: "C1".into(),
+                source: "=SUM(A1:B2)".into(),
+            },
+        );
+        setup.run(
+            main,
+            human(),
+            Command::SetFormula {
+                sheet,
+                a1: "C2".into(),
+                source: "=C1*2".into(),
+            },
+        );
+        let mut commands: Vec<_> = ["A1", "B1", "A2", "B2"]
+            .into_iter()
+            .enumerate()
+            .map(|(i, a1)| Command::SetValue {
+                sheet,
+                a1: a1.into(),
+                value: Literal::Number((i + 1) as f64),
+            })
+            .collect();
+        commands.push(Command::ClearCell {
+            sheet,
+            a1: "B2".into(),
+        });
+        setup
+            .store
+            .append_batch(main, human(), 3_000, commands)
+            .unwrap();
+        assert_eq!(setup.value(main, "C2"), CellValue::Number(12.0));
+        let expected = setup.store.document(main).unwrap().digest();
+        setup.store.write_snapshot(main).unwrap();
+        setup.store.evict();
+        assert_eq!(setup.store.document(main).unwrap().digest(), expected);
+        assert_eq!(setup.value(main, "C2"), CellValue::Number(12.0));
+        setup
+            .store
+            .connection
+            .execute("DELETE FROM snapshots", [])
+            .unwrap();
+        setup.store.evict();
+        assert_eq!(setup.store.document(main).unwrap().digest(), expected);
         cleanup(&path);
     }
 

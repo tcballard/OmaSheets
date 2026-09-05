@@ -1156,6 +1156,7 @@ impl Document {
             return Err(ApplyError::UnsupportedSchema(snapshot.schema));
         }
         let mut document = Self::empty(snapshot.document);
+        document.calc.begin_bulk();
         document.name = snapshot.name.clone();
         document.branch = snapshot.branch;
         document.head = snapshot.head;
@@ -1255,6 +1256,7 @@ impl Document {
         document.checks = snapshot.checks.clone();
         document.watches = snapshot.watches.clone();
         document.merges = snapshot.merges.clone();
+        document.calc.end_bulk();
         Ok(document)
     }
 
@@ -1607,6 +1609,18 @@ impl Document {
         let event = Event::new(self.head, self.branch, actor, timestamp, operation);
         self.apply(&event)?;
         Ok(event)
+    }
+
+    /// Defer recalculation while staging value/formula/clear commands. Event
+    /// validation and dependency updates remain immediate. Do not inspect
+    /// calculated values or snapshots until `end_bulk`; this is not a rollback
+    /// boundary and a rejected batch must discard its staged document.
+    pub fn begin_bulk(&mut self) {
+        self.calc.begin_bulk();
+    }
+
+    pub fn end_bulk(&mut self) {
+        self.calc.end_bulk();
     }
 
     fn seed(&self) -> Vec<u8> {
@@ -2899,12 +2913,11 @@ impl Document {
     }
 
     fn check_fresh_batch(&self, ids: impl Iterator<Item = ObjectId>) -> Result<(), ApplyError> {
-        let mut seen = BTreeSet::new();
+        let mut seen: BTreeSet<_> = self.known_ids().collect();
         for id in ids {
             if !seen.insert(id) {
                 return Err(ApplyError::DuplicateId(id));
             }
-            self.check_fresh(id)?;
         }
         Ok(())
     }
