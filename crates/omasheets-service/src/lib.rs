@@ -930,7 +930,7 @@ fn xlsx_formula_is_portable(
         && formula.table_bindings.is_empty()
         && document
             .compile_formula(cell.sheet, &formula.source)
-            .is_ok_and(|current| current.references == formula.references)
+            .is_ok_and(|current| current.references() == formula.references())
 }
 
 fn write_xlsx_value(

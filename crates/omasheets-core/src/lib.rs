@@ -14,8 +14,8 @@
 //! `omasheets-calc`; the event core never reads a clock.
 
 use omasheets_calc::{
-    CalcError, CellId, FormulaError, ParsedFormula, StructuredColumn, StructuredContext,
-    StructuredTable, Value, Workbook,
+    CalcError, CellId, FormulaError, ParsedFormula, ReferenceGroup, StructuredColumn,
+    StructuredContext, StructuredTable, Value, Workbook,
 };
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -305,7 +305,7 @@ pub struct CellRef {
 /// names it used at that moment, and every cell reference it resolved, in the
 /// engine's traversal order. Replay rebinds by position and never consults
 /// coordinates or current sheet names.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CompiledFormula {
     pub source: String,
     pub sheet_bindings: Vec<(String, SheetId)>,
@@ -314,6 +314,75 @@ pub struct CompiledFormula {
     #[serde(default)]
     pub current_table: Option<TableId>,
     pub references: Vec<CellRef>,
+    /// Compact occurrences for new range formulas. Omitted for legacy events
+    /// so their signed canonical bytes and snapshot digests remain unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bindings: Vec<FormulaBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct FormulaRange {
+    pub sheet: SheetId,
+    pub rows: Vec<RowId>,
+    pub columns: Vec<ColumnId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FormulaBinding {
+    Cell { cell: CellRef },
+    Range { range: FormulaRange },
+}
+
+impl CompiledFormula {
+    fn reference_count(&self) -> usize {
+        self.bindings
+            .iter()
+            .fold(self.references.len(), |count, binding| {
+                count.saturating_add(match binding {
+                    FormulaBinding::Cell { .. } => 1,
+                    FormulaBinding::Range { range } => {
+                        range.rows.len().saturating_mul(range.columns.len())
+                    }
+                })
+            })
+    }
+
+    /// Expanded traversal order for bounded lineage/export projections and
+    /// compatibility with legacy per-cell event bindings.
+    pub fn references(&self) -> Vec<CellRef> {
+        let mut references = self.references.clone();
+        for binding in &self.bindings {
+            match binding {
+                FormulaBinding::Cell { cell } => references.push(*cell),
+                FormulaBinding::Range { range } => {
+                    for row in &range.rows {
+                        for column in &range.columns {
+                            references.push(CellRef {
+                                sheet: range.sheet,
+                                row: *row,
+                                column: *column,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        references
+    }
+}
+
+impl PartialEq for CompiledFormula {
+    fn eq(&self, other: &Self) -> bool {
+        self.source == other.source
+            && self.sheet_bindings == other.sheet_bindings
+            && self.table_bindings == other.table_bindings
+            && self.current_table == other.current_table
+            && ((self.references == other.references && self.bindings == other.bindings)
+                || (self.reference_count() <= MAX_FORMULA_REFERENCES
+                    && other.reference_count() <= MAX_FORMULA_REFERENCES
+                    && self.references() == other.references()))
+    }
 }
 
 /// One computed-column formula materialised for a stable table row.
@@ -1045,6 +1114,7 @@ pub struct Document {
     watches: BTreeMap<WatchId, WatchRecord>,
     merges: Vec<MergeRecord>,
     dependents: BTreeMap<CellRef, BTreeSet<CellRef>>,
+    range_dependents: BTreeMap<FormulaRange, BTreeSet<CellRef>>,
     calc: Workbook,
 }
 
@@ -1143,6 +1213,7 @@ impl Document {
             watches: BTreeMap::new(),
             merges: Vec::new(),
             dependents: BTreeMap::new(),
+            range_dependents: BTreeMap::new(),
             calc: Workbook::default(),
         }
     }
@@ -1300,7 +1371,7 @@ impl Document {
         let state = self.cell(cell)?;
         let (kind, inputs) = match &state.input {
             CellInput::Formula { formula } => {
-                let mut inputs: Vec<CellRef> = formula.references.clone();
+                let mut inputs: Vec<CellRef> = formula.references();
                 inputs.sort_unstable();
                 inputs.dedup();
                 (LineageKind::Computed, inputs)
@@ -1943,11 +2014,6 @@ impl Document {
             .iter()
             .map(|(id, state)| (state.name.clone(), self.sheet_ordinals[id]))
             .collect();
-        let by_ordinal: BTreeMap<u32, SheetId> = self
-            .sheet_ordinals
-            .iter()
-            .map(|(id, ordinal)| (*ordinal, *id))
-            .collect();
         let structured = self.structured_tables(None, false)?;
         let current_table_name = current_table
             .map(|id| {
@@ -1976,33 +2042,16 @@ impl Document {
                 current_row,
             },
         )?;
-        let view_references = parsed.references();
-        if view_references.len() > MAX_FORMULA_REFERENCES {
-            return Err(ApplyError::TooManyReferences);
-        }
-        let mut references = Vec::with_capacity(view_references.len());
-        let mut bound = BTreeSet::new();
-        for view in view_references {
-            let target = by_ordinal[&view.sheet];
-            let state = &self.sheets[&target];
-            let address = format!("{}{}", column_letters(view.column as usize), view.row + 1);
-            let row = *state
-                .rows
-                .get(view.row as usize)
-                .ok_or_else(|| ApplyError::ReferenceOutOfView(address.clone()))?;
-            let column = *state
-                .columns
-                .get(view.column as usize)
-                .ok_or(ApplyError::ReferenceOutOfView(address))?;
-            if target != sheet {
-                bound.insert(target);
-            }
-            references.push(CellRef {
-                sheet: target,
-                row,
-                column,
-            });
-        }
+        let (references, bindings) = self.resolve_formula_bindings(&parsed)?;
+        let bound: BTreeSet<_> = references
+            .iter()
+            .map(|cell| cell.sheet)
+            .chain(bindings.iter().map(|binding| match binding {
+                FormulaBinding::Cell { cell } => cell.sheet,
+                FormulaBinding::Range { range } => range.sheet,
+            }))
+            .filter(|target| *target != sheet)
+            .collect();
         let sheet_bindings = bound
             .into_iter()
             .map(|id| (self.sheets[&id].name.clone(), id))
@@ -2031,7 +2080,119 @@ impl Document {
             table_bindings,
             current_table,
             references,
+            bindings,
         })
+    }
+
+    fn resolve_formula_bindings(
+        &self,
+        parsed: &ParsedFormula,
+    ) -> Result<(Vec<CellRef>, Vec<FormulaBinding>), ApplyError> {
+        if parsed.reference_count() > MAX_FORMULA_REFERENCES {
+            return Err(ApplyError::TooManyReferences);
+        }
+        let by_ordinal: BTreeMap<_, _> = self
+            .sheet_ordinals
+            .iter()
+            .map(|(id, ordinal)| (*ordinal, *id))
+            .collect();
+        let resolve = |view: CellId| -> Result<CellRef, ApplyError> {
+            let target = *by_ordinal
+                .get(&view.sheet)
+                .ok_or(ApplyError::FormulaShapeMismatch)?;
+            let state = &self.sheets[&target];
+            let address = || format!("{}{}", column_letters(view.column as usize), view.row + 1);
+            Ok(CellRef {
+                sheet: target,
+                row: *state
+                    .rows
+                    .get(view.row as usize)
+                    .ok_or_else(|| ApplyError::ReferenceOutOfView(address()))?,
+                column: *state
+                    .columns
+                    .get(view.column as usize)
+                    .ok_or_else(|| ApplyError::ReferenceOutOfView(address()))?,
+            })
+        };
+        let mut bindings = Vec::new();
+        let mut has_range = false;
+        for group in parsed.reference_groups() {
+            match group {
+                ReferenceGroup::Cell(view) => bindings.push(FormulaBinding::Cell {
+                    cell: resolve(view)?,
+                }),
+                ReferenceGroup::Range {
+                    anchor,
+                    members,
+                    rows,
+                    columns,
+                } => {
+                    has_range = true;
+                    if rows == 0 || columns == 0 {
+                        return Err(ApplyError::FormulaShapeMismatch);
+                    }
+                    let view_rows: Vec<_> = (0..rows)
+                        .map(|i| {
+                            members
+                                .as_ref()
+                                .map_or(anchor.row + i as u32, |cells| cells[i * columns].row)
+                        })
+                        .collect();
+                    let view_columns: Vec<_> = (0..columns)
+                        .map(|i| {
+                            members
+                                .as_ref()
+                                .map_or(anchor.column + i as u32, |cells| cells[i].column)
+                        })
+                        .collect();
+                    if let Some(members) = &members
+                        && members.iter().enumerate().any(|(i, cell)| {
+                            cell.sheet != anchor.sheet
+                                || cell.row != view_rows[i / columns]
+                                || cell.column != view_columns[i % columns]
+                        })
+                    {
+                        return Err(ApplyError::FormulaShapeMismatch);
+                    }
+                    let first = resolve(anchor)?;
+                    let rows = view_rows
+                        .into_iter()
+                        .map(|row| {
+                            resolve(CellId::new(anchor.sheet, row, anchor.column))
+                                .map(|cell| cell.row)
+                        })
+                        .collect::<Result<_, _>>()?;
+                    let columns = view_columns
+                        .into_iter()
+                        .map(|column| {
+                            resolve(CellId::new(anchor.sheet, anchor.row, column))
+                                .map(|cell| cell.column)
+                        })
+                        .collect::<Result<_, _>>()?;
+                    bindings.push(FormulaBinding::Range {
+                        range: FormulaRange {
+                            sheet: first.sheet,
+                            rows,
+                            columns,
+                        },
+                    });
+                }
+            }
+        }
+        if has_range {
+            Ok((Vec::new(), bindings))
+        } else {
+            Ok((
+                bindings
+                    .into_iter()
+                    .map(|binding| match binding {
+                        FormulaBinding::Cell { cell } => cell,
+                        _ => unreachable!(),
+                    })
+                    .collect(),
+                Vec::new(),
+            ))
+        }
     }
 
     fn structured_tables(
@@ -2132,36 +2293,15 @@ impl Document {
                 current_row,
             },
         )?;
-        let view_references = parsed.references();
-        if view_references.len() > MAX_FORMULA_REFERENCES {
-            return Err(ApplyError::TooManyReferences);
-        }
-        let by_ordinal: BTreeMap<u32, SheetId> = self
-            .sheet_ordinals
-            .iter()
-            .map(|(id, ordinal)| (*ordinal, *id))
-            .collect();
-        let references =
-            view_references
-                .into_iter()
-                .map(|view| {
-                    let target = by_ordinal[&view.sheet];
-                    let state = &self.sheets[&target];
-                    let row = *state.rows.get(view.row as usize).ok_or_else(|| {
-                        ApplyError::ReferenceOutOfView((view.row + 1).to_string())
-                    })?;
-                    let column = *state.columns.get(view.column as usize).ok_or_else(|| {
-                        ApplyError::ReferenceOutOfView((view.column + 1).to_string())
-                    })?;
-                    Ok(CellRef {
-                        sheet: target,
-                        row,
-                        column,
-                    })
-                })
-                .collect::<Result<Vec<_>, ApplyError>>()?;
+        let (references, bindings) = self.resolve_formula_bindings(&parsed)?;
         let mut rebound = formula.clone();
         rebound.references = references;
+        rebound.bindings = bindings;
+        // Preserve the recorded representation during historical table replay.
+        if formula.bindings.is_empty() {
+            rebound.references = rebound.references();
+            rebound.bindings.clear();
+        }
         Ok(rebound)
     }
 
@@ -2368,16 +2508,12 @@ impl Document {
             }
             Operation::DeleteSheet { sheet } => {
                 let state = self.sheet(*sheet)?;
-                for (row, column) in state.cells.keys() {
-                    self.check_unreferenced_outside(
-                        CellRef {
-                            sheet: *sheet,
-                            row: *row,
-                            column: *column,
-                        },
-                        *sheet,
-                    )?;
-                }
+                self.check_removed_region(
+                    *sheet,
+                    |_| true,
+                    |_| true,
+                    |reader| reader.sheet == *sheet,
+                )?;
                 let cells: Vec<(RowId, ColumnId)> = state.cells.keys().copied().collect();
                 for (row, column) in cells {
                     self.clear_cell(CellRef {
@@ -2528,6 +2664,12 @@ impl Document {
                     }
                 }
                 let doomed: BTreeSet<RowId> = rows.iter().copied().collect();
+                self.check_removed_region(
+                    *sheet,
+                    |row| doomed.contains(row),
+                    |_| true,
+                    |reader| reader.sheet == *sheet && doomed.contains(&reader.row),
+                )?;
                 let cells: Vec<CellRef> = state
                     .cells
                     .keys()
@@ -2538,9 +2680,6 @@ impl Document {
                         column: *column,
                     })
                     .collect();
-                for cell in &cells {
-                    self.check_unreferenced_by(cell, |dependent| doomed.contains(&dependent.row))?;
-                }
                 for cell in cells {
                     self.clear_cell(cell);
                 }
@@ -2566,6 +2705,12 @@ impl Document {
                     }
                 }
                 let doomed: BTreeSet<ColumnId> = columns.iter().copied().collect();
+                self.check_removed_region(
+                    *sheet,
+                    |_| true,
+                    |column| doomed.contains(column),
+                    |reader| reader.sheet == *sheet && doomed.contains(&reader.column),
+                )?;
                 let cells: Vec<CellRef> = state
                     .cells
                     .keys()
@@ -2576,11 +2721,6 @@ impl Document {
                         column: *column,
                     })
                     .collect();
-                for cell in &cells {
-                    self.check_unreferenced_by(cell, |dependent| {
-                        doomed.contains(&dependent.column)
-                    })?;
-                }
                 for cell in cells {
                     self.clear_cell(cell);
                 }
@@ -2988,14 +3128,63 @@ impl Document {
                 current_row,
             },
         )?;
-        if parsed.references().len() != formula.references.len() {
+        if formula.reference_count() > MAX_FORMULA_REFERENCES {
+            return Err(ApplyError::TooManyReferences);
+        }
+        if !formula.bindings.is_empty() && !formula.references.is_empty() {
             return Err(ApplyError::FormulaShapeMismatch);
         }
-        let mut engine_cells = Vec::with_capacity(formula.references.len());
+        if parsed.reference_count() != formula.reference_count() {
+            return Err(ApplyError::FormulaShapeMismatch);
+        }
+        let mut engine_cells = Vec::with_capacity(formula.reference_count());
         for reference in &formula.references {
             let state = self.sheet(reference.sheet)?;
             self.check_cell_exists(state, reference)?;
             engine_cells.push(self.engine_cell(*reference).expect("checked"));
+        }
+        for binding in &formula.bindings {
+            match binding {
+                FormulaBinding::Cell { cell: reference } => {
+                    let state = self.sheet(reference.sheet)?;
+                    self.check_cell_exists(state, reference)?;
+                    engine_cells.push(self.engine_cell(*reference).expect("checked"));
+                }
+                FormulaBinding::Range { range } => {
+                    if range.rows.is_empty() || range.columns.is_empty() {
+                        return Err(ApplyError::FormulaShapeMismatch);
+                    }
+                    let state = self.sheet(range.sheet)?;
+                    let rows = range
+                        .rows
+                        .iter()
+                        .map(|row| {
+                            state
+                                .row_ordinals
+                                .get(row)
+                                .copied()
+                                .ok_or(ApplyError::UnknownRow(*row))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let columns = range
+                        .columns
+                        .iter()
+                        .map(|column| {
+                            state
+                                .column_ordinals
+                                .get(column)
+                                .copied()
+                                .ok_or(ApplyError::UnknownColumn(*column))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let sheet = self.sheet_ordinals[&range.sheet];
+                    engine_cells.extend(rows.into_iter().flat_map(|row| {
+                        columns
+                            .iter()
+                            .map(move |column| CellId::new(sheet, row, *column))
+                    }));
+                }
+            }
         }
         let mut cursor = engine_cells.into_iter();
         Ok(parsed.map_references(|_| cursor.next().expect("length checked")))
@@ -3004,6 +3193,19 @@ impl Document {
     fn attach_dependencies(&mut self, cell: CellRef, formula: &CompiledFormula) {
         for reference in &formula.references {
             self.dependents.entry(*reference).or_default().insert(cell);
+        }
+        for binding in &formula.bindings {
+            match binding {
+                FormulaBinding::Cell { cell: reference } => {
+                    self.dependents.entry(*reference).or_default().insert(cell);
+                }
+                FormulaBinding::Range { range } => {
+                    self.range_dependents
+                        .entry(range.clone())
+                        .or_default()
+                        .insert(cell);
+                }
+            }
         }
     }
 
@@ -3023,23 +3225,55 @@ impl Document {
                 }
             }
         }
+        for binding in &formula.bindings {
+            match binding {
+                FormulaBinding::Cell { cell: reference } => {
+                    if let Some(dependents) = self.dependents.get_mut(reference) {
+                        dependents.remove(&cell);
+                        if dependents.is_empty() {
+                            self.dependents.remove(reference);
+                        }
+                    }
+                }
+                FormulaBinding::Range { range } => {
+                    if let Some(dependents) = self.range_dependents.get_mut(range) {
+                        dependents.remove(&cell);
+                        if dependents.is_empty() {
+                            self.range_dependents.remove(range);
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    fn check_unreferenced_by(
+    fn check_removed_region(
         &self,
-        cell: &CellRef,
+        sheet: SheetId,
+        rows: impl Fn(&RowId) -> bool,
+        columns: impl Fn(&ColumnId) -> bool,
         exempt: impl Fn(&CellRef) -> bool,
     ) -> Result<(), ApplyError> {
-        if let Some(dependents) = self.dependents.get(cell)
-            && let Some(dependent) = dependents.iter().find(|dependent| !exempt(dependent))
-        {
-            return Err(ApplyError::ReferencedByFormula(*dependent));
+        // Include references to blank cells, which do not appear in sheet.cells.
+        for (cell, readers) in &self.dependents {
+            if cell.sheet == sheet
+                && rows(&cell.row)
+                && columns(&cell.column)
+                && let Some(reader) = readers.iter().find(|reader| !exempt(reader))
+            {
+                return Err(ApplyError::ReferencedByFormula(*reader));
+            }
+        }
+        for (range, readers) in &self.range_dependents {
+            if range.sheet == sheet
+                && range.rows.iter().any(&rows)
+                && range.columns.iter().any(&columns)
+                && let Some(reader) = readers.iter().find(|reader| !exempt(reader))
+            {
+                return Err(ApplyError::ReferencedByFormula(*reader));
+            }
         }
         Ok(())
-    }
-
-    fn check_unreferenced_outside(&self, cell: CellRef, sheet: SheetId) -> Result<(), ApplyError> {
-        self.check_unreferenced_by(&cell, |dependent| dependent.sheet == sheet)
     }
 
     fn clear_cell(&mut self, cell: CellRef) {
@@ -3067,7 +3301,7 @@ impl Document {
         if formula.source.chars().count() > MAX_FORMULA_CHARS {
             return Err(ApplyError::FormulaTooLong);
         }
-        if formula.references.len() > MAX_FORMULA_REFERENCES {
+        if formula.reference_count() > MAX_FORMULA_REFERENCES {
             return Err(ApplyError::TooManyReferences);
         }
         let bound = self.bind_formula(cell, formula)?;
@@ -3912,6 +4146,51 @@ mod tests {
             replayed.value(replayed.resolve_a1(sheet, "D1").unwrap()),
             CellValue::Number(65.0)
         );
+        // Replay historical per-cell table rebindings without rewriting their
+        // canonical event bytes or silently retargeting any reference.
+        fn legacy_formulas(value: &mut serde_json::Value) {
+            if value.get("bindings").is_some() && value.get("source").is_some() {
+                let mut formula: CompiledFormula = serde_json::from_value(value.take()).unwrap();
+                formula.references = formula.references();
+                formula.bindings.clear();
+                *value = serde_json::to_value(formula).unwrap();
+            } else {
+                match value {
+                    serde_json::Value::Array(items) => items.iter_mut().for_each(legacy_formulas),
+                    serde_json::Value::Object(items) => {
+                        items.values_mut().for_each(legacy_formulas)
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut historical = Document::empty(fixture.document.id());
+        for event in &fixture.events {
+            let mut operation = serde_json::to_value(&event.operation).unwrap();
+            legacy_formulas(&mut operation);
+            let event = Event::new(
+                historical.head(),
+                historical.branch(),
+                event.actor.clone(),
+                event.timestamp,
+                serde_json::from_value(operation).unwrap(),
+            );
+            let bytes = event.canonical_json();
+            let decoded: Event = serde_json::from_str(&bytes).unwrap();
+            assert_eq!(decoded.canonical_json(), bytes);
+            assert!(decoded.verify());
+            historical.apply(&decoded).unwrap();
+        }
+        assert_eq!(
+            historical.value(historical.resolve_a1(sheet, "D1").unwrap()),
+            CellValue::Number(65.0)
+        );
+        assert_eq!(
+            Document::from_snapshot(&historical.snapshot())
+                .unwrap()
+                .digest(),
+            historical.digest()
+        );
     }
 
     #[test]
@@ -4110,6 +4389,129 @@ mod tests {
                 assert_eq!(Some(inferred), document.inferred_column_type(sheet, column));
             }
         }
+    }
+
+    #[test]
+    fn compact_range_bindings_share_dependencies_and_legacy_events_keep_their_bytes() {
+        let mut fixture = Fixture::new();
+        let sheet = fixture.sheet;
+        let row_count = fixture.document.rows(sheet).unwrap().len();
+        let column_count = fixture.document.columns(sheet).unwrap().len();
+        fixture.run(
+            human(),
+            Command::AddRows {
+                sheet,
+                count: 100 - row_count,
+                at: row_count,
+                table: None,
+            },
+        );
+        fixture.run(
+            human(),
+            Command::AddColumns {
+                sheet,
+                count: 101 - column_count,
+                at: column_count,
+            },
+        );
+        for row in 1..=20 {
+            fixture.formula(&format!("CW{row}"), "=SUM(A1:CV100)");
+        }
+        assert_eq!(fixture.document.range_dependents.len(), 1);
+        assert!(fixture.document.dependents.is_empty());
+        let compact = fixture
+            .document
+            .compile_formula(sheet, "=SUM(A1:CV100)")
+            .unwrap();
+        let mut legacy = compact.clone();
+        legacy.references = legacy.references();
+        legacy.bindings.clear();
+        assert_eq!(compact, legacy);
+        let compact_bytes = serde_json::to_vec(&compact).unwrap().len();
+        let legacy_bytes = serde_json::to_vec(&legacy).unwrap().len();
+        assert!(compact_bytes * 20 < legacy_bytes);
+        assert_eq!(compact.reference_count(), 10_000);
+        assert!(compact.references.is_empty());
+        assert_eq!(legacy.references.len(), 10_000);
+        let cell = fixture.document.resolve_a1(sheet, "CW21").unwrap();
+        let event = Event::new(
+            fixture.document.head(),
+            fixture.document.branch(),
+            human(),
+            9_000,
+            Operation::SetFormula {
+                cell,
+                formula: legacy,
+            },
+        );
+        let bytes = event.canonical_json();
+        assert!(!bytes.contains("\"bindings\""));
+        let decoded: Event = serde_json::from_str(&bytes).unwrap();
+        assert!(decoded.verify());
+        assert_eq!(decoded.canonical_json(), bytes);
+        fixture.document.apply(&decoded).unwrap();
+        fixture.events.push(decoded);
+        fixture.set("A1", 4.0);
+        assert_eq!(fixture.document.value(cell), CellValue::Number(4.0));
+        let expected = fixture.document.digest();
+        assert_eq!(
+            Document::from_snapshot(&fixture.document.snapshot())
+                .unwrap()
+                .digest(),
+            expected
+        );
+        assert_eq!(
+            Document::replay(&fixture.events).unwrap().digest(),
+            expected
+        );
+        for row in 1..=20 {
+            fixture.run(
+                human(),
+                Command::ClearCell {
+                    sheet,
+                    a1: format!("CW{row}"),
+                },
+            );
+        }
+        assert!(fixture.document.range_dependents.is_empty());
+        assert!(
+            !fixture.document.dependents.is_empty(),
+            "legacy reader still protects its references"
+        );
+    }
+
+    #[test]
+    fn compact_ranges_protect_blank_references_and_keep_the_reference_limit() {
+        let mut fixture = Fixture::new();
+        let sheet = fixture.sheet;
+        fixture.formula("C1", "=SUM(A1:B2)");
+        let reader = fixture.document.resolve_a1(sheet, "C1").unwrap();
+        let row = fixture.document.rows(sheet).unwrap()[1];
+        let column = fixture.document.columns(sheet).unwrap()[0];
+        assert_eq!(
+            fixture.fail(
+                human(),
+                Command::DeleteRows {
+                    sheet,
+                    rows: vec![row]
+                }
+            ),
+            ApplyError::ReferencedByFormula(reader)
+        );
+        assert_eq!(
+            fixture.fail(
+                human(),
+                Command::DeleteColumns {
+                    sheet,
+                    columns: vec![column]
+                }
+            ),
+            ApplyError::ReferencedByFormula(reader)
+        );
+        assert_eq!(
+            fixture.document.compile_formula(sheet, "=SUM(A1:A10001)"),
+            Err(ApplyError::TooManyReferences)
+        );
     }
 
     #[test]
