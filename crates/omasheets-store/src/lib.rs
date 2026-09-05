@@ -312,6 +312,10 @@ impl Store {
     }
 
     fn chain(&self, branch: BranchId) -> Result<Vec<StoredEvent>, StoreError> {
+        self.chain_after(branch, 0)
+    }
+
+    fn chain_after(&self, branch: BranchId, after: i64) -> Result<Vec<StoredEvent>, StoreError> {
         // Walk ancestry: each branch contributes its own events up to the next
         // child's fork point, then the child's events.
         let mut lineage = Vec::new();
@@ -342,27 +346,30 @@ impl Store {
         }
         lineage.reverse();
         let mut events = Vec::new();
-        // The fork point limits how much of each ancestor is included.
-        let mut limit: Option<EventId> = None;
+        // Query only the requested tail, bounded by each child's fork point.
         for (index, (current, _)) in lineage.iter().enumerate() {
-            let next_base = lineage.get(index + 1).and_then(|(_, base)| base.clone());
-            let _ = limit.take();
-            let mut statement = self
-                .connection
-                .prepare("SELECT seq, canonical FROM events WHERE branch = ?1 ORDER BY seq")?;
-            let rows = statement.query_map(params![current.to_string()], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-            })?;
+            let next_base = lineage.get(index + 1).and_then(|(_, base)| base.as_ref());
+            let through: i64 = match next_base {
+                Some(base) => self.connection.query_row(
+                    "SELECT seq FROM events WHERE id = ?1 AND branch = ?2",
+                    params![base, current.to_string()],
+                    |row| row.get(0),
+                )?,
+                None => i64::MAX,
+            };
+            let mut statement = self.connection.prepare(
+                "SELECT seq, canonical FROM events WHERE branch = ?1 AND seq > ?2 AND seq <= ?3 ORDER BY seq",
+            )?;
+            let rows = statement
+                .query_map(params![current.to_string(), after, through], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })?;
             for row in rows {
                 let (seq, canonical) = row?;
-                let event: Event = serde_json::from_str(&canonical)?;
-                let id = event.id;
-                events.push(StoredEvent { seq, event });
-                if let Some(base) = &next_base
-                    && id.to_string() == *base
-                {
-                    break;
-                }
+                events.push(StoredEvent {
+                    seq,
+                    event: serde_json::from_str(&canonical)?,
+                });
             }
         }
         Ok(events)
@@ -370,7 +377,6 @@ impl Store {
 
     fn load(&self, branch: BranchId) -> Result<(Document, LoadReport), StoreError> {
         let name = self.branch_name(branch)?;
-        let chain = self.chain(branch)?;
         let snapshot: Option<(i64, String, String)> = self
             .connection
             .query_row(
@@ -381,20 +387,25 @@ impl Store {
             .optional()?;
         let mut path = LoadPath::FullReplay;
         if let Some((seq, digest, payload)) = snapshot {
+            // Include the checkpoint event itself to verify membership in this
+            // branch's ancestry, without parsing the history preceding it.
+            let tail = self.chain_after(branch, seq.saturating_sub(1))?;
             let restored = serde_json::from_str::<Snapshot>(&payload)
                 .ok()
                 .and_then(|snapshot| Document::from_snapshot(&snapshot).ok())
                 .filter(|document| document.digest() == digest)
                 .filter(|document| {
-                    chain
-                        .iter()
-                        .find(|stored| stored.seq == seq)
-                        .is_some_and(|stored| Some(stored.event.id) == document.head())
+                    document.branch() == branch
+                        && tail.first().is_some_and(|stored| {
+                            stored.seq == seq
+                                && stored.event.verify()
+                                && Some(stored.event.id) == document.head()
+                        })
                 });
             match restored {
                 Some(mut document) => {
                     let mut replayed = 0;
-                    for stored in chain.iter().filter(|stored| stored.seq > seq) {
+                    for stored in tail.iter().skip(1) {
                         document.apply(&stored.event)?;
                         replayed += 1;
                     }
@@ -411,7 +422,11 @@ impl Store {
                 None => path = LoadPath::SnapshotRejected,
             }
         }
-        let events: Vec<Event> = chain.into_iter().map(|stored| stored.event).collect();
+        let events: Vec<Event> = self
+            .chain(branch)?
+            .into_iter()
+            .map(|stored| stored.event)
+            .collect();
         if events.is_empty() {
             return Err(StoreError::CorruptLog("branch has no events".into()));
         }
@@ -484,6 +499,7 @@ impl Store {
         self.persist(branch, &events)?;
         self.documents.insert(branch, staged);
         self.load_reports.remove(&branch);
+        let _ = self.maybe_snapshot(branch);
         Ok(events)
     }
 
@@ -509,7 +525,12 @@ impl Store {
 
     fn maybe_snapshot(&mut self, branch: BranchId) -> Result<(), StoreError> {
         let count = self.documents[&branch].event_count();
-        if count.is_multiple_of(self.snapshot_interval) {
+        let checkpoint_count: u64 = self.connection.query_row(
+            "SELECT COALESCE(MAX(event_count), 0) FROM snapshots WHERE branch = ?1",
+            params![branch.to_string()],
+            |row| row.get(0),
+        )?;
+        if count.saturating_sub(checkpoint_count) >= self.snapshot_interval {
             self.write_snapshot(branch)?;
         }
         Ok(())
@@ -538,6 +559,12 @@ impl Store {
                 document.digest(),
                 payload
             ],
+        )?;
+        // Snapshots are disposable caches. Keep one per branch instead of
+        // retaining a full document copy at every checkpoint indefinitely.
+        self.connection.execute(
+            "DELETE FROM snapshots WHERE branch = ?1 AND seq < ?2",
+            params![branch.to_string(), seq],
         )?;
         Ok(())
     }
@@ -1170,6 +1197,65 @@ mod tests {
             .unwrap();
         assert_eq!(rows, 4);
         assert_eq!(setup.store.document(main).unwrap().digest(), before);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn batches_cross_checkpoint_threshold_and_reopen_parses_only_the_tail() {
+        let path = temp_path("batch-checkpoint");
+        let mut setup = Setup::new(&path);
+        let main = setup.main;
+        setup.store.set_snapshot_interval(5);
+        let commands = (0..3)
+            .map(|value| Command::SetValue {
+                sheet: setup.sheet,
+                a1: "A1".into(),
+                value: Literal::Number(f64::from(value)),
+            })
+            .collect();
+        setup
+            .store
+            .append_batch(main, human(), 2_000, commands)
+            .unwrap();
+        // Four setup events plus three edits crossed 5 without landing on it.
+        let count: i64 = setup
+            .store
+            .connection
+            .query_row(
+                "SELECT event_count FROM snapshots WHERE branch = ?1",
+                params![main.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 7);
+        setup.set(main, "A2", 3.0);
+        let expected = setup.store.document(main).unwrap().digest();
+        // A valid snapshot permits skipping earlier canonical JSON entirely.
+        setup
+            .store
+            .connection
+            .execute(
+                "UPDATE events SET canonical = 'unparseable' WHERE seq = 1",
+                [],
+            )
+            .unwrap();
+        setup.store.evict();
+        assert_eq!(setup.store.document(main).unwrap().digest(), expected);
+        assert_eq!(setup.store.load_report(main).unwrap().events_replayed, 1);
+        setup.store.write_snapshot(main).unwrap();
+        let count: i64 = setup
+            .store
+            .connection
+            .query_row("SELECT COUNT(*) FROM snapshots", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        setup
+            .store
+            .connection
+            .execute("DELETE FROM snapshots", [])
+            .unwrap();
+        setup.store.evict();
+        assert!(setup.store.document(main).is_err());
         cleanup(&path);
     }
 
