@@ -350,6 +350,12 @@ fn parse_cell(cell: &Value) -> Result<GridCell, String> {
     let formula = cell["formula"].as_str();
     let input_text = if let Some(formula) = formula {
         formula.to_string()
+    } else if value_type == "text"
+        && (display.is_empty() || display.starts_with(['\'', '='])
+            || display.eq_ignore_ascii_case("true") || display.eq_ignore_ascii_case("false")
+            || display.parse::<f64>().is_ok_and(|number| number.is_finite()))
+    {
+        format!("'{display}")
     } else {
         display.clone()
     };
@@ -361,6 +367,10 @@ fn parse_cell(cell: &Value) -> Result<GridCell, String> {
 }
 
 fn edit_command(sheet: &str, a1: &str, text: &str) -> Value {
+    if let Some(literal) = text.strip_prefix('\'') {
+        return json!({ "command": "set_value", "sheet": sheet, "a1": a1,
+            "value": { "type": "text", "value": literal } });
+    }
     if text.is_empty() {
         return json!({ "command": "clear_cell", "sheet": sheet, "a1": a1 });
     }
@@ -511,6 +521,20 @@ mod tests {
         assert_eq!(edit_command("sheet-id", "A1", "12.5")["value"]["type"], "number");
         assert_eq!(edit_command("sheet-id", "A1", "TRUE")["value"]["type"], "boolean");
         assert_eq!(edit_command("sheet-id", "A1", "hello")["value"]["type"], "text");
+    }
+
+    #[test]
+    fn literal_text_round_trips_without_coercion() {
+        for text in ["00123", "TRUE", "false", "=SUM(A1:A2)", "'quoted", "", "hello", "<b>text</b>"] {
+            let cell = parse_cell(&json!({"value": {"type": "text", "value": text}})).unwrap();
+            assert_eq!(cell.display, text);
+            let command = edit_command("sheet-id", "A1", &cell.input);
+            assert_eq!(command["command"], "set_value");
+            assert_eq!(command["value"], json!({"type": "text", "value": text}));
+        }
+        assert_eq!(edit_command("sheet-id", "A1", "'00123")["value"]["value"], "00123");
+        assert_eq!(edit_command("sheet-id", "A1", "'=1+1")["value"]["type"], "text");
+        assert_eq!(edit_command("sheet-id", "A1", "'TRUE")["value"]["type"], "text");
     }
 
     #[test]
