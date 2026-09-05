@@ -183,10 +183,10 @@ struct DocumentState {
     redo: Vec<EditRecord>,
 }
 
-#[derive(Clone)]
 struct EditRecord {
     before: Vec<Value>,
     after: Vec<Value>,
+    bytes: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -355,7 +355,7 @@ impl GridDocument {
         {
             return Err("paste must be rectangular, at most 1,000 cells, and fit inside the sheet".into());
         }
-        let mut record = EditRecord { before: Vec::new(), after: Vec::new() };
+        let mut record = EditRecord { before: Vec::new(), after: Vec::new(), bytes: 0 };
         for (dr, line) in values.iter().enumerate() {
             for (dc, text) in line.iter().enumerate() {
                 let old = self.cell(row + dr, column + dc)?;
@@ -365,14 +365,15 @@ impl GridDocument {
             }
         }
         if record.before == record.after { return self.verify_revision(); }
-        if record_bytes(&record) > 4 * 1024 * 1024 {
+        record.bytes = record_bytes(&record);
+        if record.bytes > 4 * 1024 * 1024 {
             return Err("edit is too large to retain safe undo history".into());
         }
         let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
         apply_commands(&mut state, &record.after)?;
         state.redo.clear();
         state.undo.push(record);
-        while state.undo.len() > 32 || state.undo.iter().map(record_bytes).sum::<usize>() > 8 * 1024 * 1024 {
+        while state.undo.len() > 32 || state.undo.iter().map(|record| record.bytes).sum::<usize>() > 8 * 1024 * 1024 {
             state.undo.remove(0);
         }
         Ok(())
@@ -380,11 +381,13 @@ impl GridDocument {
 
     pub fn undo(&self, redo: bool) -> Result<(), String> {
         let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
-        let record = if redo { state.redo.last() } else { state.undo.last() }
-            .cloned().ok_or(if redo { "nothing to redo" } else { "nothing to undo" })?;
-        apply_commands(&mut state, if redo { &record.after } else { &record.before })?;
-        if redo { state.redo.pop(); state.undo.push(record); }
-        else { state.undo.pop(); state.redo.push(record); }
+        let record = if redo { state.redo.pop() } else { state.undo.pop() }
+            .ok_or(if redo { "nothing to redo" } else { "nothing to undo" })?;
+        if let Err(error) = apply_commands(&mut state, if redo { &record.after } else { &record.before }) {
+            if redo { state.redo.push(record); } else { state.undo.push(record); }
+            return Err(error);
+        }
+        if redo { state.undo.push(record); } else { state.redo.push(record); }
         Ok(())
     }
 

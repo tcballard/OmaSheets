@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs::OpenOptions;
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -571,9 +571,10 @@ fn export_csv(
             Err(error) => return Err(export_io_error(error)),
         }
     }
-    let (temporary_path, mut file) = temporary
+    let (temporary_path, file) = temporary
         .ok_or_else(|| ServiceError::new("export_io", "could not allocate a temporary CSV file"))?;
 
+    let mut file = BufWriter::new(file);
     let written = (|| -> Result<CsvExportStats, ServiceError> {
         let mut stats = CsvExportStats::default();
         for (row_index, row) in rows.iter().enumerate() {
@@ -614,7 +615,8 @@ fn export_csv(
                 file.write_all(b"\r\n").map_err(export_io_error)?;
             }
         }
-        file.sync_all().map_err(export_io_error)?;
+        file.flush().map_err(export_io_error)?;
+        file.get_ref().sync_all().map_err(export_io_error)?;
         Ok(stats)
     })();
     drop(file);
