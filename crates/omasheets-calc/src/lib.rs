@@ -534,6 +534,8 @@ fn rebind_references(expression: &mut Expr<CellId>, map: &mut impl FnMut(CellId)
 
 #[derive(Clone, Debug)]
 enum Input {
+    /// Reusable slot left by an unreferenced range vertex.
+    Vacant,
     Literal(Value),
     Formula(Expr<usize>),
     /// A shared range node: its `dependents` are the formulas that read it
@@ -554,7 +556,10 @@ enum RangeShape {
         rows: usize,
         columns: usize,
     },
-    Members,
+    Members {
+        rows: usize,
+        columns: usize,
+    },
 }
 
 /// Rows per bucket of the rectangle index: a changed cell only checks the
@@ -608,6 +613,7 @@ pub struct Workbook {
     /// Shared range nodes by identity, so every formula over the same cells
     /// shares one node and one set of member edges.
     ranges: HashMap<RangeKey, usize>,
+    free_ranges: Vec<usize>,
     generation: u64,
     /// While a bulk load is open, commits record their cells here instead of
     /// recalculating, and `end_bulk` evaluates everything once.
@@ -630,6 +636,7 @@ impl Default for Workbook {
             sheet_names: HashMap::new(),
             defined_names: DefinedNames::default(),
             ranges: HashMap::new(),
+            free_ranges: Vec::new(),
             generation: 1,
             bulk: None,
             evaluating: std::cell::Cell::new(CellId::new(0, 0, 0)),
@@ -731,6 +738,9 @@ impl Workbook {
             range_nodes.insert(key, node);
         }
         if let Some(path) = self.prospective_cycle(cell, &cells, range_nodes.values().copied()) {
+            for node in range_nodes.values() {
+                self.retire_range(*node);
+            }
             return Err(FormulaError::Cycle(path));
         }
         let mut dependencies: Vec<usize> = cells
@@ -751,7 +761,15 @@ impl Workbook {
         if let Some(node) = self.ranges.get(key) {
             return *node;
         }
-        let node = self.cells.len();
+        // Resolve member cells before reserving the range's graph index.
+        let indices: Vec<usize> = match key {
+            RangeKey::Members { members, .. } => members
+                .iter()
+                .map(|member| self.ensure_cell(*member))
+                .collect(),
+            _ => Vec::new(),
+        };
+        let node = self.free_ranges.pop().unwrap_or(self.cells.len());
         let cell = match key {
             RangeKey::Rectangle {
                 anchor,
@@ -779,18 +797,21 @@ impl Workbook {
                     value: Value::Blank,
                 }
             }
-            RangeKey::Members { members, .. } => {
-                let indices: Vec<usize> = members
-                    .iter()
-                    .map(|member| self.ensure_cell(*member))
-                    .collect();
+            RangeKey::Members {
+                members,
+                rows,
+                columns,
+            } => {
                 for member in &indices {
                     self.cells[*member].dependents.push(node);
                 }
                 Cell {
                     id: members[0],
                     input: Input::Range {
-                        shape: RangeShape::Members,
+                        shape: RangeShape::Members {
+                            rows: *rows,
+                            columns: *columns,
+                        },
                     },
                     dependencies: indices,
                     dependents: Vec::new(),
@@ -798,11 +819,68 @@ impl Workbook {
                 }
             }
         };
-        self.cells.push(cell);
-        self.dirty_marks.push(0);
-        self.pending.push(0);
+        if node == self.cells.len() {
+            self.cells.push(cell);
+            self.dirty_marks.push(0);
+            self.pending.push(0);
+        } else {
+            self.cells[node] = cell;
+            self.dirty_marks[node] = 0;
+            self.pending[node] = 0;
+        }
         self.ranges.insert(key.clone(), node);
         node
+    }
+
+    fn retire_range(&mut self, node: usize) {
+        if !self.cells[node].dependents.is_empty() {
+            return;
+        }
+        let Input::Range { shape } = self.cells[node].input else {
+            return;
+        };
+        let key = match shape {
+            RangeShape::Rectangle {
+                anchor,
+                rows,
+                columns,
+            } => {
+                let last = anchor.row + rows as u32 - 1;
+                for band in anchor.row / RANGE_BAND_ROWS..=last / RANGE_BAND_ROWS {
+                    let key = (anchor.sheet, band);
+                    if let Some(nodes) = self.range_bands.get_mut(&key) {
+                        nodes.retain(|candidate| *candidate != node);
+                        if nodes.is_empty() {
+                            self.range_bands.remove(&key);
+                        }
+                    }
+                }
+                RangeKey::Rectangle {
+                    anchor,
+                    rows,
+                    columns,
+                }
+            }
+            RangeShape::Members { rows, columns } => RangeKey::Members {
+                members: self.cells[node]
+                    .dependencies
+                    .iter()
+                    .map(|member| self.cells[*member].id)
+                    .collect(),
+                rows,
+                columns,
+            },
+        };
+        self.ranges.remove(&key);
+        let dependencies = std::mem::take(&mut self.cells[node].dependencies);
+        for member in dependencies {
+            self.cells[member]
+                .dependents
+                .retain(|dependent| *dependent != node);
+        }
+        self.cells[node].dependents = Vec::new();
+        self.cells[node].input = Input::Vacant;
+        self.free_ranges.push(node);
     }
 
     fn range_shape(&self, node: usize) -> RangeShape {
@@ -825,7 +903,7 @@ impl Workbook {
                     && cell.column >= anchor.column
                     && cell.column < anchor.column + columns as u32
             }
-            RangeShape::Members => false,
+            RangeShape::Members { .. } => false,
         }
     }
 
@@ -863,6 +941,7 @@ impl Workbook {
                     statistics.expression_nodes += count_nodes(expression);
                 }
                 Input::Literal(_) => statistics.cells += 1,
+                Input::Vacant => continue,
             }
             statistics.dependency_edges += cell.dependencies.len();
             statistics.dependent_edges += cell.dependents.len();
@@ -877,7 +956,7 @@ impl Workbook {
     fn range_len(&self, node: usize) -> usize {
         match self.range_shape(node) {
             RangeShape::Rectangle { rows, columns, .. } => rows * columns,
-            RangeShape::Members => self.cells[node].dependencies.len(),
+            RangeShape::Members { .. } => self.cells[node].dependencies.len(),
         }
     }
 
@@ -894,7 +973,7 @@ impl Workbook {
                     anchor.column + (index % columns) as u32,
                 ))
                 .copied(),
-            RangeShape::Members => Some(self.cells[node].dependencies[index]),
+            RangeShape::Members { .. } => Some(self.cells[node].dependencies[index]),
         }
     }
 
@@ -953,7 +1032,7 @@ impl Workbook {
                 });
                 output
             }
-            RangeShape::Members => self.cells[node]
+            RangeShape::Members { .. } => self.cells[node]
                 .dependencies
                 .iter()
                 .map(|member| Some(*member))
@@ -976,7 +1055,7 @@ impl Workbook {
                 });
                 output
             }
-            RangeShape::Members => self.cells[node]
+            RangeShape::Members { .. } => self.cells[node]
                 .dependencies
                 .iter()
                 .map(|member| self.cells[*member].value.clone())
@@ -1009,8 +1088,8 @@ impl Workbook {
     fn commit(&mut self, cell: CellId, input: Input, dependencies: Vec<usize>) -> RecalcReport {
         let changed = self.ensure_cell(cell);
         let previous = std::mem::take(&mut self.cells[changed].dependencies);
-        for dependency in previous {
-            self.cells[dependency]
+        for dependency in &previous {
+            self.cells[*dependency]
                 .dependents
                 .retain(|dependent| *dependent != changed);
         }
@@ -1021,6 +1100,9 @@ impl Workbook {
         entry.input = input;
         entry.dependencies = dependencies;
         entry.value = Value::Blank;
+        for dependency in previous {
+            self.retire_range(dependency);
+        }
         if let Some(pending) = &mut self.bulk {
             pending.push(changed);
             return RecalcReport::default();
@@ -1192,6 +1274,7 @@ impl Workbook {
                 }
                 // A range node only orders its members before its readers.
                 Input::Range { .. } => None,
+                Input::Vacant => unreachable!("retired ranges have no edges"),
             };
             match value {
                 Some(value) => {
@@ -1288,7 +1371,7 @@ impl Workbook {
                     .zip(column_offset)
                     .map(|(row, column)| row * columns + column)
             }
-            RangeShape::Members => self.cells[node].dependencies.iter().position(|member| {
+            RangeShape::Members { .. } => self.cells[node].dependencies.iter().position(|member| {
                 let id = self.cells[*member].id;
                 (columns == 1 || id.column == origin.column) && (rows == 1 || id.row == origin.row)
             }),
@@ -5326,6 +5409,69 @@ mod tests {
     /// Graph vertices beyond the cells that exist: the shared range nodes.
     fn range_node_count(workbook: &Workbook) -> usize {
         workbook.ranges.len()
+    }
+
+    #[test]
+    fn unused_ranges_release_memberships_and_reuse_slots_including_rejected_formulas() {
+        let mut workbook = Workbook::default();
+        workbook.begin_bulk();
+        for end in 1..=10_000 {
+            workbook
+                .set_formula(cell(0, 1), &format!("=SUM(A1:A{end})"))
+                .unwrap();
+        }
+        workbook.end_bulk();
+        assert_eq!(workbook.statistics().range_nodes, 1);
+        assert!(
+            workbook.cells.len() <= 3,
+            "historic ranges must reuse graph slots"
+        );
+        workbook.set_formula(cell(1, 1), "=SUM(A1:A10000)").unwrap();
+        workbook.clear(cell(0, 1));
+        assert_eq!(
+            workbook.statistics().range_nodes,
+            1,
+            "live shared reader retains the node"
+        );
+        workbook.set_number(cell(0, 0), 7.0);
+        assert_eq!(workbook.value(cell(1, 1)), Value::Number(7.0));
+        workbook.clear(cell(1, 1));
+        assert!(workbook.ranges.is_empty());
+        assert!(workbook.range_bands.is_empty());
+        assert_eq!(workbook.statistics().dependent_capacity, 0);
+        for end in 1..=100 {
+            assert!(
+                workbook
+                    .set_formula(cell(0, 0), &format!("=SUM(A1:A{end})"))
+                    .is_err()
+            );
+        }
+        assert!(workbook.ranges.is_empty());
+        assert!(workbook.range_bands.is_empty());
+        assert_eq!(
+            workbook.set_number(cell(0, 0), 8.0).evaluated,
+            vec![cell(0, 0)]
+        );
+    }
+
+    #[test]
+    fn explicit_ranges_bind_missing_members_before_allocating_and_retire_reverse_edges() {
+        let parsed = ParsedFormula::parse("=SUM(A1:A2)", 0, &HashMap::new())
+            .unwrap()
+            .map_references(|id| cell(id.row * 2, id.column));
+        let mut workbook = Workbook::default();
+        workbook
+            .set_parsed_formula(cell(0, 1), parsed.clone())
+            .unwrap();
+        workbook.set_number(cell(2, 0), 9.0);
+        assert_eq!(workbook.value(cell(0, 1)), Value::Number(9.0));
+        workbook.clear(cell(0, 1));
+        assert_eq!(workbook.statistics().dependency_edges, 0);
+        assert_eq!(workbook.statistics().dependent_edges, 0);
+        assert!(workbook.ranges.is_empty());
+        assert!(workbook.set_parsed_formula(cell(0, 0), parsed).is_err());
+        assert!(workbook.ranges.is_empty());
+        assert_eq!(workbook.statistics().dependent_edges, 0);
     }
 
     #[test]
