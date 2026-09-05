@@ -515,6 +515,51 @@ impl Store {
         Ok(events)
     }
 
+    /// Validate and atomically persist already-resolved events on one branch.
+    /// Import planning can retain its signed events instead of resolving the
+    /// same commands a second time. Validation still replays every event.
+    pub fn append_events(
+        &mut self,
+        branch: BranchId,
+        events: Vec<Event>,
+    ) -> Result<(), StoreError> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        let mut staged = self.document(branch)?.clone();
+        let mut deferred = false;
+        for event in &events {
+            let edit = matches!(
+                event.operation,
+                Operation::SetValue { .. }
+                    | Operation::SetFormula { .. }
+                    | Operation::ClearCell { .. }
+            );
+            if deferred && !edit {
+                staged.end_bulk();
+            }
+            if !deferred && edit {
+                staged.begin_bulk();
+            }
+            deferred = edit;
+            if event.branch != branch {
+                return Err(StoreError::Apply(ApplyError::BranchMismatch));
+            }
+            staged.apply(event)?;
+            if staged.branch() != branch {
+                return Err(StoreError::Apply(ApplyError::BranchMismatch));
+            }
+        }
+        if deferred {
+            staged.end_bulk();
+        }
+        self.persist(branch, &events)?;
+        self.documents.insert(branch, staged);
+        self.load_reports.remove(&branch);
+        let _ = self.maybe_snapshot(branch);
+        Ok(())
+    }
+
     fn persist(&mut self, branch: BranchId, events: &[Event]) -> Result<(), StoreError> {
         let transaction = self
             .connection
@@ -1143,6 +1188,60 @@ mod tests {
             .unwrap();
         setup.store.evict();
         assert_eq!(setup.store.document(main).unwrap().digest(), expected);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn resolved_event_import_validates_every_event_before_persisting() {
+        let path = temp_path("resolved-events");
+        let mut setup = Setup::new(&path);
+        let main = setup.main;
+        let before = setup.store.document(main).unwrap().digest();
+        let mut planning = setup.store.document(main).unwrap().clone();
+        let events = vec![
+            planning
+                .command(
+                    human(),
+                    3_000,
+                    Command::SetValue {
+                        sheet: setup.sheet,
+                        a1: "A1".into(),
+                        value: Literal::Number(4.0),
+                    },
+                )
+                .unwrap(),
+            planning
+                .command(
+                    human(),
+                    3_001,
+                    Command::SetFormula {
+                        sheet: setup.sheet,
+                        a1: "B1".into(),
+                        source: "=A1*2".into(),
+                    },
+                )
+                .unwrap(),
+        ];
+        let mut corrupt = events.clone();
+        corrupt[1].timestamp += 1;
+        assert!(matches!(
+            setup.store.append_events(main, corrupt),
+            Err(StoreError::Apply(ApplyError::InvalidEventId))
+        ));
+        assert_eq!(setup.store.document(main).unwrap().digest(), before);
+        setup.store.evict();
+        assert_eq!(setup.store.document(main).unwrap().digest(), before);
+        setup.store.append_events(main, events).unwrap();
+        assert_eq!(
+            setup.store.document(main).unwrap().digest(),
+            planning.digest()
+        );
+        assert_eq!(setup.value(main, "B1"), CellValue::Number(8.0));
+        setup.store.evict();
+        assert_eq!(
+            setup.store.document(main).unwrap().digest(),
+            planning.digest()
+        );
         cleanup(&path);
     }
 
