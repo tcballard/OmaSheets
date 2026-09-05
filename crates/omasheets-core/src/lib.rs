@@ -883,8 +883,42 @@ struct Sheet {
     column_ordinals: BTreeMap<ColumnId, u32>,
     next_row_ordinal: u32,
     next_column_ordinal: u32,
+    #[serde(skip)]
+    row_positions: BTreeMap<RowId, usize>,
+    #[serde(skip)]
+    column_positions: BTreeMap<ColumnId, usize>,
+    #[serde(skip)]
+    occupied: BTreeSet<(usize, usize)>,
     column_types: BTreeMap<ColumnId, ColumnType>,
     cells: BTreeMap<(RowId, ColumnId), CellState>,
+}
+
+impl Sheet {
+    fn rebuild_view(&mut self) {
+        self.row_positions = self
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (*id, i))
+            .collect();
+        self.column_positions = self
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (*id, i))
+            .collect();
+        self.occupied = self
+            .cells
+            .keys()
+            .map(|(row, column)| (self.row_positions[row], self.column_positions[column]))
+            .collect();
+    }
+
+    fn insert_cell(&mut self, key: (RowId, ColumnId), state: CellState) -> Option<CellState> {
+        self.occupied
+            .insert((self.row_positions[&key.0], self.column_positions[&key.1]));
+        self.cells.insert(key, state)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1158,6 +1192,19 @@ impl Document {
                     columns: sheet.columns.clone(),
                     next_row_ordinal: sheet.rows.len() as u32,
                     next_column_ordinal: sheet.columns.len() as u32,
+                    row_positions: sheet
+                        .rows
+                        .iter()
+                        .enumerate()
+                        .map(|(i, id)| (*id, i))
+                        .collect(),
+                    column_positions: sheet
+                        .columns
+                        .iter()
+                        .enumerate()
+                        .map(|(i, id)| (*id, i))
+                        .collect(),
+                    occupied: BTreeSet::new(),
                     row_ordinals,
                     column_ordinals,
                     column_types: sheet.column_types.clone(),
@@ -1188,8 +1235,7 @@ impl Document {
                     .sheets
                     .get_mut(&sheet.id)
                     .expect("inserted")
-                    .cells
-                    .insert((cell.row, cell.column), cell.state.clone());
+                    .insert_cell((cell.row, cell.column), cell.state.clone());
             }
         }
         document.tables = snapshot.tables.clone();
@@ -1347,6 +1393,46 @@ impl Document {
     /// Infers a column's current value type without coercing or mutating it.
     /// Blank and error values carry no base type. A declared date column
     /// interprets numeric calculation results as 1900-system date serials.
+    /// Infer all columns in one sparse pass; empty grid coordinates contribute
+    /// no type. Calculated values are read fresh, including formula changes.
+    pub fn inferred_column_types(&self, sheet: SheetId) -> BTreeMap<ColumnId, InferredColumnType> {
+        let Some(state) = self.sheets.get(&sheet) else {
+            return BTreeMap::new();
+        };
+        let mut types: BTreeMap<_, _> = state
+            .columns
+            .iter()
+            .map(|id| (*id, InferredColumnType::Empty))
+            .collect();
+        for (row, column) in state.cells.keys() {
+            let inferred = types.get_mut(column).expect("existing column");
+            if *inferred == InferredColumnType::Mixed {
+                continue;
+            }
+            let observed = match self.value(CellRef {
+                sheet,
+                row: *row,
+                column: *column,
+            }) {
+                CellValue::Blank | CellValue::Error(_) => continue,
+                CellValue::Number(_)
+                    if state.column_types.get(column) == Some(&ColumnType::DateSerial) =>
+                {
+                    InferredColumnType::DateSerial
+                }
+                CellValue::Number(_) => InferredColumnType::Number,
+                CellValue::Text(_) => InferredColumnType::Text,
+                CellValue::Boolean(_) => InferredColumnType::Boolean,
+            };
+            if *inferred == InferredColumnType::Empty {
+                *inferred = observed;
+            } else if *inferred != observed {
+                *inferred = InferredColumnType::Mixed;
+            }
+        }
+        types
+    }
+
     pub fn inferred_column_type(
         &self,
         sheet: SheetId,
@@ -1423,14 +1509,22 @@ impl Document {
         Ok(CellRef { sheet, row, column })
     }
 
+    /// Occupied cells in row-major view order, without scanning blank cells.
+    pub fn cells_in_view(&self, sheet: SheetId) -> impl Iterator<Item = CellRef> + '_ {
+        self.sheets.get(&sheet).into_iter().flat_map(move |state| {
+            state.occupied.iter().map(move |(row, column)| CellRef {
+                sheet,
+                row: state.rows[*row],
+                column: state.columns[*column],
+            })
+        })
+    }
+
     /// Renders the current view address of a stable cell.
     pub fn project_a1(&self, cell: CellRef) -> Option<String> {
         let sheet = self.sheets.get(&cell.sheet)?;
-        let row = sheet.rows.iter().position(|row| *row == cell.row)?;
-        let column = sheet
-            .columns
-            .iter()
-            .position(|column| *column == cell.column)?;
+        let row = sheet.row_positions.get(&cell.row)?;
+        let column = *sheet.column_positions.get(&cell.column)?;
         Some(format!("{}{}", column_letters(column), row + 1))
     }
 
@@ -1704,11 +1798,12 @@ impl Document {
 
         let mut staged = self.clone();
         let state = staged.sheets.get_mut(&sheet).expect("checked");
-        for (offset, row) in rows.iter().enumerate() {
-            state.rows.insert(at + offset, *row);
+        state.rows.splice(at..at, rows.iter().copied());
+        for row in &rows {
             state.row_ordinals.insert(*row, state.next_row_ordinal);
             state.next_row_ordinal += 1;
         }
+        state.rebuild_view();
         let mut computed = Vec::new();
         let mut rebound = Vec::new();
         if let Some(table_id) = table {
@@ -1851,10 +1946,9 @@ impl Document {
         let current_row = current_row
             .map(|row| {
                 self.sheets[&sheet]
-                    .rows
-                    .iter()
-                    .position(|candidate| *candidate == row)
-                    .map(|position| position as u32)
+                    .row_positions
+                    .get(&row)
+                    .map(|position| *position as u32)
                     .ok_or(ApplyError::UnknownRow(row))
             })
             .transpose()?;
@@ -1950,10 +2044,9 @@ impl Document {
                         sheet.row_ordinals.get(row).copied()
                     } else {
                         sheet
-                            .rows
-                            .iter()
-                            .position(|candidate| candidate == row)
-                            .map(|position| position as u32)
+                            .row_positions
+                            .get(row)
+                            .map(|position| *position as u32)
                     }
                 };
                 let column_ordinal = |column: &ColumnId| {
@@ -1961,10 +2054,9 @@ impl Document {
                         sheet.column_ordinals.get(column).copied()
                     } else {
                         sheet
-                            .columns
-                            .iter()
-                            .position(|candidate| candidate == column)
-                            .map(|position| position as u32)
+                            .column_positions
+                            .get(column)
+                            .map(|position| *position as u32)
                     }
                 };
                 Ok(StructuredTable {
@@ -2013,10 +2105,9 @@ impl Document {
             .transpose()?;
         let sheet = self.sheet(cell.sheet)?;
         let current_row = sheet
-            .rows
-            .iter()
-            .position(|row| *row == cell.row)
-            .map(|position| position as u32);
+            .row_positions
+            .get(&cell.row)
+            .map(|position| *position as u32);
         let parsed = ParsedFormula::parse_with_structured_references(
             &formula.source,
             self.sheet_ordinals[&cell.sheet],
@@ -2241,6 +2332,9 @@ impl Document {
                         column_ordinals: BTreeMap::new(),
                         next_row_ordinal: 0,
                         next_column_ordinal: 0,
+                        row_positions: BTreeMap::new(),
+                        column_positions: BTreeMap::new(),
+                        occupied: BTreeSet::new(),
                         column_types: BTreeMap::new(),
                         cells: BTreeMap::new(),
                     },
@@ -2290,13 +2384,14 @@ impl Document {
                 }
                 self.check_fresh_batch(columns.iter().map(|id| id.0))?;
                 let state = self.sheets.get_mut(sheet).expect("checked");
-                for (offset, column) in columns.iter().enumerate() {
-                    state.columns.insert(at + offset, *column);
+                state.columns.splice(*at..*at, columns.iter().copied());
+                for column in columns {
                     state
                         .column_ordinals
                         .insert(*column, state.next_column_ordinal);
                     state.next_column_ordinal += 1;
                 }
+                state.rebuild_view();
             }
             Operation::AddRows {
                 sheet,
@@ -2324,11 +2419,12 @@ impl Document {
                     }
                     self.check_fresh_batch(rows.iter().map(|id| id.0))?;
                     let state = self.sheets.get_mut(sheet).expect("checked");
-                    for (offset, row) in rows.iter().enumerate() {
-                        state.rows.insert(at + offset, *row);
+                    state.rows.splice(*at..*at, rows.iter().copied());
+                    for row in rows {
                         state.row_ordinals.insert(*row, state.next_row_ordinal);
                         state.next_row_ordinal += 1;
                     }
+                    state.rebuild_view();
                     if let Some(table) = table {
                         self.tables
                             .get_mut(table)
@@ -2436,6 +2532,7 @@ impl Document {
                 }
                 let state = self.sheets.get_mut(sheet).expect("checked");
                 state.rows.retain(|row| !doomed.contains(row));
+                state.rebuild_view();
                 for row in &doomed {
                     state.row_ordinals.remove(row);
                 }
@@ -2475,6 +2572,7 @@ impl Document {
                 }
                 let state = self.sheets.get_mut(sheet).expect("checked");
                 state.columns.retain(|column| !doomed.contains(column));
+                state.rebuild_view();
                 for column in &doomed {
                     state.column_ordinals.remove(column);
                     state.column_types.remove(column);
@@ -2678,8 +2776,7 @@ impl Document {
                 self.sheets
                     .get_mut(&cell.sheet)
                     .expect("checked")
-                    .cells
-                    .insert(
+                    .insert_cell(
                         (cell.row, cell.column),
                         CellState {
                             input: CellInput::Value {
@@ -2939,6 +3036,10 @@ impl Document {
         }
         if let Some(sheet) = self.sheets.get_mut(&cell.sheet) {
             sheet.cells.remove(&(cell.row, cell.column));
+            sheet.occupied.remove(&(
+                sheet.row_positions[&cell.row],
+                sheet.column_positions[&cell.column],
+            ));
         }
     }
 
@@ -2974,8 +3075,7 @@ impl Document {
         self.sheets
             .get_mut(&cell.sheet)
             .expect("checked")
-            .cells
-            .insert(
+            .insert_cell(
                 (cell.row, cell.column),
                 CellState {
                     input: CellInput::Formula {
@@ -3917,6 +4017,86 @@ mod tests {
             .touches(),
             vec![Touch::Cell { cell: a1 }]
         );
+    }
+
+    #[test]
+    fn sparse_view_indexes_follow_structural_edits_and_snapshot_restore() {
+        let mut fixture = Fixture::new();
+        let sheet = fixture.sheet;
+        fixture.run(
+            human(),
+            Command::SetValue {
+                sheet,
+                a1: "B2".into(),
+                value: Literal::Number(7.0),
+            },
+        );
+        fixture.run(
+            human(),
+            Command::SetValue {
+                sheet,
+                a1: "A1".into(),
+                value: Literal::Text("label".into()),
+            },
+        );
+        let target = fixture.document.resolve_a1(sheet, "B2").unwrap();
+        fixture.run(
+            human(),
+            Command::AddRows {
+                sheet,
+                count: 3,
+                at: 1,
+                table: None,
+            },
+        );
+        fixture.run(
+            human(),
+            Command::AddColumns {
+                sheet,
+                count: 2,
+                at: 1,
+            },
+        );
+        assert_eq!(fixture.document.project_a1(target).as_deref(), Some("D5"));
+        let addresses = |document: &Document| {
+            document
+                .cells_in_view(sheet)
+                .map(|cell| document.project_a1(cell).unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(addresses(&fixture.document), vec!["A1", "D5"]);
+        fixture.run(
+            human(),
+            Command::SetValue {
+                sheet,
+                a1: "C3".into(),
+                value: Literal::Blank,
+            },
+        );
+        assert_eq!(addresses(&fixture.document), vec!["A1", "C3", "D5"]);
+        fixture.run(
+            human(),
+            Command::ClearCell {
+                sheet,
+                a1: "C3".into(),
+            },
+        );
+        let rows = fixture.document.rows(sheet).unwrap()[1..4].to_vec();
+        let columns = fixture.document.columns(sheet).unwrap()[1..3].to_vec();
+        fixture.run(human(), Command::DeleteRows { sheet, rows });
+        fixture.run(human(), Command::DeleteColumns { sheet, columns });
+        assert_eq!(fixture.document.project_a1(target).as_deref(), Some("B2"));
+        assert_eq!(addresses(&fixture.document), vec!["A1", "B2"]);
+        for document in [
+            Document::from_snapshot(&fixture.document.snapshot()).unwrap(),
+            Document::replay(&fixture.events).unwrap(),
+        ] {
+            assert_eq!(document.digest(), fixture.document.digest());
+            assert_eq!(addresses(&document), vec!["A1", "B2"]);
+            for (column, inferred) in document.inferred_column_types(sheet) {
+                assert_eq!(Some(inferred), document.inferred_column_type(sheet, column));
+            }
+        }
     }
 
     #[test]

@@ -1705,6 +1705,7 @@ impl Service {
                         let rows = document.rows(*sheet).map_or(0, <[_]>::len);
                         let column_ids = document.columns(*sheet).unwrap_or(&[]);
                         let columns = column_ids.len();
+                        let inferred = document.inferred_column_types(*sheet);
                         let column_types = column_ids
                             .iter()
                             .enumerate()
@@ -1714,9 +1715,7 @@ impl Service {
                                 declared: document
                                     .column_type(*sheet, *column)
                                     .expect("listed column has a type"),
-                                inferred: document
-                                    .inferred_column_type(*sheet, *column)
-                                    .expect("listed column can be inferred"),
+                                inferred: inferred[column],
                             })
                             .collect();
                         SheetSummary {
@@ -1762,31 +1761,16 @@ impl Service {
                 let (_, branch) = Self::branch(store, branch.as_deref())?;
                 let document = store.document(branch)?;
                 let sheet = Self::sheet(document, &sheet)?;
-                let rows = document.rows(sheet).unwrap_or(&[]);
-                let columns = document.columns(sheet).unwrap_or(&[]);
-                let mut all = Vec::new();
-                for row in rows {
-                    for column in columns {
-                        let cell = CellRef {
-                            sheet,
-                            row: *row,
-                            column: *column,
-                        };
-                        if document.cell(cell).is_some() {
-                            all.push(cell);
-                        }
-                    }
-                }
-                let total = all.len();
-                let page: Vec<CellReport> = all
-                    .iter()
+                let total = document.cell_count(sheet);
+                let page: Vec<CellReport> = document
+                    .cells_in_view(sheet)
                     .skip(start)
                     .take(limit)
                     .map(|cell| CellReport {
-                        cell: *cell,
-                        a1: document.project_a1(*cell),
-                        value: document.value(*cell),
-                        state: document.cell(*cell).cloned(),
+                        cell,
+                        a1: document.project_a1(cell),
+                        value: document.value(cell),
+                        state: document.cell(cell).cloned(),
                     })
                     .collect();
                 let next = (start + page.len() < total).then_some(start + page.len());
@@ -1848,7 +1832,10 @@ impl Service {
                             cells.push(GridCell {
                                 row: row_start + row_offset,
                                 column: column_start + column_offset,
-                                a1: document.project_a1(cell),
+                                a1: Some(a1(
+                                    (row_start + row_offset) as u32,
+                                    (column_start + column_offset) as u32,
+                                )),
                                 value: document.value(cell),
                                 formula,
                             });
