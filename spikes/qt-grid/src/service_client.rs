@@ -265,15 +265,47 @@ fn fetch_page(
     });
     let response = state.client.call(&request)?;
     state.requests += 1;
+    let page = parse_page(&response, sheet, row_start, column_start);
+    if page.is_err() {
+        // Do not repeat a malformed page request for every visible delegate.
+        state.client.usable = false;
+    }
+    page
+}
+
+fn parse_page(
+    response: &Value,
+    sheet: &str,
+    row_start: usize,
+    column_start: usize,
+) -> Result<CachedPage, String> {
+    if response["kind"] != "grid_page"
+        || response["sheet"].as_str() != Some(sheet)
+        || response["row_start"].as_u64() != Some(row_start as u64)
+        || response["column_start"].as_u64() != Some(column_start as u64)
+    {
+        return Err("service returned a different grid page".into());
+    }
+    let rows = response["rows"].as_u64().filter(|rows| *rows <= PAGE_ROWS as u64)
+        .ok_or("service returned invalid page dimensions")?;
+    let columns = response["columns"].as_u64().filter(|columns| *columns <= PAGE_COLUMNS as u64)
+        .ok_or("service returned invalid page dimensions")?;
+    let entries = response["cells"].as_array().ok_or("service page has no cell list")?;
+    if entries.len() as u64 > rows * columns {
+        return Err("service page contains too many cells".into());
+    }
     let mut cells = BTreeMap::new();
-    for cell in response["cells"].as_array().into_iter().flatten() {
-        let Some(row) = cell["row"].as_u64().map(|value| value as usize) else {
-            continue;
-        };
-        let Some(column) = cell["column"].as_u64().map(|value| value as usize) else {
-            continue;
-        };
-        cells.insert((row, column), parse_cell(cell));
+    for cell in entries {
+        let row = cell["row"].as_u64().ok_or("service cell has no row")?;
+        let column = cell["column"].as_u64().ok_or("service cell has no column")?;
+        if row.checked_sub(row_start as u64).is_none_or(|offset| offset >= rows)
+            || column.checked_sub(column_start as u64).is_none_or(|offset| offset >= columns)
+        {
+            return Err("service cell is outside the requested page".into());
+        }
+        if cells.insert((row as usize, column as usize), parse_cell(cell)?).is_some() {
+            return Err("service page contains a duplicate cell".into());
+        }
     }
     Ok(CachedPage {
         sheet: sheet.to_string(),
@@ -295,33 +327,37 @@ fn parse_sheet(sheet: &Value) -> Result<SheetInfo, String> {
     })
 }
 
-fn parse_cell(cell: &Value) -> GridCell {
+fn parse_cell(cell: &Value) -> Result<GridCell, String> {
     let value = &cell["value"];
-    let value_type = value["type"].as_str().unwrap_or("blank");
+    let value_type = value["type"].as_str().ok_or("service cell has no value type")?;
     let display = match value_type {
         "number" => value["value"]
             .as_f64()
             .map(format_number)
-            .unwrap_or_default(),
-        "text" | "error" => value["value"].as_str().unwrap_or("").to_string(),
+            .ok_or("service cell has an invalid number")?,
+        "text" | "error" => value["value"].as_str().ok_or("service cell has invalid text")?.to_string(),
         "boolean" => match value["value"].as_bool() {
             Some(true) => "TRUE".into(),
             Some(false) => "FALSE".into(),
-            None => String::new(),
+            None => return Err("service cell has an invalid boolean".into()),
         },
-        _ => String::new(),
+        "blank" => String::new(),
+        _ => return Err("service cell has an unknown value type".into()),
     };
+    if cell.get("formula").is_some_and(|formula| !formula.is_null() && !formula.is_string()) {
+        return Err("service cell has an invalid formula".into());
+    }
     let formula = cell["formula"].as_str();
     let input_text = if let Some(formula) = formula {
         formula.to_string()
     } else {
         display.clone()
     };
-    GridCell {
+    Ok(GridCell {
         display,
         input: input_text,
         kind: if formula.is_some() { "formula" } else { value_type }.into(),
-    }
+    })
 }
 
 fn edit_command(sheet: &str, a1: &str, text: &str) -> Value {
@@ -420,13 +456,52 @@ mod tests {
             "formula": "=A1*2"
         });
         assert_eq!(
-            parse_cell(&formula),
+            parse_cell(&formula).unwrap(),
             GridCell { display: "8".into(), input: "=A1*2".into(), kind: "formula".into() }
         );
         let error = json!({
             "value": { "type": "error", "value": "#REF!" }
         });
-        assert_eq!(parse_cell(&error).display, "#REF!");
+        assert_eq!(parse_cell(&error).unwrap().display, "#REF!");
+    }
+
+    #[test]
+    fn grid_pages_reject_malformed_data_instead_of_showing_blanks() {
+        let page = json!({
+            "kind": "grid_page", "sheet": "sheet-id", "row_start": 64,
+            "column_start": 16, "rows": 2, "columns": 2,
+            "cells": [{"row": 64, "column": 16, "value": {"type": "text", "value": "<b>literal</b>"}}]
+        });
+        let parsed = parse_page(&page, "sheet-id", 64, 16).unwrap();
+        assert_eq!(parsed.cells[&(64, 16)].display, "<b>literal</b>");
+        assert_eq!(parsed.cells.len(), 1);
+        for (key, invalid) in [
+            ("kind", json!("document")), ("sheet", json!("other-sheet")),
+            ("row_start", json!(0)), ("column_start", json!(0)),
+            ("rows", json!(65)), ("columns", json!(17)), ("cells", Value::Null),
+        ] {
+            let mut changed = page.clone();
+            changed[key] = invalid;
+            assert!(parse_page(&changed, "sheet-id", 64, 16).is_err(), "{key}");
+        }
+        for invalid_cell in [
+            json!({"row": 63, "column": 16, "value": {"type": "blank"}}),
+            json!({"row": 66, "column": 16, "value": {"type": "blank"}}),
+            json!({"row": 64, "column": 18, "value": {"type": "blank"}}),
+            json!({"row": 64, "value": {"type": "blank"}}),
+            json!({"row": 64, "column": 16, "value": {"type": "number", "value": "bad"}}),
+            json!({"row": 64, "column": 16, "value": {"type": "mystery"}}),
+        ] {
+            let mut changed = page.clone();
+            changed["cells"] = json!([invalid_cell]);
+            assert!(parse_page(&changed, "sheet-id", 64, 16).is_err());
+        }
+        let mut duplicate = page.clone();
+        duplicate["cells"] = json!([page["cells"][0], page["cells"][0]]);
+        assert!(parse_page(&duplicate, "sheet-id", 64, 16).is_err());
+        let mut empty = page;
+        empty["cells"] = json!([]);
+        assert!(parse_page(&empty, "sheet-id", 64, 16).unwrap().cells.is_empty());
     }
 
     #[test]
