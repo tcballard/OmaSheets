@@ -35,7 +35,7 @@ Numeric-looking text retains its apostrophe editing marker.
 Ctrl+Z undoes a single edit, clear or entire paste. Ctrl+Shift+Z or Ctrl+Y redoes
 it. History is local to the open window, limited to 32 edits and 8 MiB, and is
 cleared when the window closes. Undo writes compensating events, retaining the
-document's audit history. Each mutation checks its expected document digest;
+document's audit history. Each mutation checks its expected document revision;
 changes from another window or client cause a refusal until the document is
 reopened. A failed paste or undo leaves history and document state unchanged
 when the service reports a definitive rejection. Uncertain transport outcomes
@@ -53,7 +53,11 @@ local service, exposes its sheets as themed tabs and requests 64-row by
 (8,192 coordinates) stay cached, and the cache is cleared when switching
 sheets. Displayed formula results and editable formula source remain separate,
 and edits append through the same service API used by the CLI. The service never
-receives one request per painted cell.
+receives one request per painted cell. Paint and formula-preview reads load
+missing tiles on a worker connection and display a loading marker meanwhile.
+At most eight reads are outstanding. Completions return through the Qt event
+queue; replies from before an edit or sheet switch are discarded. Explicit
+edit/copy reads and saves retain their ordered validation path.
 
 On Omarchy, the window reads the active normalized palette from
 `~/.config/omarchy/current/theme/colors.toml`. Background, foreground, accent,

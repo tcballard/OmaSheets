@@ -176,7 +176,7 @@ ApplicationWindow {
                     elide: Text.ElideRight
                     text: {
                         backend.revision;
-                        return backend.cellInput(grid.currentRow, grid.currentColumn);
+                        return backend.cellPreview(grid.currentRow, grid.currentColumn);
                     }
                     color: window.textColor
                     font.family: "monospace"
@@ -476,6 +476,10 @@ ApplicationWindow {
                             readonly property int columnOffset: index % grid.visibleColumnCount
                             readonly property int logicalRow: grid.firstVisibleRow + rowOffset
                             readonly property int logicalColumn: grid.firstVisibleColumn + columnOffset
+                            readonly property string valueKind: {
+                                backend.revision;
+                                return backend.cellKind(logicalRow, logicalColumn);
+                            }
                             readonly property bool selectedCell: logicalRow >= grid.selectionRow
                                 && logicalRow < grid.selectionRow + grid.selectionRows
                                 && logicalColumn >= grid.selectionColumn
@@ -492,7 +496,7 @@ ApplicationWindow {
 
                             Accessible.role: Accessible.StaticText
                             Accessible.name: backend.columnLabel(logicalColumn) + (logicalRow + 1)
-                            Accessible.description: "Spreadsheet cell, " + backend.cellKind(logicalRow, logicalColumn)
+                            Accessible.description: "Spreadsheet cell, " + valueKind
                                 + ", value " + valueLabel.text
                             Accessible.focusable: true
                             Accessible.focused: selectedCell && body.activeFocus
@@ -505,14 +509,14 @@ ApplicationWindow {
                                 leftPadding: 7
                                 rightPadding: 7
                                 verticalAlignment: Text.AlignVCenter
-                                horizontalAlignment: backend.cellKind(parent.logicalRow, parent.logicalColumn) === "number"
+                                horizontalAlignment: parent.valueKind === "number"
                                     ? Text.AlignRight : Text.AlignLeft
                                 elide: Text.ElideRight
                                 text: {
                                     backend.revision;
                                     return backend.cellText(parent.logicalRow, parent.logicalColumn);
                                 }
-                                color: backend.cellKind(parent.logicalRow, parent.logicalColumn) === "formula"
+                                color: parent.valueKind === "formula"
                                     ? window.formulaColor
                                     : (parent.logicalColumn % 6 === 5 && text === "Reviewed"
                                         ? window.successColor : window.textColor)
