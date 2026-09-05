@@ -12,19 +12,56 @@ ApplicationWindow {
     minimumWidth: 760
     minimumHeight: 480
     visible: true
-    title: backend.documentName + " — OmaSheets"
+    title: backend.homeMode ? "OmaSheets" : backend.documentName + " — OmaSheets"
     color: palette.window
-    onClosing: close => { close.accepted = grid.commitEdit(); }
+    onClosing: close => { close.accepted = !backend.busy && grid.commitEdit(); }
+
+    WorkbookActions {
+        id: fileActions
+        anchors.fill: parent
+        gridModel: backend
+        blocked: keyboardHelp.visible
+        finishEditing: () => grid.commitEdit()
+    }
+
+    menuBar: MenuBar {
+        Menu {
+            title: "File"
+            MenuItem { action: fileActions.newAction }
+            MenuItem { action: fileActions.openAction }
+            MenuItem { action: fileActions.importAction }
+            MenuItem { action: fileActions.compatibilityAction }
+            MenuSeparator {}
+            MenuItem {
+                text: "Save cell draft"
+                enabled: !backend.homeMode && !backend.busy && fileActions.available
+                onTriggered: grid.commitEdit()
+            }
+            MenuItem { action: fileActions.xlsxAction }
+            MenuItem { action: fileActions.csvAction }
+            MenuItem { action: fileActions.parquetAction }
+            MenuSeparator {}
+            MenuItem { text: "Close window"; onTriggered: window.close() }
+        }
+        Menu {
+            title: "Help"
+            MenuItem {
+                text: "Keyboard help (F1)"
+                enabled: !backend.busy
+                onTriggered: keyboardHelp.open()
+            }
+        }
+    }
 
     Shortcut {
         sequence: StandardKey.Save
-        enabled: !keyboardHelp.visible
+        enabled: fileActions.available && !backend.homeMode
         onActivated: grid.commitEdit()
     }
 
     Shortcut {
         sequence: "F1"
-        enabled: !keyboardHelp.visible
+        enabled: !keyboardHelp.visible && !backend.busy
         onActivated: keyboardHelp.open()
     }
 
@@ -45,7 +82,9 @@ ApplicationWindow {
         }
         onOpened: helpScroll.forceActiveFocus()
         onClosed: {
-            if (editor.visible)
+            if (backend.homeMode)
+                newWorkbookButton.forceActiveFocus();
+            else if (editor.visible)
                 editor.forceActiveFocus();
             else
                 body.forceActiveFocus();
@@ -71,6 +110,11 @@ ApplicationWindow {
 
                 Repeater {
                     model: [
+                        { heading: "Workbook", shortcuts: [
+                            ["Ctrl+N", "Create a native workbook"],
+                            ["Ctrl+O", "Open a native workbook"],
+                            ["File menu", "Import, open Excel / ODS, or export a copy"]
+                        ] },
                         { heading: "Move around", shortcuts: [
                             ["Arrow keys", "Move one cell"],
                             ["Tab / Shift+Tab", "Move right / left"],
@@ -139,7 +183,9 @@ ApplicationWindow {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: backend.documentMode
+                    text: backend.homeMode
+                        ? "Create or open a workbook from the File menu to get started."
+                        : backend.documentMode
                         ? "Native document edits save when committed. Selection clipboard and undo shortcuts apply outside the cell editor."
                         : "Demo grid: edits are not saved. Selection clipboard and undo require a native document."
                     wrapMode: Text.WordWrap
@@ -186,9 +232,79 @@ ApplicationWindow {
     palette.base: panelColor
     palette.text: textColor
     palette.highlight: accentColor
+    palette.button: panelColor
+    palette.buttonText: textColor
+    palette.highlightedText: canvasColor
 
     GridModel {
         id: backend
+    }
+
+    Connections {
+        target: backend
+        function onDocumentGenerationChanged() {
+            grid.currentRow = 0;
+            grid.currentColumn = 0;
+            grid.anchorRow = 0;
+            grid.anchorColumn = 0;
+            body.contentX = 0;
+            body.contentY = 0;
+            body.forceActiveFocus();
+        }
+    }
+
+    ColumnLayout {
+        anchors.centerIn: parent
+        width: Math.min(520, parent.width - 48)
+        spacing: 14
+        visible: backend.homeMode
+        enabled: !backend.busy
+        Label {
+            text: "OMA / SHEETS"
+            color: window.accentColor
+            font.family: "monospace"
+            font.bold: true
+            font.pixelSize: 18
+        }
+        Label {
+            text: "Your next workbook starts here."
+            color: window.textColor
+            font.pixelSize: 25
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+        }
+        Label {
+            text: "Create a workbook or pick up an existing one. Your files and edits stay on this computer."
+            color: window.mutedColor
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+        }
+        RowLayout {
+            Button { id: newWorkbookButton; action: fileActions.newAction; highlighted: true; focus: backend.homeMode }
+            Button { action: fileActions.openAction }
+        }
+        RowLayout {
+            Button { action: fileActions.importAction }
+            Button { action: fileActions.compatibilityAction }
+        }
+        Label {
+            text: "Native workbooks save as you finish each cell edit. Press F1 for the keyboard guide."
+            color: window.mutedColor
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+        }
+    }
+
+    Popup {
+        anchors.centerIn: parent
+        visible: backend.busy
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        contentItem: RowLayout {
+            BusyIndicator { running: backend.busy }
+            Label { text: "Working…" }
+        }
     }
 
     Timer {
@@ -201,6 +317,8 @@ ApplicationWindow {
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
+        visible: !backend.homeMode
+        enabled: !backend.busy
 
         Rectangle {
             Layout.fillWidth: true
@@ -912,5 +1030,8 @@ ApplicationWindow {
         }
     }
 
-    Component.onCompleted: body.forceActiveFocus()
+    Component.onCompleted: {
+        if (backend.homeMode) newWorkbookButton.forceActiveFocus();
+        else body.forceActiveFocus();
+    }
 }

@@ -3,6 +3,8 @@ pub mod qobject {
     unsafe extern "C++" {
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
+        include!("cxx-qt-lib/qurl.h");
+        type QUrl = cxx_qt_lib::QUrl;
         include!("omasheets-grid/src/native_clipboard.h");
         fn write_grid_clipboard(text: &QString, origin: &QString);
         fn grid_clipboard_origin(text: &QString) -> QString;
@@ -16,6 +18,11 @@ pub mod qobject {
         #[qproperty(u64, revision, cxx_name = "revision")]
         #[qproperty(bool, benchmark, cxx_name = "benchmark")]
         #[qproperty(bool, document_mode, cxx_name = "documentMode")]
+        #[qproperty(bool, home_mode, cxx_name = "homeMode")]
+        #[qproperty(bool, busy, cxx_name = "busy")]
+        #[qproperty(QString, document_path, cxx_name = "documentPath")]
+        #[qproperty(QString, operation_message, cxx_name = "operationMessage")]
+        #[qproperty(u64, document_generation, cxx_name = "documentGeneration")]
         #[qproperty(QString, document_name, cxx_name = "documentName")]
         #[qproperty(QString, sheet_name, cxx_name = "sheetName")]
         #[qproperty(i32, sheet_count, cxx_name = "sheetCount")]
@@ -32,6 +39,22 @@ pub mod qobject {
         #[qproperty(QString, theme_blue, cxx_name = "themeBlue")]
         #[qproperty(QString, theme_magenta, cxx_name = "themeMagenta")]
         type GridModel = super::GridModelRust;
+
+        #[qinvokable]
+        #[cxx_name = "openDocument"]
+        fn open_document(self: Pin<&mut Self>, url: &QUrl, create: bool);
+
+        #[qinvokable]
+        #[cxx_name = "importDocument"]
+        fn import_document(self: Pin<&mut Self>, source: &QUrl, output: &QUrl);
+
+        #[qinvokable]
+        #[cxx_name = "exportDocument"]
+        fn export_document(self: Pin<&mut Self>, output: &QUrl, format: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "openCompatibility"]
+        fn open_compatibility(self: Pin<&mut Self>, url: &QUrl);
 
         #[qinvokable]
         #[cxx_name = "cellText"]
@@ -105,7 +128,7 @@ pub mod qobject {
 
 use core::pin::Pin;
 use cxx_qt::{CxxQtType, Threading};
-use cxx_qt_lib::QString;
+use cxx_qt_lib::{QString, QUrl};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -123,6 +146,11 @@ pub struct GridModelRust {
     revision: u64,
     benchmark: bool,
     document_mode: bool,
+    home_mode: bool,
+    busy: bool,
+    document_path: QString,
+    operation_message: QString,
+    document_generation: u64,
     document_name: QString,
     sheet_name: QString,
     sheet_count: i32,
@@ -203,6 +231,13 @@ impl Default for GridModelRust {
             revision: 0,
             benchmark: std::env::var_os("OMASHEETS_GRID_BENCHMARK").is_some(),
             document_mode: requested.is_some(),
+            home_mode: requested.is_none()
+                && std::env::var_os("OMASHEETS_GRID_BENCHMARK").is_none()
+                && !std::env::args_os().any(|arg| arg == "--demo"),
+            busy: false,
+            document_path: requested.as_ref().map(|path| path.to_string_lossy().to_string()).unwrap_or_default().as_str().into(),
+            operation_message: QString::default(),
+            document_generation: 0,
             document_name: document_name.as_str().into(),
             sheet_name: sheet_name.as_str().into(),
             sheet_count,
@@ -228,6 +263,128 @@ impl Default for GridModelRust {
 }
 
 impl qobject::GridModel {
+    fn begin_file_action(mut self: Pin<&mut Self>) -> bool {
+        if self.busy { return false; }
+        self.as_mut().set_operation_message(QString::default());
+        self.as_mut().set_busy(true);
+        true
+    }
+
+    fn load_workbook(mut self: Pin<&mut Self>, path: PathBuf,
+        prepare: impl FnOnce() -> Result<Option<String>, String> + Send + 'static) {
+        if !self.as_mut().begin_file_action() { return; }
+        let thread = self.qt_thread();
+        std::thread::spawn(move || {
+            let result = prepare().and_then(|report| GridDocument::open(&path, None).map(|document| (document, report)));
+            thread.queue(move |mut model| {
+                model.as_mut().set_busy(false);
+                match result {
+                    Ok((document, report)) => {
+                        let sheet = document.current_sheet().expect("opened document has a sheet");
+                        let count = document.sheets.len() as i32;
+                        let name = document.name.clone();
+                        model.as_mut().set_row_count(sheet.rows.min(i32::MAX as usize) as i32);
+                        model.as_mut().set_column_count(sheet.columns.min(i32::MAX as usize) as i32);
+                        model.as_mut().set_sheet_name(sheet.name.as_str().into());
+                        model.as_mut().set_sheet_count(count);
+                        model.as_mut().set_current_sheet(0);
+                        model.as_mut().set_document_name(name.as_str().into());
+                        model.as_mut().set_document_path(path.to_string_lossy().as_ref().into());
+                        model.as_mut().rust_mut().document = Some(document);
+                        model.as_mut().rust_mut().edits.clear();
+                        model.as_mut().set_document_mode(true);
+                        model.as_mut().set_home_mode(false);
+                        model.as_mut().set_source_status("Saved locally · Enter or Ctrl+S commits your cell draft".into());
+                        let generation = *model.document_generation();
+                        model.as_mut().set_document_generation(generation.wrapping_add(1));
+                        let revision = *model.revision();
+                        model.as_mut().set_revision(revision.wrapping_add(1));
+                        if let Some(report) = report { model.as_mut().set_operation_message(report.as_str().into()); }
+                    }
+                    Err(error) => model.as_mut().set_operation_message(error.as_str().into()),
+                }
+            }).ok();
+        });
+    }
+
+    pub fn open_document(mut self: Pin<&mut Self>, url: &QUrl, create: bool) {
+        let path = PathBuf::from(url.to_local_file().unwrap_or_default().to_string());
+        if !path.is_absolute() || !path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("omasheets")) {
+            self.as_mut().set_operation_message("Choose a local .omasheets file.".into());
+            return;
+        }
+        let destination = path.clone();
+        self.load_workbook(path, move || {
+            if create { crate::service_client::create_workbook(&destination)?; }
+            Ok(None)
+        });
+    }
+
+    pub fn import_document(mut self: Pin<&mut Self>, source: &QUrl, output: &QUrl) {
+        let source = PathBuf::from(source.to_local_file().unwrap_or_default().to_string());
+        let output = PathBuf::from(output.to_local_file().unwrap_or_default().to_string());
+        if !source.is_absolute() || !output.is_absolute()
+            || !source.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx"))
+            || !output.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("omasheets")) {
+            self.as_mut().set_operation_message("Choose a local .xlsx source and a new .omasheets destination.".into());
+            return;
+        }
+        let destination = output.clone();
+        self.load_workbook(output, move || {
+            crate::service_client::desktop_call(&serde_json::json!({"kind": "import_xlsx",
+                "source": source, "output": destination, "actor": {"kind": "human", "id": "omasheets-desktop"}}))
+                .map(|manifest| Some(crate::service_client::transfer_summary(&manifest)))
+        });
+    }
+
+    pub fn export_document(mut self: Pin<&mut Self>, output: &QUrl, format: &QString) {
+        let output = PathBuf::from(output.to_local_file().unwrap_or_default().to_string());
+        let format = format.to_string();
+        let Some(document) = self.document.as_ref() else { return; };
+        if !output.is_absolute() || !["xlsx", "csv", "parquet"].contains(&format.as_str()) {
+            self.as_mut().set_operation_message("Choose a local export destination.".into());
+            return;
+        }
+        let request = match document.export_request(&output, &format) {
+            Ok(request) => request,
+            Err(error) => {
+                self.as_mut().set_operation_message(error.as_str().into());
+                return;
+            }
+        };
+        if !self.as_mut().begin_file_action() { return; }
+        let thread = self.qt_thread();
+        std::thread::spawn(move || {
+            let result = crate::service_client::desktop_call(&request).map(|report| crate::service_client::transfer_summary(&report));
+            thread.queue(move |mut model| {
+                model.as_mut().set_busy(false);
+                let message = result.unwrap_or_else(|error| error);
+                model.as_mut().set_operation_message(message.as_str().into());
+            }).ok();
+        });
+    }
+
+    pub fn open_compatibility(mut self: Pin<&mut Self>, url: &QUrl) {
+        let path = PathBuf::from(url.to_local_file().unwrap_or_default().to_string());
+        if !path.is_absolute() { return; }
+        if !self.as_mut().begin_file_action() { return; }
+        let thread = self.qt_thread();
+        std::thread::spawn(move || {
+            let result = std::process::Command::new(std::env::var_os("OMASHEETS_PYTHON").unwrap_or_else(|| "python3".into()))
+                .args(["-m", "omasheets.cli", "launch"]).arg(path)
+                .env_remove("OMASHEETS_DOCUMENT").output();
+            thread.queue(move |mut model| {
+                model.as_mut().set_busy(false);
+                let message = match result {
+                    Ok(output) if output.status.success() => String::new(),
+                    Ok(output) => String::from_utf8_lossy(&output.stderr).chars().take(2000).collect(),
+                    Err(error) => error.to_string(),
+                };
+                model.as_mut().set_operation_message(message.as_str().into());
+            }).ok();
+        });
+    }
+
     fn display_cell(&self, document: &GridDocument, row: i32, column: i32) -> Result<crate::service_client::GridCell, String> {
         let thread = self.qt_thread();
         document.display_cell(row as usize, column as usize, move || {

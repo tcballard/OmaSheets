@@ -169,6 +169,48 @@ impl ServiceClient {
     }
 }
 
+/// File actions use their own connection so a slow transfer cannot desynchronize
+/// the editing connection. Call from a worker, never from the render thread.
+pub(crate) fn desktop_call(request: &Value) -> Result<Value, String> {
+    let mut client = ServiceClient::connect()?;
+    client.writer.set_read_timeout(Some(Duration::from_secs(120)))
+        .map_err(|error| error.to_string())?;
+    client.call(request)
+}
+
+pub(crate) fn create_workbook(path: &Path) -> Result<(), String> {
+    let actor = json!({"kind": "human", "id": "omasheets-desktop"});
+    let name = path.file_stem().and_then(|name| name.to_str()).unwrap_or("Untitled");
+    desktop_call(&json!({"kind": "create", "path": path, "name": name, "actor": actor}))?;
+    // Creation never overwrites a file. Keep a partially created document on
+    // failure: deleting it after a lost reply could destroy confirmed work.
+    let sheet = desktop_call(&json!({"kind": "append", "path": path, "actor": actor,
+        "command": {"command": "add_sheet", "name": "Sheet1"}}))?;
+    let sheet = sheet["operation"]["sheet"].as_str().ok_or("new sheet has no identity")?;
+    desktop_call(&json!({"kind": "append_batch", "path": path, "actor": actor,
+        "commands": [
+            {"command": "add_columns", "sheet": sheet, "count": 26, "at": 0},
+            {"command": "add_rows", "sheet": sheet, "count": 1000, "at": 0, "table": null}
+        ]}))?;
+    Ok(())
+}
+
+pub(crate) fn transfer_summary(manifest: &Value) -> String {
+    let mut lines = vec![format!("File written: {}", manifest["output"].as_str().unwrap_or("selected destination"))];
+    for key in ["formula_cells_preserved", "formula_cells_flattened", "formula_cells_native",
+        "formula_cells_cached_only", "formula_cells_omitted", "error_cells_omitted",
+        "rejected_value_cells_omitted", "skipped_source_sheets", "error_cells_as_null",
+        "potential_formula_injection_cells"] {
+        if let Some(count) = manifest[key].as_u64() {
+            lines.push(format!("{}: {count}", key.replace('_', " ")));
+        }
+    }
+    if let Some(limitations) = manifest["limitations"].as_array() {
+        lines.extend(limitations.iter().filter_map(Value::as_str).map(str::to_owned));
+    }
+    lines.join("\n\n")
+}
+
 struct DocumentState {
     client: ServiceClient,
     path: PathBuf,
@@ -414,6 +456,15 @@ impl GridDocument {
         self.state.lock().map_or(0, |state| state.current_sheet)
     }
 
+    pub(crate) fn export_request(&self, output: &Path, format: &str) -> Result<Value, String> {
+        let state = self.state.lock().map_err(|_| "document state is unavailable")?;
+        let sheet = self.sheets.get(state.current_sheet).ok_or("current sheet is unavailable")?;
+        let mut request = json!({"kind": format!("export_{format}"),
+            "path": state.path, "branch": state.branch, "output": output});
+        if format != "xlsx" { request["sheet"] = sheet.id.clone().into(); }
+        Ok(request)
+    }
+
     pub fn select_sheet(&self, index: usize) -> Result<SheetInfo, String> {
         let sheet = self
             .sheets
@@ -637,6 +688,49 @@ fn column_letters(column: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires the authenticated native service; exercised by Qt CI"]
+    fn desktop_workflow_service_roundtrip() {
+        let directory = std::env::temp_dir().join(format!("omasheets-desktop-{}", std::process::id()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("My workbook.omasheets");
+        create_workbook(&path).unwrap();
+        let document = GridDocument::open(&path, None).unwrap();
+        assert_eq!(document.current_sheet().unwrap().rows, 1000);
+        assert_eq!(document.current_sheet().unwrap().columns, 26);
+        document.set_text(0, 0, "7").unwrap();
+        document.set_text(0, 1, "=A1*3").unwrap();
+        assert_eq!(document.cell(0, 1).unwrap().display, "21");
+        for format in ["csv", "xlsx", "parquet"] {
+            let output = directory.join(format!("copy.{format}"));
+            let request = document.export_request(&output, format).unwrap();
+            let report = desktop_call(&request).unwrap();
+            assert!(transfer_summary(&report).contains("File written:"));
+            assert!(output.metadata().unwrap().len() > 0);
+            let bytes = fs::read(&output).unwrap();
+            assert!(desktop_call(&request).is_err());
+            assert_eq!(fs::read(&output).unwrap(), bytes);
+        }
+        drop(document);
+        desktop_call(&json!({"kind": "close", "path": path})).unwrap();
+        let persisted = fs::read(&path).unwrap();
+        assert!(create_workbook(&path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), persisted);
+        let reopened = GridDocument::open(&path, None).unwrap();
+        assert_eq!(reopened.cell(0, 1).unwrap().input, "=A1*3");
+        assert_eq!(reopened.cell(0, 1).unwrap().display, "21");
+        drop(reopened);
+        desktop_call(&json!({"kind": "close", "path": path})).unwrap();
+        let imported = directory.join("Imported.omasheets");
+        desktop_call(&json!({"kind": "import_xlsx", "source": directory.join("copy.xlsx"),
+            "output": imported, "actor": {"kind": "human", "id": "ci"}})).unwrap();
+        let document = GridDocument::open(&imported, None).unwrap();
+        assert_eq!(document.cell(0, 1).unwrap().display, "21");
+        drop(document);
+        desktop_call(&json!({"kind": "close", "path": imported})).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn rendering_returns_while_io_is_blocked_and_old_generations_cannot_fill_cache() {

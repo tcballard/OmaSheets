@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import fcntl
 import hashlib
 import json
 import os
@@ -19,6 +20,7 @@ from .errors import ConflictError
 from .integration import IntegrationPaths, install as install_integration, uninstall as uninstall_integration
 from .native_bundle import download_native_bundle, install_native_bundle
 from .store import read_json, write_json_atomic
+from .transactions import exclusive_lock
 from .user_service import UserServicePaths, uninstall as uninstall_user_service
 
 PLUGIN_NAME = "omasheets"
@@ -169,6 +171,7 @@ def _launcher(app: Path) -> bytes:
         "export PYTHONDONTWRITEBYTECODE=1\n"
         f"export PYTHONPATH={shlex.quote(str(module_root))}\n"
         f"export PATH={shlex.quote(str(app / 'bin'))}:\"$PATH\"\n"
+        "export OMASHEETS_PYTHON=/usr/bin/python\n"
         "exec /usr/bin/python -m omasheets.cli \"$@\"\n"
     ).encode()
 
@@ -224,7 +227,14 @@ def install(
     bundle_path: Path | None = None,
 ) -> dict[str, Any]:
     paths = paths or InstallPaths.discover()
+    with exclusive_lock(paths.journal.parent / ".installation.lock"):
+        return _install_locked(source_root, paths, check_dependencies=check_dependencies, bundle_path=bundle_path)
+
+
+def _install_locked(source_root: Path, paths: InstallPaths, *, check_dependencies: bool, bundle_path: Path | None) -> dict[str, Any]:
     source_root = source_root.resolve(strict=True)
+    identity = source_identity(source_root)
+    previous_journal = None
     if paths.journal.is_file():
         journal = read_json(paths.journal)
         intact = paths.launcher.is_file() and _sha_file(paths.launcher) == journal["launcher_sha256"]
@@ -241,22 +251,29 @@ def install(
             marketplace = json.loads(paths.codex_marketplace.read_text())
             intact = PLUGIN_ENTRY in marketplace.get("plugins", [])
         intact = intact and paths.integration.desktop.is_file() and paths.integration.journal.is_file()
-        if intact:
+        if not intact:
+            raise ConflictError("installed OmaSheets files changed; resolve them before updating")
+        if journal["source"] == identity:
             return {"installed": True, "changed": False, "source": journal["source"]}
-        raise ConflictError("installed OmaSheets files changed; uninstall or resolve them before reinstalling")
+        previous_journal = journal
     report = dependency_report()
     if check_dependencies and not report["ready"]:
         missing = ", ".join(check["name"] for check in report["checks"] if not check["ok"])
         raise RuntimeError(f"missing dependencies: {missing}\nInstall them explicitly with: {report['install_command']}")
     for target in (paths.app, paths.launcher, paths.service_launcher, paths.codex_plugin):
-        if target.exists():
+        if target.exists() and previous_journal is None:
             raise ConflictError(f"refusing to overwrite unowned installation target: {target}")
-
-    identity = source_identity(source_root)
     paths.app.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=".app.", dir=paths.app.parent))
     marketplace_before = paths.codex_marketplace.read_bytes() if paths.codex_marketplace.is_file() else None
     marketplace_after = _marketplace_after(marketplace_before)
+    backups: dict[Path, Path] = {}
+    published: set[Path] = set()
+    launcher_before = {
+        path: path.read_bytes() if path.is_file() else None
+        for path in (paths.launcher, paths.service_launcher)
+    }
+    lease = None
     try:
         shutil.copytree(
             source_root / "src/omasheets", stage / "lib/omasheets",
@@ -278,10 +295,29 @@ def install(
             "native_bundle": native_manifest,
         }
         _write_bytes(stage / "provenance.json", (json.dumps(provenance, indent=2, sort_keys=True) + "\n").encode())
+        if previous_journal is not None:
+            runtime = os.environ.get("XDG_RUNTIME_DIR")
+            if runtime and (Path(runtime) / "omasheets").is_dir():
+                lease = (Path(runtime) / "omasheets/grid-clients.lock").open("a+b")
+                os.chmod(lease.name, 0o600)
+                try:
+                    fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise ConflictError("Close OmaSheets windows before updating; your workbooks are preserved") from None
+                from .native_grid import _service_socket_ready
+                if _service_socket_ready(Path(runtime) / "omasheets/native.sock"):
+                    raise ConflictError("The native service is still running. Close OmaSheets, stop any optional user service, then retry the update")
+            for target in (paths.app, paths.codex_plugin):
+                backup = Path(tempfile.mkdtemp(prefix=f".{target.name}.previous.", dir=target.parent))
+                backup.rmdir()
+                os.replace(target, backup)
+                backups[target] = backup
         os.replace(stage, paths.app)
+        published.add(paths.app)
         _write_bytes(paths.launcher, _launcher(paths.app), 0o755)
         _write_bytes(paths.service_launcher, _service_launcher(paths.app), 0o755)
         paths.codex_plugin.parent.mkdir(parents=True, exist_ok=True)
+        published.add(paths.codex_plugin)
         shutil.copytree(source_root / "plugins/omasheets", paths.codex_plugin)
         mcp_path = paths.codex_plugin / ".mcp.json"
         mcp = json.loads(mcp_path.read_text())
@@ -295,35 +331,48 @@ def install(
             "launcher_sha256": _sha_file(paths.launcher),
             "service_launcher_sha256": _sha_file(paths.service_launcher),
             "codex_plugin_sha256": _tree_sha(paths.codex_plugin),
-            "marketplace_before": base64.b64encode(marketplace_before).decode() if marketplace_before is not None else None,
+            "marketplace_before": previous_journal["marketplace_before"] if previous_journal is not None else (
+                base64.b64encode(marketplace_before).decode() if marketplace_before is not None else None
+            ),
             "marketplace_after_sha256": _sha_bytes(marketplace_after),
         }
         write_json_atomic(paths.journal, journal)
+        for backup in backups.values():
+            shutil.rmtree(backup, ignore_errors=True)
         return {
             "installed": True,
             "changed": True,
+            "updated": previous_journal is not None,
             "source": identity,
             "launcher": str(paths.launcher),
             "service_launcher": str(paths.service_launcher),
         }
     except Exception:
-        if stage.exists():
-            shutil.rmtree(stage)
-        for target in (paths.app, paths.codex_plugin):
+        for target in published:
             if target.exists():
                 shutil.rmtree(target)
-        for launcher in (paths.launcher, paths.service_launcher):
-            if launcher.exists():
-                launcher.unlink()
+        for target, backup in backups.items():
+            os.replace(backup, target)
+        for launcher, before in launcher_before.items():
+            if before is None:
+                launcher.unlink(missing_ok=True)
+            else:
+                _write_bytes(launcher, before, 0o755)
         if marketplace_before is None:
             paths.codex_marketplace.unlink(missing_ok=True)
         else:
             _write_bytes(paths.codex_marketplace, marketplace_before)
-        try:
-            uninstall_integration(paths.integration)
-        except Exception:
-            pass
+        if previous_journal is None:
+            try:
+                uninstall_integration(paths.integration)
+            except Exception:
+                pass
         raise
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage)
+        if lease is not None:
+            lease.close()
 
 
 def _remove_marketplace_entry(path: Path, journal: dict[str, Any]) -> None:

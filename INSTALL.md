@@ -114,14 +114,31 @@ omasheets --version
 window, native Qt grid, desktop integration and the Omarchy plugin. Restart or refresh Codex after the
 first installation so it discovers the new personal plugin and MCP server.
 
-Open or select a workbook, then choose **Ask Agent** from either the native
-window header or Omarchy bar. OmaSheets passes a fixed path-free prompt to
+Launch **OmaSheets** from the app menu, or run `omasheets`. Use **New workbook**
+(Ctrl+N) and choose a `.omasheets` filename. Type a value or formula, then press
+Enter or Ctrl+S to save the cell. Close and reopen with **Open workbook**
+(Ctrl+O) to continue. F1 shows the keyboard guide. The File menu also provides
+Excel import and XLSX, CSV or Parquet export, with a report of conversion limits.
+
+Open or select a compatibility workbook, then choose **Ask Agent** from either the
+compatibility window header or Omarchy bar. OmaSheets passes a fixed path-free prompt to
 `omarchy agent prompt`, which launches the default agent selected in Omarchy.
 The Codex plugin supplies native MCP discovery when Codex is that default; other
 agents can use their own MCP configuration or the prompt's provider-neutral
 `omasheets agent-session` JSON command bridge. If the Omarchy launcher is not
 on `PATH`, the command reports that the agent entry point is unavailable while
 spreadsheet editing remains functional.
+
+## Updating a development installation
+
+Close OmaSheets windows first. Check out the revision matching the new native
+bundle, then repeat the install command with `OMASHEETS_NATIVE_BUNDLE_PATH` set
+to that bundle. The installer verifies the replacement before swapping it in.
+An intact installation of the same revision is unchanged; a different revision
+updates the app and launchers. Failed updates restore the previous installation.
+User workbooks and unrelated marketplace entries are preserved. Modified app
+files are reported as conflicts. If you explicitly enabled the optional native
+user service, stop it before updating and restart it afterwards.
 
 ## Removal
 
