@@ -30,6 +30,7 @@ PLUGIN_ENTRY = {
 }
 ARCH_PACKAGES = (
     "gtk3", "libreoffice-fresh", "bubblewrap",
+    "qt6-base", "qt6-declarative", "qt6-wayland",
 )
 
 
@@ -64,6 +65,7 @@ class InstallPaths:
                 data / "applications/io.github.tcballard.OmaSheets.desktop",
                 config / "mimeapps.list",
                 state / "omasheets/desktop-integration.json",
+                data / "mime/packages/io.github.tcballard.OmaSheets.xml",
             ),
             user_service=UserServicePaths(
                 data / "omasheets/app/bin/omasheets-service",
@@ -132,6 +134,12 @@ def dependency_report() -> dict[str, Any]:
             "/usr/lib/libreoffice/program/liblibreofficekitgtk.so",
         )),
         ("Bubblewrap", _first_existing("/usr/bin/bwrap")),
+        ("Qt Quick", _first_existing("/usr/lib/libQt6Quick.so", "/usr/lib/libQt6Quick.so.6")),
+        ("Qt Wayland", _first_existing(
+            "/usr/lib/qt6/plugins/platforms/libqwayland.so",
+            "/usr/lib/qt6/plugins/platforms/libqwayland-egl.so",
+            "/usr/lib/qt6/plugins/platforms/libqwayland-generic.so",
+        )),
         ("system Python", _first_existing("/usr/bin/python")),
         ("Python UNO", _python_uno()),
     ]

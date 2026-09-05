@@ -108,6 +108,18 @@ def main(argv: list[str] | None = None) -> int:
             env=rust_environment,
             check=True,
         )
+        grid_target = build / "qt-grid-target"
+        grid_environment = rust_environment.copy()
+        grid_environment["CARGO_TARGET_DIR"] = str(grid_target)
+        subprocess.run(
+            [
+                "cargo", "build", "--locked", "--release", "--manifest-path",
+                str(ROOT / "spikes/qt-grid/Cargo.toml"),
+            ],
+            cwd=ROOT,
+            env=grid_environment,
+            check=True,
+        )
         subprocess.run([
             "cmake", "-S", str(ROOT / "native/libreofficekit"), "-B", str(build),
             "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={stage}",
@@ -117,6 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.run(["cmake", "--build", str(build), "--parallel", "2"], check=True)
         subprocess.run(["cmake", "--install", str(build)], check=True)
         shutil.copy2(rust_target / "release/omasheets-service", stage / "bin/omasheets-service")
+        shutil.copy2(grid_target / "release/omasheets-grid", stage / "bin/omasheets-grid")
         files = {f"bin/{name}": sha256(stage / "bin" / name) for name in NATIVE_EXECUTABLES}
         manifest = {
             "schema": 1,
@@ -126,6 +139,11 @@ def main(argv: list[str] | None = None) -> int:
             "source": identity,
             "build_contract": "native/libreofficekit/CMakeLists.txt",
             "rust_build_contract": ["Cargo.lock", "crates/omasheets-service/Cargo.toml"],
+            "qt_build_contract": [
+                "spikes/qt-grid/Cargo.lock",
+                "spikes/qt-grid/Cargo.toml",
+                "spikes/qt-grid/build.rs",
+            ],
             "files": files,
         }
         if build_inputs is not None:

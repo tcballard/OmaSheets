@@ -11,7 +11,10 @@ from unittest.mock import patch
 
 from omasheets import __version__
 from omasheets.errors import ConflictError
-from omasheets.installation import ARCH_PACKAGES, InstallPaths, PLUGIN_ENTRY, install, source_identity, uninstall
+from omasheets.installation import (
+    ARCH_PACKAGES, InstallPaths, PLUGIN_ENTRY, dependency_report, install,
+    source_identity, uninstall,
+)
 from omasheets.integration import DESKTOP_ID, IntegrationPaths
 from omasheets.native_bundle import NATIVE_EXECUTABLES, normalized_architecture, platform_id
 from omasheets.user_service import UserServicePaths
@@ -36,6 +39,7 @@ class InstallationTests(unittest.TestCase):
                 root / "data/applications" / DESKTOP_ID,
                 root / "config/mimeapps.list",
                 root / "state/omasheets/desktop-integration.json",
+                root / "data/mime/packages/io.github.tcballard.OmaSheets.xml",
             ),
             user_service=UserServicePaths(
                 root / "data/omasheets/app/bin/omasheets-service",
@@ -81,6 +85,7 @@ class InstallationTests(unittest.TestCase):
         self.assertTrue(self.paths.service_launcher.is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-window").is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-service").is_file())
+        self.assertTrue((self.paths.app / "bin/omasheets-grid").is_file())
         mcp = json.loads((self.paths.codex_plugin / ".mcp.json").read_text())
         self.assertEqual(mcp["mcpServers"]["omasheets"]["command"], str(self.paths.launcher))
         marketplace = json.loads(self.paths.codex_marketplace.read_text())
@@ -122,9 +127,29 @@ class InstallationTests(unittest.TestCase):
         download.assert_not_called()
 
     def test_user_dependencies_are_runtime_only(self):
-        self.assertEqual(ARCH_PACKAGES, ("gtk3", "libreoffice-fresh", "bubblewrap"))
+        self.assertEqual(ARCH_PACKAGES, (
+            "gtk3", "libreoffice-fresh", "bubblewrap",
+            "qt6-base", "qt6-declarative", "qt6-wayland",
+        ))
         for build_tool in ("gcc", "make", "cmake", "pkgconf", "libreoffice-fresh-sdk"):
             self.assertNotIn(build_tool, ARCH_PACKAGES)
+
+    @patch("omasheets.installation._python_uno", return_value="importable")
+    @patch("omasheets.installation._first_existing")
+    def test_current_arch_qt_wayland_plugin_is_recognized(self, first_existing, _uno):
+        present = {
+            "/usr/lib/libgtk-3.so", "/usr/bin/soffice",
+            "/usr/lib/libreofficekitgtk.so", "/usr/bin/bwrap",
+            "/usr/lib/libQt6Quick.so", "/usr/lib/qt6/plugins/platforms/libqwayland.so",
+            "/usr/bin/python",
+        }
+        first_existing.side_effect = lambda *values: next(
+            (value for value in values if value in present), None,
+        )
+        report = dependency_report()
+        wayland = next(check for check in report["checks"] if check["name"] == "Qt Wayland")
+        self.assertTrue(wayland["ok"])
+        self.assertEqual(wayland["detail"], "/usr/lib/qt6/plugins/platforms/libqwayland.so")
 
     def test_uninstall_preserves_a_modified_owned_file(self):
         install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)

@@ -1,6 +1,6 @@
 [package]
-name = "omasheets-qt-grid-spike"
-version = "0.0.0"
+name = "omasheets-grid"
+version = "0.0.2"
 edition = "2024"
 license = "MIT"
 publish = false

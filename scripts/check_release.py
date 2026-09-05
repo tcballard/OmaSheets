@@ -85,6 +85,8 @@ def main(argv: list[str] | None = None) -> int:
         "scripts/check_native_service_install.py",
         "scripts/verify_release_signature.py", "docs/RELEASE.md",
         "native/libreofficekit/CMakeLists.txt", "plugins/omasheets/.codex-plugin/plugin.json",
+        "spikes/qt-grid/Cargo.toml", "spikes/qt-grid/Cargo.lock",
+        "src/omasheets/native_grid.py",
     ):
         assert (ROOT / required).is_file(), f"missing release document: {required}"
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
@@ -100,6 +102,9 @@ def main(argv: list[str] | None = None) -> int:
     assert "OMASHEETS_NATIVE_BUNDLE_PATH" in install_job
     assert "Exercise the installed agentic workbook loop" in workflow
     assert "Exercise the installed native service workflow" in workflow
+    assert "Open a native document through the installed production grid" in workflow
+    assert '"omasheets-grid"' in (ROOT / "src/omasheets/native_bundle.py").read_text()
+    assert "qt6-base qt6-declarative qt6-wayland" in workflow
     assert '"agent-session", "call", "query_workbook"' in workflow
     assert "omasheets://session" in (ROOT / "README.md").read_text()
     assert "Ask Agent" in (ROOT / "README.md").read_text()

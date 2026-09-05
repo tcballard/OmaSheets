@@ -25,9 +25,14 @@ def check_static_contract() -> None:
     service_client = (ROOT / "spikes/qt-grid/src/service_client.rs").read_text()
     theme = (ROOT / "spikes/qt-grid/src/theme.rs").read_text()
     service = (ROOT / "crates/omasheets-service/src/lib.rs").read_text()
+    bundle = (ROOT / "scripts/build_native_bundle.py").read_text()
+    native_bundle = (ROOT / "src/omasheets/native_bundle.py").read_text()
 
-    require('"spikes/qt-grid"' in workspace, "Qt spike must remain outside the release workspace")
-    require((ROOT / "spikes/qt-grid/Cargo.lock").is_file(), "isolated Qt spike needs a lockfile")
+    require('"spikes/qt-grid"' in workspace, "Qt grid must retain its isolated dependency graph")
+    require((ROOT / "spikes/qt-grid/Cargo.lock").is_file(), "Qt grid needs its own lockfile")
+    require('name = "omasheets-grid"' in manifest, "production grid binary name is missing")
+    require('"omasheets-grid"' in native_bundle, "production bundle must allow-list the grid")
+    require('grid_target / "release/omasheets-grid"' in bundle, "release builder must stage the grid")
     require('cxx = "=1.0.199"' in manifest, "CXX runtime must match the bridge generator ABI")
     require('cxx-qt = "=0.10.0"' in manifest, "CXX-Qt must be pinned exactly")
     require('cxx-qt-build = { version = "=0.10.0"' in manifest, "CXX-Qt build must be pinned exactly")
@@ -60,7 +65,7 @@ def check_static_contract() -> None:
     for key in ("Key_Left", "Key_Right", "Key_Up", "Key_Down", "Key_PageUp", "Key_PageDown"):
         require(key in qml, f"keyboard contract missing {key}")
     for rejected in ("Electron", "React", "Glide Data Grid"):
-        require(rejected not in qml + manifest, f"isolated Qt spike unexpectedly contains {rejected}")
+        require(rejected not in qml + manifest, f"Qt grid unexpectedly contains {rejected}")
 
 
 def read_report(path: Path) -> dict[str, object]:
