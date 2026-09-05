@@ -1,10 +1,11 @@
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, mpsc};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 const PAGE_ROWS: usize = 64;
@@ -25,6 +26,76 @@ struct CachedPage {
     row_start: usize,
     column_start: usize,
     cells: BTreeMap<(usize, usize), GridCell>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct PageKey { sheet: String, row: usize, column: usize }
+
+struct PageReply {
+    generation: u64,
+    key: PageKey,
+    page: Result<CachedPage, String>,
+}
+
+struct PageLoader {
+    requests: mpsc::SyncSender<(u64, PageKey)>,
+    replies: mpsc::Receiver<PageReply>,
+    generation: Arc<AtomicU64>,
+    pending: BTreeSet<PageKey>,
+    error: Option<String>,
+}
+
+impl PageLoader {
+    fn spawn(
+        path: PathBuf, branch: Option<String>,
+        connect: impl FnOnce() -> Result<ServiceClient, String> + Send + 'static,
+        notify: impl Fn() + Send + 'static,
+    ) -> Self {
+        let (requests, work) = mpsc::sync_channel::<(u64, PageKey)>(MAX_CACHED_PAGES);
+        let (answers, replies) = mpsc::sync_channel(MAX_CACHED_PAGES);
+        let generation = Arc::new(AtomicU64::new(0));
+        let current = Arc::clone(&generation);
+        std::thread::spawn(move || {
+            let mut client = connect();
+            while let Ok((generation, key)) = work.recv() {
+                if generation != current.load(Ordering::Acquire) {
+                    // Wake the viewport when cancelled work frees queue space.
+                    if answers.send(PageReply {generation, key, page: Err("obsolete page".into())}).is_err() { break; }
+                    notify();
+                    continue;
+                }
+                let page = match &mut client {
+                    Ok(client) => client.call(&page_request(&path, &branch, &key.sheet, key.row, key.column))
+                        .and_then(|response| {
+                            let page = parse_page(&response, &key.sheet, key.row, key.column);
+                            if page.is_err() { client.usable = false; }
+                            page
+                        }),
+                    Err(error) => Err(error.clone()),
+                };
+                if answers.send(PageReply {generation, key, page}).is_err() { break; }
+                notify();
+            }
+        });
+        Self {requests, replies, generation, pending: BTreeSet::new(), error: None}
+    }
+
+    fn request(&mut self, key: PageKey) -> Result<(), String> {
+        if let Some(error) = &self.error { return Err(error.clone()); }
+        if self.pending.len() < MAX_CACHED_PAGES && !self.pending.contains(&key) {
+            match self.requests.try_send((self.generation.load(Ordering::Acquire), key.clone())) {
+                Ok(()) => { self.pending.insert(key); }
+                Err(mpsc::TrySendError::Full(_)) => {},
+                Err(mpsc::TrySendError::Disconnected(_)) => return Err("page loader stopped; reopen the document".into()),
+            }
+        }
+        Ok(())
+    }
+
+    fn invalidate(&mut self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        self.pending.clear();
+    }
 }
 
 struct ServiceClient {
@@ -105,6 +176,7 @@ struct DocumentState {
     current_sheet: usize,
     actor: String,
     pages: VecDeque<CachedPage>,
+    loader: Option<PageLoader>,
     requests: u64,
     revision: String,
     undo: Vec<EditRecord>,
@@ -178,6 +250,7 @@ impl GridDocument {
                 current_sheet: 0,
                 actor,
                 pages: VecDeque::new(),
+                loader: None,
                 requests: 2,
                 revision: summary["revision"].as_str().ok_or("document has no revision")?.to_string(),
                 undo: Vec::new(),
@@ -215,6 +288,57 @@ impl GridDocument {
             state.pages.pop_front();
         }
         Ok(cell)
+    }
+
+    /// Rendering never waits for service I/O. Explicit edit/copy reads still use
+    /// `cell`, preserving their validation and save ordering.
+    pub fn display_cell(&self, row: usize, column: usize, notify: impl Fn() + Send + 'static) -> Result<GridCell, String> {
+        let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
+        let sheet = self.sheets.get(state.current_sheet).ok_or("the current sheet is unavailable")?;
+        if row >= sheet.rows || column >= sheet.columns { return Ok(GridCell::default()); }
+        let key = PageKey {sheet: sheet.id.clone(), row: row / PAGE_ROWS * PAGE_ROWS, column: column / PAGE_COLUMNS * PAGE_COLUMNS};
+        if let Some(position) = state.pages.iter().position(|p| p.sheet == key.sheet && p.row_start == key.row && p.column_start == key.column) {
+            let page = state.pages.remove(position).expect("found");
+            let cell = page.cells.get(&(row, column)).cloned().unwrap_or_default();
+            state.pages.push_back(page);
+            return Ok(cell);
+        }
+        if state.loader.is_none() {
+            state.loader = Some(PageLoader::spawn(state.path.clone(), state.branch.clone(), ServiceClient::connect, notify));
+        }
+        state.loader.as_mut().expect("created").request(key)?;
+        Ok(GridCell {display: "…".into(), input: String::new(), kind: "loading".into()})
+    }
+
+    /// Called on the Qt thread after a background reply; stale generations are
+    /// discarded and never overwrite a newer edit or a different sheet's cache.
+    pub fn accept_pages(&self) -> Result<bool, String> {
+        let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
+        let mut accepted = Vec::new();
+        let mut changed = false;
+        let mut requests = 0;
+        let mut error = None;
+        if let Some(loader) = &mut state.loader {
+            while let Ok(reply) = loader.replies.try_recv() {
+                requests += 1;
+                // Even an obsolete reply frees a queue slot for the viewport.
+                changed = true;
+                if reply.generation != loader.generation.load(Ordering::Acquire) { continue; }
+                loader.pending.remove(&reply.key);
+                match reply.page {
+                    Ok(page) => accepted.push(page),
+                    Err(message) => { loader.error = Some(message.clone()); error = Some(message); }
+                }
+            }
+        }
+        state.requests += requests;
+        for page in accepted {
+            state.pages.retain(|old| !(old.sheet == page.sheet && old.row_start == page.row_start && old.column_start == page.column_start));
+            state.pages.push_back(page);
+        }
+        while state.pages.len() > MAX_CACHED_PAGES { state.pages.pop_front(); }
+        if let Some(error) = error { return Err(error); }
+        Ok(changed)
     }
 
     pub fn set_text(&self, row: usize, column: usize, text: &str) -> Result<(), String> {
@@ -297,6 +421,7 @@ impl GridDocument {
         if state.current_sheet != index {
             state.current_sheet = index;
             state.pages.clear();
+            if let Some(loader) = &mut state.loader { loader.invalidate(); }
         }
         Ok(sheet)
     }
@@ -325,6 +450,7 @@ fn apply_commands(state: &mut DocumentState, commands: &[Value]) -> Result<(), S
     state.revision = response["revision"].as_str().unwrap().to_string();
     state.requests += 1;
     state.pages.clear();
+    if let Some(loader) = &mut state.loader { loader.invalidate(); }
     Ok(())
 }
 
@@ -334,16 +460,7 @@ fn fetch_page(
     row_start: usize,
     column_start: usize,
 ) -> Result<CachedPage, String> {
-    let request = json!({
-        "kind": "grid_page",
-        "path": &state.path,
-        "branch": state.branch.as_deref(),
-        "sheet": sheet,
-        "row_start": row_start,
-        "column_start": column_start,
-        "rows": PAGE_ROWS,
-        "columns": PAGE_COLUMNS,
-    });
+    let request = page_request(&state.path, &state.branch, sheet, row_start, column_start);
     let response = state.client.call(&request)?;
     state.requests += 1;
     let page = parse_page(&response, sheet, row_start, column_start);
@@ -352,6 +469,11 @@ fn fetch_page(
         state.client.usable = false;
     }
     page
+}
+
+fn page_request(path: &Path, branch: &Option<String>, sheet: &str, row: usize, column: usize) -> Value {
+    json!({"kind":"grid_page", "path":path, "branch":branch, "sheet":sheet,
+        "row_start":row, "column_start":column, "rows":PAGE_ROWS, "columns":PAGE_COLUMNS})
 }
 
 fn parse_page(
@@ -514,6 +636,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rendering_returns_while_io_is_blocked_and_old_generations_cannot_fill_cache() {
+        let (client, edit_peer) = connected_pair();
+        let (read_client, read_peer) = connected_pair();
+        read_client.reader.get_ref().set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let (seen, started) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        let (notify, notified) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let mut reader = BufReader::new(read_peer.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            seen.send(()).unwrap();
+            resume.recv().unwrap();
+            writeln!(&read_peer, "{}", json!({"ok":true,"response":{
+                "kind":"grid_page","sheet":"sheet-id","row_start":0,"column_start":0,
+                "rows":64,"columns":16,"cells":[{"row":0,"column":0,"value":{"type":"number","value":99}}]
+            }})).unwrap();
+            line.clear();
+            reader.read_line(&mut line).unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["row_start"], 0);
+            writeln!(&read_peer, "{}", json!({"ok":true,"response":{
+                "kind":"grid_page","sheet":"sheet-id","row_start":0,"column_start":0,
+                "rows":64,"columns":16,"cells":[{"row":0,"column":0,"value":{"type":"number","value":42}}]
+            }})).unwrap();
+        });
+        let loader = PageLoader::spawn(PathBuf::from("test.omasheets"), None, move || Ok(read_client), move || { let _ = notify.send(()); });
+        let document = GridDocument {
+            name:"Test".into(), sheets:vec![SheetInfo {id:"sheet-id".into(),name:"Sheet".into(),rows:4096,columns:16}],
+            state: Mutex::new(DocumentState {client,path:PathBuf::from("test.omasheets"),branch:None,
+                current_sheet:0,actor:"test".into(),pages:VecDeque::new(),loader:Some(loader),requests:0,
+                revision:"r0".into(),undo:Vec::new(),redo:Vec::new()}),
+        };
+        assert_eq!(document.display_cell(0,0,||{}).unwrap().kind, "loading");
+        started.recv_timeout(Duration::from_secs(5)).unwrap();
+        // The peer cannot reply until this thread releases it. All paint reads
+        // must return anyway, deduplicating and bounding outstanding requests.
+        for row in (0..4096).step_by(64) { assert_eq!(document.display_cell(row,0,||{}).unwrap().kind, "loading"); }
+        {
+            let mut state = document.state.lock().unwrap();
+            let loader = state.loader.as_mut().unwrap();
+            assert_eq!(loader.pending.len(), MAX_CACHED_PAGES);
+            loader.invalidate();
+        }
+        release.send(()).unwrap();
+        notified.recv_timeout(Duration::from_secs(5)).unwrap();
+        document.accept_pages().unwrap();
+        assert!(document.state.lock().unwrap().pages.is_empty());
+        loop {
+            let cell = document.display_cell(0,0,||{}).unwrap();
+            if cell.kind != "loading" { assert_eq!(cell.display, "42"); break; }
+            notified.recv_timeout(Duration::from_secs(5)).unwrap();
+            document.accept_pages().unwrap();
+        }
+        server.join().unwrap();
+        drop(edit_peer);
+    }
+
+    #[test]
     fn bulk_edit_undo_redo_and_failed_undo_preserve_history() {
         let (client, peer) = connected_pair();
         // This integration test uses a real local socket, not a timing timeout.
@@ -559,7 +739,7 @@ mod tests {
             name: "Test".into(),
             sheets: vec![SheetInfo {id:"sheet-id".into(),name:"Sheet".into(),rows:4,columns:4}],
             state: Mutex::new(DocumentState {client,path:PathBuf::from("test.omasheets"),branch:None,
-                current_sheet:0,actor:"test".into(),pages:VecDeque::new(),requests:0,
+                current_sheet:0,actor:"test".into(),pages:VecDeque::new(),loader:None,requests:0,
                 revision:"d0".into(),undo:Vec::new(),redo:Vec::new()}),
         };
         document.set_matrix(0,0,&[vec!["1".into(),"2".into()],vec!["3".into(),"4".into()]]).unwrap();
@@ -587,7 +767,7 @@ mod tests {
         drop(GridDocument {
             name: "Test".into(), sheets: Vec::new(),
             state: Mutex::new(DocumentState {client,path:PathBuf::from("test.omasheets"),branch:Some("draft".into()),
-                current_sheet:0,actor:"test".into(),pages:VecDeque::new(),requests:0,
+                current_sheet:0,actor:"test".into(),pages:VecDeque::new(),loader:None,requests:0,
                 revision:"r0".into(),undo:Vec::new(),redo:Vec::new()}),
         });
         server.join().unwrap();

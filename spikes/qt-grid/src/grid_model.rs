@@ -42,6 +42,10 @@ pub mod qobject {
         fn cell_input(&self, row: i32, column: i32) -> QString;
 
         #[qinvokable]
+        #[cxx_name = "cellPreview"]
+        fn cell_preview(&self, row: i32, column: i32) -> QString;
+
+        #[qinvokable]
         #[cxx_name = "cellKind"]
         fn cell_kind(&self, row: i32, column: i32) -> QString;
 
@@ -96,10 +100,11 @@ pub mod qobject {
             visible_delegates: i32,
         );
     }
+    impl cxx_qt::Threading for GridModel {}
 }
 
 use core::pin::Pin;
-use cxx_qt::CxxQtType;
+use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -223,6 +228,37 @@ impl Default for GridModelRust {
 }
 
 impl qobject::GridModel {
+    fn display_cell(&self, document: &GridDocument, row: i32, column: i32) -> Result<crate::service_client::GridCell, String> {
+        let thread = self.qt_thread();
+        document.display_cell(row as usize, column as usize, move || {
+            thread.queue(|mut model| {
+                let result = model.document.as_ref().map(GridDocument::accept_pages);
+                match result {
+                    Some(Ok(true)) => {
+                        let revision = *model.revision();
+                        model.as_mut().set_revision(revision.wrapping_add(1));
+                    }
+                    Some(Err(error)) => {
+                        model.as_mut().set_source_status(error.as_str().into());
+                        let revision = *model.revision();
+                        model.as_mut().set_revision(revision.wrapping_add(1));
+                    }
+                    _ => {},
+                }
+            }).ok();
+        })
+    }
+
+    pub fn cell_preview(&self, row: i32, column: i32) -> QString {
+        if row < 0 || column < 0 { return QString::default(); }
+        if let Some(document) = &self.document {
+            return self.display_cell(document, row, column)
+                .map(|cell| if cell.kind == "loading" { cell.display } else { cell.input }.into())
+                .unwrap_or_else(|_| "#SERVICE!".into());
+        }
+        self.cell_text(row, column)
+    }
+
     pub fn copy_range(mut self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) -> bool {
         let result = (|| -> Result<String, String> {
             if row < 0 || column < 0 || rows <= 0 || columns <= 0
@@ -330,8 +366,7 @@ impl qobject::GridModel {
             return QString::default();
         }
         if let Some(document) = &self.document {
-            return document
-                .cell(row as usize, column as usize)
+            return self.display_cell(document, row, column)
                 .map(|cell| cell.display.into())
                 .unwrap_or_else(|_| "#SERVICE!".into());
         }
@@ -362,8 +397,7 @@ impl qobject::GridModel {
             return "blank".into();
         }
         if let Some(document) = &self.document {
-            return document
-                .cell(row as usize, column as usize)
+            return self.display_cell(document, row, column)
                 .map(|cell| cell.kind.into())
                 .unwrap_or_else(|_| "error".into());
         }
