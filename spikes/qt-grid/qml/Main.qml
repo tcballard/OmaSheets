@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
+import QtCore
 import io.omasheets.grid 1.0
 
 ApplicationWindow {
@@ -14,14 +15,17 @@ ApplicationWindow {
     visible: true
     title: backend.homeMode ? "OmaSheets" : backend.documentName + " — OmaSheets"
     color: palette.window
+    property bool examplePending: false
+    property bool tourVisible: false
     onClosing: close => { close.accepted = !backend.busy && grid.commitEdit(); }
 
     WorkbookActions {
         id: fileActions
         anchors.fill: parent
         gridModel: backend
-        blocked: keyboardHelp.visible
+        blocked: keyboardHelp.visible || updatePrompt.visible
         finishEditing: () => grid.commitEdit()
+        onExampleRequested: window.examplePending = true
     }
 
     menuBar: MenuBar {
@@ -45,12 +49,44 @@ ApplicationWindow {
         }
         Menu {
             title: "Help"
+            MenuItem { action: fileActions.exampleAction }
             MenuItem {
                 text: "Keyboard help (F1)"
                 enabled: !backend.busy
                 onTriggered: keyboardHelp.open()
             }
+            MenuSeparator {}
+            MenuItem {
+                text: "Updates…"
+                enabled: fileActions.available
+                onTriggered: { if (backend.homeMode || grid.commitEdit()) updatePrompt.open(); }
+            }
         }
+    }
+
+    Dialog {
+        id: updatePrompt
+        anchors.centerIn: parent
+        title: "Update OmaSheets"
+        modal: true
+        width: Math.min(480, window.width - 32)
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        contentItem: Label {
+            text: "OmaSheets Setup will download and verify the latest development build. This workbook window will close so the app can be updated safely. Your committed edits are saved.\n\nClose any other OmaSheets windows before installing, then reopen the app from Setup."
+            wrapMode: Text.WordWrap
+        }
+        onAccepted: { if (backend.openUpdater()) window.close(); }
+    }
+
+    FirstSteps {
+        id: firstSteps
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: 48
+        z: 20
+        visible: window.tourVisible && !backend.homeMode && !backend.busy && !keyboardHelp.visible
+        onFinished: { window.tourVisible = false; backend.finishTour(); body.forceActiveFocus(); }
+        onSelectCell: (row, column) => grid.selectCell(row, column)
     }
 
     Shortcut {
@@ -250,10 +286,20 @@ ApplicationWindow {
             body.contentX = 0;
             body.contentY = 0;
             body.forceActiveFocus();
+            window.tourVisible = window.examplePending;
+            if (window.examplePending) {
+                firstSteps.step = 0;
+                grid.selectCell(1, 1);
+                window.examplePending = false;
+            }
+        }
+        function onOperationMessageChanged() {
+            if (!backend.busy && backend.operationMessage.length > 0) window.examplePending = false;
         }
     }
 
     ColumnLayout {
+        id: welcomePane
         anchors.centerIn: parent
         width: Math.min(520, parent.width - 48)
         spacing: 14
@@ -267,7 +313,7 @@ ApplicationWindow {
             font.pixelSize: 18
         }
         Label {
-            text: "Your next workbook starts here."
+            text: backend.tourSeen ? "Your next workbook starts here." : "Welcome to OmaSheets."
             color: window.textColor
             font.pixelSize: 25
             Layout.fillWidth: true
@@ -282,6 +328,13 @@ ApplicationWindow {
         RowLayout {
             Button { id: newWorkbookButton; action: fileActions.newAction; highlighted: true; focus: backend.homeMode }
             Button { action: fileActions.openAction }
+        }
+        Button { action: fileActions.exampleAction }
+        Label {
+            text: "New here? Try a small budget, change a number, and watch the formulas update. A four-step guide shows you around. You choose where to save your practice workbook."
+            color: window.mutedColor
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
         }
         RowLayout {
             Button { action: fileActions.importAction }
@@ -364,8 +417,7 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
 
                 Label {
-                    text: (backend.documentMode ? "LOCAL SERVICE" : "GRID SPIKE")
-                        + "  ·  " + backend.themeName.toUpperCase()
+                    text: (backend.documentMode ? "SAVED ON THIS COMPUTER" : "PRACTICE GRID")
                     textFormat: Text.PlainText
                     color: window.mutedColor
                     font.family: "monospace"
@@ -1031,7 +1083,19 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        if (backend.capturePath.length > 0 && backend.documentMode) window.tourVisible = true;
         if (backend.homeMode) newWorkbookButton.forceActiveFocus();
         else body.forceActiveFocus();
+    }
+    Timer {
+        interval: 1200
+        running: backend.capturePath.length > 0
+        onTriggered: {
+            const target = backend.homeMode ? welcomePane : firstSteps;
+            if (!target.grabToImage(result => {
+                if (!result.saveToFile(backend.capturePath)) Qt.exit(1);
+                else Qt.quit();
+            })) Qt.exit(1);
+        }
     }
 }

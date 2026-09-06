@@ -20,6 +20,8 @@ pub mod qobject {
         #[qproperty(bool, document_mode, cxx_name = "documentMode")]
         #[qproperty(bool, home_mode, cxx_name = "homeMode")]
         #[qproperty(bool, busy, cxx_name = "busy")]
+        #[qproperty(QString, capture_path, cxx_name = "capturePath")]
+        #[qproperty(bool, tour_seen, cxx_name = "tourSeen")]
         #[qproperty(QString, document_path, cxx_name = "documentPath")]
         #[qproperty(QString, operation_message, cxx_name = "operationMessage")]
         #[qproperty(u64, document_generation, cxx_name = "documentGeneration")]
@@ -43,6 +45,18 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "openDocument"]
         fn open_document(self: Pin<&mut Self>, url: &QUrl, create: bool);
+
+        #[qinvokable]
+        #[cxx_name = "createExample"]
+        fn create_example(self: Pin<&mut Self>, url: &QUrl);
+
+        #[qinvokable]
+        #[cxx_name = "openUpdater"]
+        fn open_updater(self: Pin<&mut Self>) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "finishTour"]
+        fn finish_tour(self: Pin<&mut Self>);
 
         #[qinvokable]
         #[cxx_name = "importDocument"]
@@ -140,6 +154,13 @@ use crate::theme::load_active_theme;
 const ROWS: i32 = 1_000_000;
 const COLUMNS: i32 = 64;
 
+fn tour_marker() -> Option<PathBuf> {
+    let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    Some(config.join("omasheets/tour-seen"))
+}
+
 pub struct GridModelRust {
     row_count: i32,
     column_count: i32,
@@ -148,6 +169,8 @@ pub struct GridModelRust {
     document_mode: bool,
     home_mode: bool,
     busy: bool,
+    capture_path: QString,
+    tour_seen: bool,
     document_path: QString,
     operation_message: QString,
     document_generation: u64,
@@ -235,6 +258,8 @@ impl Default for GridModelRust {
                 && std::env::var_os("OMASHEETS_GRID_BENCHMARK").is_none()
                 && !std::env::args_os().any(|arg| arg == "--demo"),
             busy: false,
+            tour_seen: tour_marker().is_some_and(|path| path.is_file()),
+            capture_path: std::env::var("OMASHEETS_UI_CAPTURE").unwrap_or_default().as_str().into(),
             document_path: requested.as_ref().map(|path| path.to_string_lossy().to_string()).unwrap_or_default().as_str().into(),
             operation_message: QString::default(),
             document_generation: 0,
@@ -263,6 +288,21 @@ impl Default for GridModelRust {
 }
 
 impl qobject::GridModel {
+    pub fn finish_tour(mut self: Pin<&mut Self>) {
+        self.as_mut().set_tour_seen(true);
+        if let Some(path) = tour_marker() {
+            let result = (|| -> std::io::Result<()> {
+                if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
+                match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
+                    Ok(_) => Ok(()),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+                    Err(error) => Err(error),
+                }
+            })();
+            if let Err(error) = result { eprintln!("Could not remember tour preference: {error}"); }
+        }
+    }
+
     fn begin_file_action(mut self: Pin<&mut Self>) -> bool {
         if self.busy { return false; }
         self.as_mut().set_operation_message(QString::default());
@@ -318,6 +358,32 @@ impl qobject::GridModel {
             if create { crate::service_client::create_workbook(&destination)?; }
             Ok(None)
         });
+    }
+
+    pub fn create_example(mut self: Pin<&mut Self>, url: &QUrl) {
+        let path = PathBuf::from(url.to_local_file().unwrap_or_default().to_string());
+        if !path.is_absolute() || path.extension().and_then(|ext| ext.to_str()) != Some("omasheets") {
+            self.as_mut().set_operation_message("Choose a new .omasheets filename for your practice workbook.".into());
+            return;
+        }
+        let destination = path.clone();
+        self.load_workbook(path, move || {
+            crate::service_client::create_example(&destination)?;
+            Ok(None)
+        });
+    }
+
+    pub fn open_updater(mut self: Pin<&mut Self>) -> bool {
+        if self.busy { return false; }
+        let result = std::env::current_exe().map_err(|e| e.to_string()).and_then(|exe| {
+            let setup = exe.parent().ok_or("The installed application could not be located")?.join("omasheets-setup");
+            std::process::Command::new(setup).env_remove("OMASHEETS_DOCUMENT")
+                .spawn().map(|_| ()).map_err(|e| e.to_string())
+        });
+        match result {
+            Ok(()) => true,
+            Err(error) => { self.as_mut().set_operation_message(format!("Could not open Setup: {error}").as_str().into()); false }
+        }
     }
 
     pub fn import_document(mut self: Pin<&mut Self>, source: &QUrl, output: &QUrl) {

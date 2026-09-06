@@ -109,6 +109,10 @@ def main(argv: list[str] | None = None) -> int:
             check=True,
         )
         grid_target = build / "qt-grid-target"
+        subprocess.run(
+            ["cargo", "build", "--locked", "--release", "--manifest-path", str(ROOT / "native/setup/Cargo.toml")],
+            cwd=ROOT, env=rust_environment, check=True,
+        )
         grid_environment = rust_environment.copy()
         grid_environment["CARGO_TARGET_DIR"] = str(grid_target)
         subprocess.run(
@@ -130,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.run(["cmake", "--install", str(build)], check=True)
         shutil.copy2(rust_target / "release/omasheets-service", stage / "bin/omasheets-service")
         shutil.copy2(grid_target / "release/omasheets-grid", stage / "bin/omasheets-grid")
+        shutil.copy2(rust_target / "release/omasheets-setup", stage / "bin/omasheets-setup")
         files = {f"bin/{name}": sha256(stage / "bin" / name) for name in NATIVE_EXECUTABLES}
         manifest = {
             "schema": 1,
@@ -159,6 +164,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         digest = sha256(archive)
         (arguments.output / f"{name}.sha256").write_text(f"{digest}  {name}\n")
+        setup_name = "OmaSheets-Setup-linux-x86_64.tar.gz"
+        setup_archive = arguments.output / setup_name
+        write_reproducible_archive(setup_archive, [
+            ("OmaSheets-Setup/omasheets-setup", stage / "bin/omasheets-setup", 0o755),
+            ("OmaSheets-Setup/START-HERE.txt", ROOT / "native/setup/START-HERE.txt", 0o644),
+        ], source_date_epoch())
+        (arguments.output / f"{setup_name}.sha256").write_text(f"{sha256(setup_archive)}  {setup_name}\n")
         print(json.dumps({"archive": str(archive), "sha256": digest, "source": identity}, sort_keys=True))
         return 0
     finally:

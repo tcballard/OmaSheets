@@ -1,0 +1,16 @@
+Welcome to OmaSheets
+
+1. Extract this archive with your file manager.
+2. Open omasheets-setup inside the extracted folder.
+3. Choose Install / update OmaSheets. Authorise the system prompt if dependencies are needed.
+4. Choose Open OmaSheets, then Try an example for a guided practice workbook.
+
+For updates, use Help > Updates inside OmaSheets.
+
+For Omarchy on Linux x86_64. Setup uses Omarchy's GTK 3 runtime and internet access.
+If your file manager asks, choose Execute. Extraction preserves the executable permission.
+
+This is a development preview. Some Excel features are unsupported; read import/export reports.
+Your workbooks stay on your computer. Setup does not upload them.
+
+Project and installation help: https://github.com/tcballard/OmaSheets

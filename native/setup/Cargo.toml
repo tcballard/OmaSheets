@@ -1,0 +1,12 @@
+[package]
+name = "omasheets-setup"
+version = "0.0.2"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+
+[workspace]
+
+[profile.release]
+strip = true
+lto = true

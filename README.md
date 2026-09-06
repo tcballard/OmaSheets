@@ -18,7 +18,7 @@ what cannot be preserved; it does not promise full Excel fidelity.
 from the app launcher or run `omasheets`. Create a workbook with **Ctrl+N**,
 open one with **Ctrl+O**, and press **F1** for the keyboard guide. Native edits
 save when you finish each cell; the File menu offers import and export.
-Install the current development build with the [one-command installer](INSTALL.md).
+[Download the desktop installer](https://github.com/tcballard/OmaSheets/releases) and choose **Try an example** for a guided first workbook.
 Published development builds need no GitHub login or local compiler; the
 published v0.0.2 release remains the older compatibility baseline.
 
@@ -72,17 +72,17 @@ installation.
 
 ## Install on Omarchy
 
-Install or update the native development app:
+1. [Open downloads](https://github.com/tcballard/OmaSheets/releases) and choose **OmaSheets-Setup-linux-x86_64.tar.gz** from the newest development build.
+2. Extract it and open **omasheets-setup**. Choose **Install / update OmaSheets**; authorise system package setup if asked.
+3. Choose **Open OmaSheets**, then **New workbook**, **Open workbook**, or **Try an example**.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/tcballard/OmaSheets/main/bin/omasheets-install | bash
-```
+The example is a real, editable budget with a four-step guide. You choose where
+to save it. **F1** opens the keyboard reference. Future updates are under
+**Help → Updates**. Your workbooks are preserved.
 
-Then open **OmaSheets** from the application launcher. Subsequent updates are
-`omasheets update`. The helper downloads a passing main-branch build and its
-matching source, verifies the bundle, and preserves workbooks during upgrades.
-Close the app before updating. Missing runtime dependencies are reported with
-an explicit Omarchy package command.
+For Omarchy on Linux x86_64. Setup uses the GTK runtime shipped with Omarchy;
+it downloads the app and installs missing runtime dependencies through the
+system package manager. No compiler or GitHub login is needed.
 
 The optional bar widget is installed separately:
 

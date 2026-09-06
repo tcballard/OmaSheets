@@ -13,6 +13,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  setup:
+    name: Desktop installer window
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: sudo apt-get update && sudo apt-get install --yes libgtk-3-0t64 xvfb
+      - run: |
+          cargo fmt --manifest-path native/setup/Cargo.toml --check
+          cargo clippy --manifest-path native/setup/Cargo.toml --locked -- -D warnings
+          cargo build --release --locked --manifest-path native/setup/Cargo.toml
+          xvfb-run -a timeout 20 native/setup/target/release/omasheets-setup --capture setup.png
+          test -s setup.png
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: omasheets-setup-preview
+          path: setup.png
   unit:
     name: Python ${{ matrix.python }}
     runs-on: ubuntu-latest
@@ -353,6 +369,14 @@ jobs:
             < "$evidence/persisted-edit.json"
           lscpu > "$evidence/hardware.txt"
           qmake6 -query QT_VERSION > "$evidence/qt-version.txt"
+          env XDG_CONFIG_HOME="$theme_config" XDG_RUNTIME_DIR="$runtime" \
+            OMASHEETS_UI_CAPTURE="$evidence/welcome.png" \
+            xvfb-run -a timeout 20 spikes/qt-grid/target/release/omasheets-grid
+          env XDG_CONFIG_HOME="$theme_config" XDG_RUNTIME_DIR="$runtime" \
+            OMASHEETS_DOCUMENT="$document" OMASHEETS_UI_CAPTURE="$evidence/guide.png" \
+            xvfb-run -a timeout 20 spikes/qt-grid/target/release/omasheets-grid
+          test -s "$evidence/welcome.png"
+          test -s "$evidence/guide.png"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ always() }}
         with:
@@ -390,6 +414,9 @@ jobs:
           "$RUNNER_TEMP/native-smoke/bin/omasheets-lok-render" --provenance
           "$RUNNER_TEMP/native-smoke/bin/omasheets-service" --provenance
           "$RUNNER_TEMP/native-smoke/bin/omasheets-grid" --provenance
+          "$RUNNER_TEMP/native-smoke/bin/omasheets-setup" --provenance
+          cargo fmt --manifest-path native/setup/Cargo.toml --check
+          cargo clippy --manifest-path native/setup/Cargo.toml --locked -- -D warnings
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: omasheets-native-linux-x86_64
@@ -454,7 +481,7 @@ jobs:
           expected = source_identity(plugin)
           receipt = json.loads((app / "provenance.json").read_text())
           assert receipt["source"] == expected
-          for binary in ("omasheets-window", "omasheets-lok-render", "omasheets-service", "omasheets-grid"):
+          for binary in ("omasheets-window", "omasheets-lok-render", "omasheets-service", "omasheets-grid", "omasheets-setup"):
               report = json.loads(subprocess.check_output([app / "bin" / binary, "--provenance"], text=True))
               assert report["source_commit"] == expected["commit"]
               assert report["source_sha256"] == expected["sha256"]
