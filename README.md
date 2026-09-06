@@ -18,7 +18,7 @@ what cannot be preserved; it does not promise full Excel fidelity.
 from the app launcher or run `omasheets`. Create a workbook with **Ctrl+N**,
 open one with **Ctrl+O**, and press **F1** for the keyboard guide. Native edits
 save when you finish each cell; the File menu offers import and export.
-[Download the desktop installer](https://github.com/tcballard/OmaSheets/releases) and choose **Try an example** for a guided first workbook.
+[Install the Arch package](INSTALL.md) and choose **Try an example** for a guided first workbook.
 Published development builds need no GitHub login or local compiler; the
 published v0.0.2 release remains the older compatibility baseline.
 
