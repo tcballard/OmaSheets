@@ -1,17 +1,60 @@
 # Install OmaSheets on Omarchy
 
-## Install from your desktop
+## Install the Arch package
 
 1. [Open the downloads page](https://github.com/tcballard/OmaSheets/releases).
-2. In the newest development build, download **OmaSheets-Setup-linux-x86_64.tar.gz**.
-3. Extract the archive and open **omasheets-setup** inside it. If your file manager asks, choose **Execute**.
-4. Choose **Install / update OmaSheets**. Setup shows progress and asks for system authentication if required packages are missing. This uses Arch's normal full system update to avoid a partial upgrade.
-5. Choose **Open OmaSheets**. The app is also available in the application launcher.
+2. Download **omasheets-bin-…-x86_64.pkg.tar.zst** from the newest development build.
+3. Update your system through Omarchy, then install the downloaded file:
 
-Setup requires Omarchy on Linux x86_64, its standard GTK 3 runtime, and an
-internet connection. It installs the app in your home directory. System
-package installation uses Polkit; cancelling authentication leaves the app
-installation unstarted. Failed downloads can be retried from the same window.
+   ```bash
+   sudo pacman -U ~/Downloads/omasheets-bin-*.pkg.tar.zst
+   ```
+
+   Keep only the package you intend to install in that wildcard, or use its exact filename.
+4. Open **OmaSheets** from your app launcher. Choose **Try an example** to learn the basics.
+
+Pacman installs the dependencies and owns the application, desktop entry and
+file-type registration. No compiler, source checkout, plugin or custom Setup
+app is required. Workbooks and preferences remain in your home directory.
+The package does not change your preferred application for existing Excel files.
+
+### Updates and removal
+
+For downloaded packages, download a newer build and repeat `pacman -U`.
+A standalone downloaded package does **not** gain automatic repository updates.
+Remove it through **Omarchy → Remove → Package**, or:
+
+```bash
+sudo pacman -Rns omasheets-bin
+```
+
+Removing the package leaves your workbooks and preferences intact.
+**Help → Updates** explains the installed package's update options.
+
+### Install through Omarchy's AUR menu
+
+This requires publishing `omasheets-bin` to the AUR first. Until that is done,
+it will not appear in **Install → AUR**, and `yay -S omasheets-bin` is not an
+available installation instruction. Each release includes a pinned
+**omasheets-aur-recipe.tar.gz** ready for an AUR maintainer to publish.
+After publication, the AUR menu can install it and Omarchy's normal AUR updates
+can update it. [Maintainer instructions](packaging/arch/README.md).
+
+### Move your existing installation to Pacman
+
+Close OmaSheets and stop its optional user service if you enabled one. Install
+the package above, then run this **once as your normal user**:
+
+```bash
+/usr/bin/omasheets migrate-user-install
+```
+
+This uses the old installer's ownership records to remove its app, launchers,
+desktop overrides and automatically installed Codex plugin. It preserves
+workbooks and unrelated configuration, and reports modified files instead of
+deleting them. Run `hash -r` afterwards if your shell cached the old launcher.
+The standalone package includes MCP through `omasheets mcp serve`; agent
+configuration is optional and is not written by Pacman as root.
 
 ### Your first workbook
 
@@ -26,15 +69,15 @@ Excel and OpenDocument files have a separate opener on the welcome screen.
 Importing an Excel file creates a native copy and shows a report of features
 that could not be preserved.
 
-### Update from the app
+### Older home-directory installations
 
-Choose **Help → Updates**, confirm closing the current window, and use Setup.
+For the older custom installation only: choose **Help → Updates**, confirm closing the current window, and use Setup.
 Close other OmaSheets windows before installing. Setup downloads and verifies
 the latest passing development build, preserves workbooks, and offers to
 reopen the app afterwards. If you enabled the optional systemd service,
 stop it before updating; a running service is reported instead of replaced.
 
-## Optional terminal installation
+## Legacy home-directory installer
 
 Close any OmaSheets windows, then install or update the development build:
 

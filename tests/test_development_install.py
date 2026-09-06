@@ -48,7 +48,8 @@ class DevelopmentSelectionTests(unittest.TestCase):
 
 
 class UpdateCommandTests(unittest.TestCase):
-    def test_update_delegates_to_installed_helper_and_preserves_failure(self):
+    @patch("omasheets.package_install.is_package_managed", return_value=False)
+    def test_update_delegates_to_installed_helper_and_preserves_failure(self, managed):
         from omasheets.cli import main
         with patch("omasheets.cli.Path.is_file", return_value=True), patch(
             "subprocess.run", return_value=Mock(returncode=7),

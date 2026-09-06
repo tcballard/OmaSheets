@@ -384,6 +384,40 @@ jobs:
           path: ${{ runner.temp }}/omasheets-qt-grid/
           if-no-files-found: warn
 
+  arch-package:
+    name: Arch package install, upgrade and removal
+    needs: native-package
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - run: pacman -Syu --noconfirm --needed git python gtk3 libreoffice-fresh bubblewrap qt6-base qt6-declarative qt6-wayland desktop-file-utils shared-mime-info xorg-server-xvfb ttf-dejavu
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: omasheets-native-linux-x86_64
+          path: dist-native
+      - name: Package the verified binaries without rebuilding
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          bash packaging/arch/build.sh dist-native/omasheets-native-0.0.2-linux-x86_64.tar.gz /tmp/arch-package
+          useradd -m builder
+          chown -R builder:builder /tmp/arch-package
+          runuser -u builder -- bash -c 'cd /tmp/arch-package && makepkg --noconfirm && makepkg --printsrcinfo > .SRCINFO'
+          cd /tmp/arch-package
+          sha256sum *.pkg.tar.zst > SHA256SUMS
+          tar -czf omasheets-aur-recipe.tar.gz PKGBUILD .SRCINFO
+      - name: Verify package lifecycle as a desktop user
+        run: bash packaging/arch/check.sh /tmp/arch-package
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: omasheets-arch-linux-x86_64
+          path: |
+            /tmp/arch-package/*.pkg.tar.zst
+            /tmp/arch-package/SHA256SUMS
+            /tmp/arch-package/*.tar.gz
+            /tmp/arch-package/*.sha256
+
   native-package:
     name: Build native release bundle
     runs-on: ubuntu-latest

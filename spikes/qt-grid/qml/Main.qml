@@ -70,9 +70,11 @@ ApplicationWindow {
         title: "Update OmaSheets"
         modal: true
         width: Math.min(480, window.width - 32)
-        standardButtons: Dialog.Ok | Dialog.Cancel
+        standardButtons: backend.packageManaged ? Dialog.Close : Dialog.Ok | Dialog.Cancel
         contentItem: Label {
-            text: "OmaSheets Setup will download and verify the latest development build. This workbook window will close so the app can be updated safely. Your committed edits are saved.\n\nClose any other OmaSheets windows before installing, then reopen the app from Setup."
+            text: backend.packageManaged
+                ? "OmaSheets is managed by your system package manager.\n\nFor an AUR installation, use Omarchy’s Update menu. If you downloaded the package from GitHub, install a newer package from the releases page.\n\nClose OmaSheets before updating. Your workbooks stay on your computer."
+                : "OmaSheets Setup will download and verify the latest development build. This workbook window will close so the app can be updated safely. Your committed edits are saved.\n\nClose any other OmaSheets windows before installing, then reopen the app from Setup."
             wrapMode: Text.WordWrap
         }
         onAccepted: { if (backend.openUpdater()) window.close(); }

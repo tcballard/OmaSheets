@@ -1,0 +1,18 @@
+# Maintainer: Tom Ballard
+pkgname=omasheets-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='Native spreadsheets for Omarchy with reviewable agent changes (development preview)'
+arch=('x86_64')
+url='https://github.com/tcballard/OmaSheets'
+license=('MIT')
+depends=('python' 'gtk3' 'libreoffice-fresh' 'bubblewrap' 'qt6-base' 'qt6-declarative' 'qt6-wayland' 'desktop-file-utils' 'shared-mime-info')
+provides=('omasheets')
+conflicts=('omasheets')
+options=('!strip' '!debug')
+source=("omasheets-runtime-${pkgver}-x86_64.tar.gz::https://github.com/tcballard/OmaSheets/releases/download/dev-@COMMIT@/omasheets-runtime-${pkgver}-x86_64.tar.gz")
+sha256sums=('@CHECKSUM@')
+
+package() {
+  cp -a usr "$pkgdir/"
+}

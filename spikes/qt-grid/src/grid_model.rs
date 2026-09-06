@@ -22,6 +22,7 @@ pub mod qobject {
         #[qproperty(bool, busy, cxx_name = "busy")]
         #[qproperty(QString, capture_path, cxx_name = "capturePath")]
         #[qproperty(bool, tour_seen, cxx_name = "tourSeen")]
+        #[qproperty(bool, package_managed, cxx_name = "packageManaged")]
         #[qproperty(QString, document_path, cxx_name = "documentPath")]
         #[qproperty(QString, operation_message, cxx_name = "operationMessage")]
         #[qproperty(u64, document_generation, cxx_name = "documentGeneration")]
@@ -171,6 +172,7 @@ pub struct GridModelRust {
     busy: bool,
     capture_path: QString,
     tour_seen: bool,
+    package_managed: bool,
     document_path: QString,
     operation_message: QString,
     document_generation: u64,
@@ -259,6 +261,7 @@ impl Default for GridModelRust {
                 && !std::env::args_os().any(|arg| arg == "--demo"),
             busy: false,
             tour_seen: tour_marker().is_some_and(|path| path.is_file()),
+            package_managed: std::env::current_exe().ok().and_then(|exe| exe.parent()?.parent().map(|app| app.join("package-manager"))).is_some_and(|marker| marker.is_file()),
             capture_path: std::env::var("OMASHEETS_UI_CAPTURE").unwrap_or_default().as_str().into(),
             document_path: requested.as_ref().map(|path| path.to_string_lossy().to_string()).unwrap_or_default().as_str().into(),
             operation_message: QString::default(),
@@ -374,6 +377,7 @@ impl qobject::GridModel {
     }
 
     pub fn open_updater(mut self: Pin<&mut Self>) -> bool {
+        if self.package_managed { return false; }
         if self.busy { return false; }
         let result = std::env::current_exe().map_err(|e| e.to_string()).and_then(|exe| {
             let setup = exe.parent().ok_or("The installed application could not be located")?.join("omasheets-setup");

@@ -3,6 +3,13 @@ set -euo pipefail
 
 plugin_root=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 launcher="${HOME}/.local/bin/omasheets"
+if [[ -f /usr/lib/omasheets/package-manager ]]; then
+  launcher=/usr/bin/omasheets
+  case "${1:-}" in
+    install | doctor) exec "$launcher" doctor ;;
+    uninstall) exec "$launcher" uninstall ;;
+  esac
+fi
 
 case "${1:-}" in
 install)
