@@ -86,6 +86,7 @@ class InstallationTests(unittest.TestCase):
         self.assertTrue((self.paths.app / "bin/omasheets-window").is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-service").is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-grid").is_file())
+        self.assertEqual((self.paths.app / "bin/omasheets-update").read_bytes(), (ROOT / "bin/omasheets-install").read_bytes())
         mcp = json.loads((self.paths.codex_plugin / ".mcp.json").read_text())
         self.assertEqual(mcp["mcpServers"]["omasheets"]["command"], str(self.paths.launcher))
         marketplace = json.loads(self.paths.codex_marketplace.read_text())

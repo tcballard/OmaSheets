@@ -1,83 +1,68 @@
 # Install OmaSheets on Omarchy
 
-**Development checkout:** the native Qt stack is not yet a tagged release.
-The commands below add the Omarchy surface, but the current checkout requires
-an explicitly built, source-matching bundle via `OMASHEETS_NATIVE_BUNDLE_PATH`
-for product installation. The published v0.0.2 assets lack the native Qt stack
-and the newer detached signature. The pinned release public key is also still
-absent. See [native grid source builds](spikes/qt-grid/README.md#arch--omarchy-build)
-and the [release gates](docs/V0.1-RELEASE.md).
-
-OmaSheets targets Omarchy `quattro`. Install and enable its Omarchy surface
-from the repository with:
+Close any OmaSheets windows, then install or update the development build:
 
 ```bash
-omarchy plugin add https://github.com/tcballard/OmaSheets.git --enable
+curl -fsSL https://raw.githubusercontent.com/tcballard/OmaSheets/main/bin/omasheets-install | bash
 ```
 
-That command is the complete Omarchy plugin installation. Omarchy clones and
-validates the repository, adds the bar widget, and deliberately does not run
-plugin install hooks or `sudo`.
-
-Open the OmaSheets bar widget and choose **Install OmaSheets** to finish the
-user-local product bootstrap. The same action can be run in a terminal:
+Open **OmaSheets** from the application launcher, or run `omasheets`.
+Future updates use:
 
 ```bash
-~/.config/omarchy/plugins/io.github.tcballard.omasheets/bin/omasheets-plugin install
+omasheets update
 ```
 
-The bootstrap checks runtime dependencies, downloads the native bundle from the
-matching tagged GitHub release, verifies its maintainer signature against the
-key pinned in the checkout, verifies it against the exact installed checkout,
-and installs only OmaSheets-owned files. No compiler, CMake, `pkgconf`, or
-LibreOffice SDK is installed or required on the user's machine. The bootstrap
-never invokes a package manager or requests privilege. If runtime dependencies
-are missing, it stops and prints this explicit Omarchy command for the user to
-approve and run:
+The command finds the newest published development build, downloads its native
+archive and checksum, fetches the matching source into a temporary checkout,
+and runs the existing installer. You do not need GitHub login, a manually
+saved ZIP, a revision number, a compiler, or an Omarchy plugin checkout.
+Existing installations are updated with rollback on failure; workbooks are
+preserved. Linux x86_64 is currently supported. The helper uses curl, jq, git,
+sha256sum and Omarchy's system Python.
+
+If runtime dependencies are missing, the installer prints the required command:
 
 ```bash
 omarchy pkg add gtk3 libreoffice-fresh bubblewrap qt6-base qt6-declarative qt6-wayland
 ```
 
-This is a manual setup step by design: the standard `omarchy plugin add`
-installs only the bar widget, and the product itself, its Codex plugin and MCP
-server, and the system packages above are installed by the explicit **Install
-OmaSheets** action and the command it prints.
+Run that command, then repeat the installer. It never installs system packages
+or requests privilege itself. Close native windows before updating. If you
+explicitly enabled the optional systemd service, stop it before updating and
+restart it afterwards.
 
-## What is verified before anything runs
+## Optional Omarchy bar widget
 
-Nothing from a release is executed until three independent checks agree:
+```bash
+omarchy plugin add https://github.com/tcballard/OmaSheets.git --enable
+```
 
-1. **Maintainer signature.** The bundle's detached `.minisig` must verify,
-   with the standard-library minisign implementation in
-   `src/omasheets/release_signing.py`, against the public key pinned at
-   `release/signing-key.pub` in the validated plugin checkout. The private key
-   is held offline by the maintainer and is never available to release
-   automation, so a compromised release credential cannot produce it. A
-   checkout without the pinned key downloads nothing.
-2. **Release checksum and bundle identity.** The `.sha256` asset, the bundle's
-   allow-listed file set, version, platform, architecture, tracked-source
-   digest, commit and per-file hashes must all match the installed checkout.
-3. **Executable provenance.** Each native executable must report the same
-   source commit and digest when run with `--provenance`, after the two
-   checks above.
+The widget's **Install OmaSheets** action uses the same development installer.
+The standalone application does not require the widget. Omarchy does not run
+plugin install hooks.
 
-The release build itself is pinned and reproducible, and the published archive
-carries a GitHub build-provenance attestation that anyone can check with
-`gh attestation verify`. `docs/RELEASE.md` documents the pins, the
-reproducibility recipe, and the offline signing step; a release without its
-`.minisig` is not installable.
+## Build channels and verification
 
-Automatic bundle download additionally requires checkout `HEAD` to be exactly
-the matching `v<version>` tag. A source checkout ahead of the published release
-fails before downloading anything. CI and development builds can instead set
-`OMASHEETS_NATIVE_BUNDLE_PATH` to an explicit bundle built from that exact
-checkout; the normal source-identity and executable-provenance checks still
-apply.
+**Development builds** are public GitHub prereleases tagged `dev-<commit>`.
+Automation publishes them only after the complete main-branch CI workflow
+passes, including compiler-free Arch installation. Draft releases are hidden
+until both archive and checksum are uploaded. These builds rely on GitHub's
+repository and CI access controls; they are not maintainer-signed production
+releases. The installer verifies the checksum, source commit, tracked-source
+digest, platform, version, allow-listed payload and executable provenance.
+It leaves your plugin or development checkout unchanged.
 
-Current Arch `libreoffice-fresh` ships the system Python `uno` module and
-`libpyuno`; there is no separate `python-uno` package. The bootstrap still
-checks `import uno` explicitly. Then run the **Install OmaSheets** action again.
+**Production releases** retain the separate signed installation path described
+in [RELEASE.md](docs/RELEASE.md): an exact version tag, the offline maintainer's
+pinned public key, a valid detached `.minisig`, checksum and provenance are all
+required. The development channel does not satisfy or remove those
+[v0.1.0 release gates](docs/V0.1-RELEASE.md). The older v0.0.2 release does not
+contain the current native app.
+
+An explicit source-matching local bundle can still be installed with
+`OMASHEETS_NATIVE_BUNDLE_PATH` through `scripts/install.py install`. That path
+remains useful for contributors and CI.
 
 ## Installed surfaces
 
@@ -111,7 +96,7 @@ omasheets --version
 ```
 
 `doctor` must report Bubblewrap, LibreOffice, Python UNO, the compatibility
-window, native Qt grid, desktop integration and the Omarchy plugin. Restart or refresh Codex after the
+window, native Qt grid and desktop integration. The Omarchy bar plugin is optional. Restart or refresh Codex after the
 first installation so it discovers the new personal plugin and MCP server.
 
 Launch **OmaSheets** from the app menu, or run `omasheets`. Use **New workbook**
@@ -128,17 +113,6 @@ agents can use their own MCP configuration or the prompt's provider-neutral
 `omasheets agent-session` JSON command bridge. If the Omarchy launcher is not
 on `PATH`, the command reports that the agent entry point is unavailable while
 spreadsheet editing remains functional.
-
-## Updating a development installation
-
-Close OmaSheets windows first. Check out the revision matching the new native
-bundle, then repeat the install command with `OMASHEETS_NATIVE_BUNDLE_PATH` set
-to that bundle. The installer verifies the replacement before swapping it in.
-An intact installation of the same revision is unchanged; a different revision
-updates the app and launchers. Failed updates restore the previous installation.
-User workbooks and unrelated marketplace entries are preserved. Modified app
-files are reported as conflicts. If you explicitly enabled the optional native
-user service, stop it before updating and restart it afterwards.
 
 ## Removal
 

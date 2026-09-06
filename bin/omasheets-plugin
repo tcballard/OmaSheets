@@ -5,7 +5,13 @@ plugin_root=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 launcher="${HOME}/.local/bin/omasheets"
 
 case "${1:-}" in
-install | doctor | uninstall)
+install)
+  if [[ -z ${OMASHEETS_NATIVE_BUNDLE_PATH:-} ]]; then
+    exec /bin/bash "$plugin_root/bin/omasheets-install"
+  fi
+  exec /usr/bin/python "$plugin_root/scripts/install.py" install
+  ;;
+doctor | uninstall)
   exec /usr/bin/python "$plugin_root/scripts/install.py" "$1"
   ;;
 run)
