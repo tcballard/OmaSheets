@@ -299,6 +299,7 @@ ApplicationWindow {
     }
 
     ColumnLayout {
+        id: welcomePane
         anchors.centerIn: parent
         width: Math.min(520, parent.width - 48)
         spacing: 14
@@ -1089,9 +1090,12 @@ ApplicationWindow {
     Timer {
         interval: 1200
         running: backend.capturePath.length > 0
-        onTriggered: window.contentItem.grabToImage(result => {
-            if (!result.saveToFile(backend.capturePath)) Qt.exit(1);
-            else Qt.quit();
-        })
+        onTriggered: {
+            const target = backend.homeMode ? welcomePane : firstSteps;
+            if (!target.grabToImage(result => {
+                if (!result.saveToFile(backend.capturePath)) Qt.exit(1);
+                else Qt.quit();
+            })) Qt.exit(1);
+        }
     }
 }
