@@ -19,7 +19,7 @@ class DevelopmentSelectionTests(unittest.TestCase):
     def release(self, **changes):
         sha = "a" * 40
         result = dict(draft=False, prerelease=True, tag_name="dev-" + sha,
-                      target_commitish=sha, assets=[
+                      target_commitish=sha, published_at="2026-09-06T08:57:50Z", assets=[
                           {"name": "omasheets-native-0.0.2-linux-x86_64.tar.gz"},
                           {"name": "omasheets-native-0.0.2-linux-x86_64.tar.gz.sha256"}])
         return {**result, **changes}
@@ -30,6 +30,15 @@ class DevelopmentSelectionTests(unittest.TestCase):
                               self.release(target_commitish="main"), self.release(assets=[]), wanted])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), wanted)
+
+    def test_latest_publication_wins_even_when_github_lists_old_release_first(self):
+        old = self.release()
+        newest = self.release(tag_name="dev-" + "b" * 40, target_commitish="b" * 40,
+                              published_at="2026-09-06T10:05:47Z")
+        for releases in ([old, newest], [newest, old]):
+            result = self.select(releases)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), newest)
 
     def test_missing_or_ambiguous_bundles_are_not_selected(self):
         for release in [self.release(assets=[]), self.release(assets=self.release()["assets"] * 2)]:
