@@ -42,6 +42,11 @@ jobs:
           sha256sum --check "${archives[0]}.sha256"
           tar -xOf "${archives[0]}" manifest.json > manifest.json
           test "$(jq -r .source.commit manifest.json)" = "$BUILD_SHA"
+      - name: Download the tested Arch package and AUR recipe
+        run: |
+          gh run download "$BUILD_RUN" --name omasheets-arch-linux-x86_64 --dir arch
+          cd arch
+          sha256sum --check SHA256SUMS
       - name: Publish an immutable development prerelease
         run: |
           tag="dev-$BUILD_SHA"
@@ -60,25 +65,28 @@ jobs:
 
           ## Install OmaSheets
 
-          Download **OmaSheets-Setup-linux-x86_64.tar.gz** below, extract it, and open **omasheets-setup**. The installer handles downloads and offers system dependency setup. Then choose **Open OmaSheets** and **Try an example**.
+          Download **omasheets-bin-*.pkg.tar.zst** below. Install with \`sudo pacman -U ./omasheets-bin-*.pkg.tar.zst\` after a normal system update. Pacman installs dependencies and registers the desktop app. Launch **OmaSheets**, then choose **Try an example**.
 
-          Future updates: **Help → Updates** inside the app. No terminal command, GitHub login or compiler is needed. For Omarchy on Linux x86_64; see INSTALL.md for details.
+          Updates from downloaded packages use the same Pacman command with a newer package; removal uses \`sudo pacman -Rns omasheets-bin\`. AUR publication is separate: the attached **omasheets-aur-recipe.tar.gz** contains the pinned PKGBUILD and .SRCINFO for a maintainer. This release does not itself list the app in the AUR.
+
+          Existing home-directory installs: close OmaSheets, install the package, then run \`/usr/bin/omasheets migrate-user-install\` once. See INSTALL.md for migration and package-channel details.
           EOF
             gh release create "$tag" --target "$BUILD_SHA" --draft --prerelease \
               --title "Development build ${BUILD_SHA:0:12}" --notes-file notes.md
           fi
           gh release upload "$tag" bundle/*.tar.gz bundle/*.tar.gz.sha256 --clobber
+          gh release upload "$tag" arch/*.pkg.tar.zst arch/SHA256SUMS arch/*.tar.gz arch/*.sha256 --clobber
           gh release edit "$tag" --draft=false
 
   install-public:
-    name: Verify public desktop install
+    name: Verify public Pacman install
     needs: publish
     runs-on: ubuntu-latest
     container:
       image: archlinux:base
     steps:
       - name: Install runtime dependencies only
-        run: pacman -Syu --noconfirm --needed git curl jq python gtk3 libreoffice-fresh bubblewrap qt6-base qt6-declarative qt6-wayland xorg-server-xvfb
+        run: pacman -Syu --noconfirm --needed git curl jq xorg-server-xvfb ttf-dejavu
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
@@ -88,12 +96,18 @@ jobs:
           BUILD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           unset GH_TOKEN GITHUB_TOKEN
-          curl -fsSL "https://github.com/tcballard/OmaSheets/releases/download/dev-$BUILD_SHA/OmaSheets-Setup-linux-x86_64.tar.gz" -o setup.tar.gz
-          tar -xzf setup.tar.gz
-          xvfb-run -a timeout 300 ./OmaSheets-Setup/omasheets-setup --install-test
-          "$HOME/.local/bin/omasheets" update
-          "$HOME/.local/bin/omasheets" doctor --json > doctor.json
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          version="0.0.2.r$(git show -s --format=%ct HEAD).g${BUILD_SHA:0:12}"
+          package="omasheets-bin-$version-1-x86_64.pkg.tar.zst"
+          url="https://github.com/tcballard/OmaSheets/releases/download/dev-$BUILD_SHA"
+          curl -fsSL "$url/$package" -o "$package"
+          curl -fsSL "$url/SHA256SUMS" -o SHA256SUMS
+          sha256sum --check SHA256SUMS
+          pacman -U --noconfirm "./$package"
+          useradd -m desktop
+          install -d -m 700 -o desktop -g desktop /tmp/omasheets-public-runtime
+          runuser -u desktop -- /usr/bin/omasheets doctor --json > doctor.json
           jq -e '.ready == true' doctor.json
-          jq -e ' .source.commit == env.BUILD_SHA ' "$HOME/.local/share/omasheets/app/provenance.json"
-          test -x "$HOME/.local/share/omasheets/app/bin/omasheets-update"
-          xvfb-run -a timeout 20 "$HOME/.local/share/omasheets/app/bin/omasheets-setup" --capture installed-setup.png
+          jq -e '.source.commit == env.BUILD_SHA' /usr/lib/omasheets/provenance.json
+          runuser -u desktop -- env XDG_RUNTIME_DIR=/tmp/omasheets-public-runtime OMASHEETS_UI_CAPTURE=/tmp/omasheets-public-runtime/welcome.png xvfb-run -a timeout 30 /usr/bin/omasheets
+          test -s /tmp/omasheets-public-runtime/welcome.png
