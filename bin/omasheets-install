@@ -1,0 +1,50 @@
+#!/bin/bash
+# Install the newest public development build; production releases retain their signed installer.
+set -euo pipefail
+
+for tool in curl jq git sha256sum; do
+  command -v "$tool" >/dev/null || { echo "Missing $tool. Install it and run this command again." >&2; exit 1; }
+done
+[[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || {
+  echo 'Development builds currently support Linux x86_64.' >&2; exit 1;
+}
+[[ -x /usr/bin/python ]] || { echo 'The Omarchy system Python is required.' >&2; exit 1; }
+
+repository='tcballard/OmaSheets'
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+fetch() {
+  curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+    --connect-timeout 15 --max-time 180 --max-filesize "$3" "$1" --output "$2"
+}
+echo 'Finding the latest published OmaSheets development build…'
+fetch "https://api.github.com/repos/$repository/releases?per_page=100" "$work/releases.json" 2097152
+jq -e '[.[] | select(.draft == false and .prerelease == true)
+  | select(.tag_name | test("^dev-[a-f0-9]{40}$"))
+  | select(.target_commitish == (.tag_name | ltrimstr("dev-")))
+  | select([.assets[].name | select(test("^omasheets-native-[0-9]+\\.[0-9]+\\.[0-9]+-linux-x86_64\\.tar\\.gz$"))] | length == 1)
+  | select([.assets[].name | select(test("^omasheets-native-[0-9]+\\.[0-9]+\\.[0-9]+-linux-x86_64\\.tar\\.gz\\.sha256$"))] | length == 1)
+  ][0] // error("No development build has finished publishing yet. Retry after CI completes.")' \
+  "$work/releases.json" > "$work/release.json"
+revision=$(jq -r .target_commitish "$work/release.json")
+archive=$(jq -r '.assets[].name | select(test("^omasheets-native-[0-9]+\\.[0-9]+\\.[0-9]+-linux-x86_64\\.tar\\.gz$"))' "$work/release.json")
+base="https://github.com/$repository/releases/download/dev-$revision"
+echo "Installing development build ${revision:0:12}. Close OmaSheets windows before continuing."
+fetch "$base/$archive" "$work/$archive" 67108864
+fetch "$base/$archive.sha256" "$work/checksum" 8192
+read -r checksum filename < "$work/checksum"
+[[ $checksum =~ ^[a-f0-9]{64}$ && $filename == "$archive" ]] || {
+  echo 'Invalid development-build checksum.' >&2; exit 1;
+}
+(cd "$work" && printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check --status)
+
+git init --quiet "$work/source"
+git -C "$work/source" fetch --quiet --depth=1 "https://github.com/$repository.git" "$revision"
+git -C "$work/source" checkout --quiet --detach FETCH_HEAD
+[[ $(git -C "$work/source" rev-parse HEAD) == "$revision" ]]
+# The existing installer also verifies platform, source digest, payload hashes
+# and executable provenance before replacing anything. It owns update rollback.
+OMASHEETS_NATIVE_BUNDLE_PATH="$work/$archive" \
+  /usr/bin/python "$work/source/scripts/install.py" install
+"$HOME/.local/bin/omasheets" doctor
+echo 'OmaSheets is ready. Open it from the app launcher, or run: omasheets'

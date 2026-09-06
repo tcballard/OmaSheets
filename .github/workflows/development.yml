@@ -1,0 +1,89 @@
+name: Publish development build
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: development-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_SHA: ${{ github.event.workflow_run.head_sha }}
+      BUILD_RUN: ${{ github.event.workflow_run.id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Download the tested bundle
+        run: |
+          gh run download "$BUILD_RUN" --name omasheets-native-linux-x86_64 --dir bundle
+          cd bundle
+          archives=(omasheets-native-*-linux-x86_64.tar.gz)
+          test "${#archives[@]}" = 1
+          sha256sum --check "${archives[0]}.sha256"
+          tar -xOf "${archives[0]}" manifest.json > manifest.json
+          test "$(jq -r .source.commit manifest.json)" = "$BUILD_SHA"
+      - name: Publish an immutable development prerelease
+        run: |
+          tag="dev-$BUILD_SHA"
+          if gh release view "$tag" --json isDraft --jq .isDraft > existing-draft.txt 2>/dev/null; then
+            if test "$(cat existing-draft.txt)" = false; then
+              echo 'This build is already published.'
+              exit 0
+            fi
+          else
+            cat > notes.md <<EOF
+          Development preview built from $BUILD_SHA after all CI checks passed.
+
+          Verification: https://github.com/$GH_REPO/actions/runs/$BUILD_RUN
+
+          These are CI development builds, not signed production releases. Native source and executable provenance are checked by the installer. Excel compatibility and real-device acceptance remain development limitations.
+
+          Install or update using the instructions in INSTALL.md. No GitHub login or local compiler is needed.
+          EOF
+            gh release create "$tag" --target "$BUILD_SHA" --draft --prerelease \
+              --title "Development build ${BUILD_SHA:0:12}" --notes-file notes.md
+          fi
+          gh release upload "$tag" bundle/*.tar.gz bundle/*.tar.gz.sha256 --clobber
+          gh release edit "$tag" --draft=false
+
+  install-public:
+    name: Verify public one-command install
+    needs: publish
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base
+    steps:
+      - name: Install runtime dependencies only
+        run: pacman -Syu --noconfirm --needed git curl jq python gtk3 libreoffice-fresh bubblewrap qt6-base qt6-declarative qt6-wayland
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Install from public release assets without GitHub credentials
+        run: |
+          unset GH_TOKEN GITHUB_TOKEN
+          bash bin/omasheets-install
+          "$HOME/.local/bin/omasheets" update
+          "$HOME/.local/bin/omasheets" doctor --json > doctor.json
+          jq -e '.ready == true' doctor.json
+          test -x "$HOME/.local/share/omasheets/app/bin/omasheets-update"

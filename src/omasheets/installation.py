@@ -290,6 +290,7 @@ def _install_locked(source_root: Path, paths: InstallPaths, *, check_dependencie
         native_manifest = install_native_bundle(
             configured_bundle, stage, version=__version__, source=identity,
         )
+        _write_bytes(stage / "bin/omasheets-update", (source_root / "bin/omasheets-install").read_bytes(), 0o755)
         provenance = {
             "schema": 1, "version": __version__, "source": identity,
             "native_bundle": native_manifest,

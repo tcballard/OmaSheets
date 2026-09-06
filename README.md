@@ -18,8 +18,9 @@ what cannot be preserved; it does not promise full Excel fidelity.
 from the app launcher or run `omasheets`. Create a workbook with **Ctrl+N**,
 open one with **Ctrl+O**, and press **F1** for the keyboard guide. Native edits
 save when you finish each cell; the File menu offers import and export.
-The current development checkout needs a source build or a matching development
-bundle; the published v0.0.2 download does not contain this native stack.
+Install the current development build with the [one-command installer](INSTALL.md).
+Published development builds need no GitHub login or local compiler; the
+published v0.0.2 release remains the older compatibility baseline.
 
 The [CI workflow](https://github.com/tcballard/OmaSheets/actions/workflows/ci.yml)
 checks replay, rejected edits, clipboard round-trips and compiler-free Arch
@@ -71,31 +72,26 @@ installation.
 
 ## Install on Omarchy
 
-**Current checkout:** the command below adds the bar widget. Full installation
-requires an explicitly built, source-matching development bundle. Automatic
-download cannot use the older v0.0.2 bundle with this checkout, and the next
-release still needs its pinned signing key and detached signature.
+Install or update the native development app:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tcballard/OmaSheets/main/bin/omasheets-install | bash
+```
+
+Then open **OmaSheets** from the application launcher. Subsequent updates are
+`omasheets update`. The helper downloads a passing main-branch build and its
+matching source, verifies the bundle, and preserves workbooks during upgrades.
+Close the app before updating. Missing runtime dependencies are reported with
+an explicit Omarchy package command.
+
+The optional bar widget is installed separately:
 
 ```bash
 omarchy plugin add https://github.com/tcballard/OmaSheets.git --enable
 ```
 
-The command installs and enables the Omarchy bar surface. Choose **Install
-OmaSheets** there to run the privilege-free, user-local bootstrap for the native
-Qt grid, compatibility window, local services, Codex plugin, MCP server,
-desktop entry and MIME associations. The bootstrap downloads the native
-executables built by the
-matching GitHub release and verifies their maintainer signature against the
-key pinned in the checkout, then their checksum, version, architecture,
-source commit, tracked-source digest and individual file hashes, before
-anything from the bundle runs. Automatic download is available only when the installed checkout
-is exactly the matching `v<version>` release tag; a newer development checkout
-fails before network access unless its operator supplies an explicitly built,
-source-matching bundle. Users do not need a compiler, CMake, `pkgconf`, or the
-LibreOffice SDK. Omarchy intentionally runs no plugin install hooks; missing
-runtime dependencies are reported with an explicit `omarchy pkg add` command
-for the user to approve. Full installation and reversible removal details are in
-[`INSTALL.md`](INSTALL.md).
+Development builds are CI prereleases, separate from signed production
+releases. [INSTALL.md](INSTALL.md) explains both channels and removal.
 
 Open a workbook and choose **Ask Agent** from the OmaSheets window or Omarchy
 bar. OmaSheets asks `omarchy agent prompt` to start an agent session with the

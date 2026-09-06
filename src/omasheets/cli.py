@@ -87,6 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Install and start the optional systemd user service",
     )
     commands.add_parser("uninstall", help="Remove the user-local OmaSheets product installation")
+    commands.add_parser("update", help="Install the latest published development build")
     lok = commands.add_parser("lok", help="Inspect the installed LibreOfficeKit engine")
     lok_commands = lok.add_subparsers(dest="lok_command", required=True)
     lok_status = lok_commands.add_parser("status", help="Check LibreOfficeKit engine dependencies")
@@ -101,6 +102,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
+    if arguments.command == "update":
+        import subprocess
+
+        updater = Path(__file__).resolve().parents[2] / "bin/omasheets-update"
+        if not updater.is_file():
+            raise SystemExit("Run the development installer from INSTALL.md to enable updates.")
+        return subprocess.run(["/bin/bash", str(updater)], check=False).returncode
     if arguments.command is None or (arguments.command == "launch" and arguments.path is None):
         from .native_grid import open_app
 
