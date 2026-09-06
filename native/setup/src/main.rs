@@ -27,6 +27,9 @@ unsafe extern "C" {
     fn gtk_label_set_text(label: Widget, text: *const c_char);
     fn gtk_label_set_line_wrap(label: Widget, wrap: c_int);
     fn gtk_label_set_xalign(label: Widget, alignment: f32);
+    fn gtk_label_set_max_width_chars(label: Widget, chars: c_int);
+    fn gtk_scrolled_window_new(horizontal: Widget, vertical: Widget) -> Widget;
+    fn gtk_scrolled_window_set_policy(window: Widget, horizontal: c_int, vertical: c_int);
     fn gtk_button_new_with_label(text: *const c_char) -> Widget;
     fn gtk_button_set_label(button: Widget, text: *const c_char);
     fn gtk_widget_set_sensitive(widget: Widget, sensitive: c_int);
@@ -93,6 +96,7 @@ struct Ui {
     window: Widget,
     capture: Option<String>,
     ticks: u32,
+    install_test: bool,
     label: Widget,
     button: Widget,
     progress: Widget,
@@ -208,6 +212,10 @@ fn install(events: &Sender<Event>) -> Result<(), String> {
 unsafe extern "C" fn clicked(_: Widget, data: Widget) {
     // SAFETY: data is the boxed Ui, alive for the entire GTK main loop.
     let ui = unsafe { &mut *data.cast::<Ui>() };
+    activate(ui);
+}
+
+fn activate(ui: &mut Ui) {
     if ui.busy {
         return;
     }
@@ -245,6 +253,9 @@ unsafe extern "C" fn close(_: Widget, _: Widget, data: Widget) -> c_int {
 unsafe extern "C" fn poll(data: Widget) -> c_int {
     let ui = unsafe { &mut *data.cast::<Ui>() };
     ui.ticks = ui.ticks.saturating_add(1);
+    if ui.ticks == 2 && ui.install_test {
+        activate(ui);
+    }
     if ui.ticks == 5
         && let Some(path) = &ui.capture
     {
@@ -278,6 +289,13 @@ unsafe extern "C" fn poll(data: Widget) -> c_int {
         match event {
             Event::Status(message) => unsafe { gtk_label_set_text(ui.label, c(&message).as_ptr()) },
             Event::Finished(result) => {
+                if ui.install_test {
+                    if let Err(error) = &result {
+                        eprintln!("{error}");
+                        std::process::exit(1);
+                    }
+                    unsafe { gtk_main_quit() };
+                }
                 ui.busy = false;
                 ui.installed = result.is_ok();
                 let message = result.err().unwrap_or_else(|| "OmaSheets is ready. You can also find it in your application launcher.\n\nStart with a blank spreadsheet or try the guided example.".into());
@@ -330,7 +348,11 @@ fn main() {
         let label = gtk_label_new(c("Install the latest development build of OmaSheets. Your spreadsheets stay on this computer.\n\nClose any OmaSheets windows first. Setup downloads the app and, if needed, asks you to authorise system package installation and updates.\n\nThis is a development preview; some Excel features are still unsupported.").as_ptr());
         gtk_label_set_line_wrap(label, 1);
         gtk_label_set_xalign(label, 0.0);
-        gtk_box_pack_start(column, label, 1, 1, 0);
+        gtk_label_set_max_width_chars(label, 70);
+        let scroll = gtk_scrolled_window_new(std::ptr::null_mut(), std::ptr::null_mut());
+        gtk_scrolled_window_set_policy(scroll, 2, 1);
+        gtk_container_add(scroll, label);
+        gtk_box_pack_start(column, scroll, 1, 1, 0);
         let progress = gtk_progress_bar_new();
         gtk_box_pack_start(column, progress, 0, 0, 0);
         let button = gtk_button_new_with_label(c("Install / update OmaSheets").as_ptr());
@@ -340,6 +362,7 @@ fn main() {
             window,
             capture: std::env::args().skip_while(|arg| arg != "--capture").nth(1),
             ticks: 0,
+            install_test: std::env::args().any(|arg| arg == "--install-test"),
             label,
             button,
             progress,
