@@ -109,5 +109,5 @@ jobs:
           runuser -u desktop -- /usr/bin/omasheets doctor --json > doctor.json
           jq -e '.ready == true' doctor.json
           jq -e '.source.commit == env.BUILD_SHA' /usr/lib/omasheets/provenance.json
-          runuser -u desktop -- env XDG_RUNTIME_DIR=/tmp/omasheets-public-runtime OMASHEETS_UI_CAPTURE=/tmp/omasheets-public-runtime/welcome.png xvfb-run -a timeout 30 /usr/bin/omasheets
+          runuser -u desktop -- env XDG_RUNTIME_DIR=/tmp/omasheets-public-runtime OMASHEETS_UI_CAPTURE=/tmp/omasheets-public-runtime/welcome.png xvfb-run -a timeout 30 bash packaging/arch/capture.sh
           test -s /tmp/omasheets-public-runtime/welcome.png

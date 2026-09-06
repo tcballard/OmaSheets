@@ -24,7 +24,7 @@ omasheets setup --omarchy
 test ! -e "$HOME/.local/share/applications/io.github.tcballard.OmaSheets.desktop"
 mkdir -p "$HOME/Documents"
 printf 'keep my workbook\n' > "$HOME/Documents/keep.omasheets"
-xvfb-run -a env OMASHEETS_UI_CAPTURE=/tmp/omasheets-package-runtime/welcome.png timeout 30 omasheets
+xvfb-run -a env OMASHEETS_UI_CAPTURE=/tmp/omasheets-package-runtime/welcome.png timeout 30 bash packaging/arch/capture.sh
 test -s /tmp/omasheets-package-runtime/welcome.png
 SH
 python -c 'import json; assert json.load(open("/tmp/omasheets-package-runtime/doctor.json"))["ready"]'
