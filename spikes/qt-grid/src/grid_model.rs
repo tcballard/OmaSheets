@@ -21,6 +21,7 @@ pub mod qobject {
         #[qproperty(bool, home_mode, cxx_name = "homeMode")]
         #[qproperty(bool, busy, cxx_name = "busy")]
         #[qproperty(QString, capture_path, cxx_name = "capturePath")]
+        #[qproperty(bool, tour_seen, cxx_name = "tourSeen")]
         #[qproperty(QString, document_path, cxx_name = "documentPath")]
         #[qproperty(QString, operation_message, cxx_name = "operationMessage")]
         #[qproperty(u64, document_generation, cxx_name = "documentGeneration")]
@@ -52,6 +53,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "openUpdater"]
         fn open_updater(self: Pin<&mut Self>) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "finishTour"]
+        fn finish_tour(self: Pin<&mut Self>);
 
         #[qinvokable]
         #[cxx_name = "importDocument"]
@@ -149,6 +154,13 @@ use crate::theme::load_active_theme;
 const ROWS: i32 = 1_000_000;
 const COLUMNS: i32 = 64;
 
+fn tour_marker() -> Option<PathBuf> {
+    let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    Some(config.join("omasheets/tour-seen"))
+}
+
 pub struct GridModelRust {
     row_count: i32,
     column_count: i32,
@@ -158,6 +170,7 @@ pub struct GridModelRust {
     home_mode: bool,
     busy: bool,
     capture_path: QString,
+    tour_seen: bool,
     document_path: QString,
     operation_message: QString,
     document_generation: u64,
@@ -245,6 +258,7 @@ impl Default for GridModelRust {
                 && std::env::var_os("OMASHEETS_GRID_BENCHMARK").is_none()
                 && !std::env::args_os().any(|arg| arg == "--demo"),
             busy: false,
+            tour_seen: tour_marker().is_some_and(|path| path.is_file()),
             capture_path: std::env::var("OMASHEETS_UI_CAPTURE").unwrap_or_default().as_str().into(),
             document_path: requested.as_ref().map(|path| path.to_string_lossy().to_string()).unwrap_or_default().as_str().into(),
             operation_message: QString::default(),
@@ -274,6 +288,21 @@ impl Default for GridModelRust {
 }
 
 impl qobject::GridModel {
+    pub fn finish_tour(mut self: Pin<&mut Self>) {
+        self.as_mut().set_tour_seen(true);
+        if let Some(path) = tour_marker() {
+            let result = (|| -> std::io::Result<()> {
+                if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
+                match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
+                    Ok(_) => Ok(()),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+                    Err(error) => Err(error),
+                }
+            })();
+            if let Err(error) = result { eprintln!("Could not remember tour preference: {error}"); }
+        }
+    }
+
     fn begin_file_action(mut self: Pin<&mut Self>) -> bool {
         if self.busy { return false; }
         self.as_mut().set_operation_message(QString::default());

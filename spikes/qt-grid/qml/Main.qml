@@ -17,11 +17,6 @@ ApplicationWindow {
     color: palette.window
     property bool examplePending: false
     property bool tourVisible: false
-    Settings {
-        id: onboarding
-        fileName: StandardPaths.writableLocation(StandardPaths.ConfigLocation) + "/omasheets/welcome.ini"
-        property bool tourSeen: false
-    }
     onClosing: close => { close.accepted = !backend.busy && grid.commitEdit(); }
 
     WorkbookActions {
@@ -90,7 +85,7 @@ ApplicationWindow {
         anchors.margins: 48
         z: 20
         visible: window.tourVisible && !backend.homeMode && !backend.busy && !keyboardHelp.visible
-        onFinished: { window.tourVisible = false; onboarding.tourSeen = true; body.forceActiveFocus(); }
+        onFinished: { window.tourVisible = false; backend.finishTour(); body.forceActiveFocus(); }
         onSelectCell: (row, column) => grid.selectCell(row, column)
     }
 
@@ -317,7 +312,7 @@ ApplicationWindow {
             font.pixelSize: 18
         }
         Label {
-            text: onboarding.tourSeen ? "Your next workbook starts here." : "Welcome to OmaSheets."
+            text: backend.tourSeen ? "Your next workbook starts here." : "Welcome to OmaSheets."
             color: window.textColor
             font.pixelSize: 25
             Layout.fillWidth: true
