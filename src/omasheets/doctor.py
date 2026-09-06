@@ -11,6 +11,7 @@ from .integration import DESKTOP_ID, IntegrationPaths
 from .lok_spike import status as lok_status
 from .native_window import status as window_status
 from .native_grid import status as grid_status
+from .package_install import is_package_managed
 
 
 def _executable(name: str, expected: Path | None = None) -> dict[str, Any]:
@@ -39,6 +40,8 @@ def diagnose() -> dict[str, Any]:
 
     integration = IntegrationPaths.discover()
     desktop_ok = integration.desktop.is_file() and integration.journal.is_file()
+    if is_package_managed():
+        desktop_ok = Path("/usr/share/applications", DESKTOP_ID).is_file()
     checks.append({
         "name": "desktop-integration",
         "ok": desktop_ok,

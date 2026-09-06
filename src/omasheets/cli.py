@@ -87,7 +87,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Install and start the optional systemd user service",
     )
     commands.add_parser("uninstall", help="Remove the user-local OmaSheets product installation")
-    commands.add_parser("update", help="Install the latest published development build")
+    commands.add_parser("update", help="Update OmaSheets or show package-manager instructions")
+    commands.add_parser("migrate-user-install", help="Remove the old user-local installation after installing the Arch package")
     lok = commands.add_parser("lok", help="Inspect the installed LibreOfficeKit engine")
     lok_commands = lok.add_subparsers(dest="lok_command", required=True)
     lok_status = lok_commands.add_parser("status", help="Check LibreOfficeKit engine dependencies")
@@ -103,6 +104,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
     if arguments.command == "update":
+        from .package_install import is_package_managed, UPDATE_HELP
+
+        if is_package_managed():
+            print(UPDATE_HELP)
+            return 0
         import subprocess
 
         updater = Path(__file__).resolve().parents[2] / "bin/omasheets-update"
@@ -260,6 +266,21 @@ def main(argv: list[str] | None = None) -> int:
         receipt = service.undo_receipt(arguments.receipt_id, supplied)
         print(json.dumps(receipt, indent=2, sort_keys=True))
         return 0
+    if arguments.command == "migrate-user-install":
+        from .package_install import is_package_managed
+        from .installation import uninstall
+
+        if not is_package_managed():
+            raise SystemExit("Install the Arch package first, then run /usr/bin/omasheets migrate-user-install.")
+        import os
+        from .native_grid import _service_socket_ready
+
+        runtime = os.environ.get("XDG_RUNTIME_DIR")
+        if runtime and _service_socket_ready(Path(runtime) / "omasheets/native.sock"):
+            raise SystemExit("Close OmaSheets and stop its optional user service before migrating.")
+        result = uninstall()
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 1 if result.get("conflicts") else 0
     if arguments.command == "integrate":
         from .integration import install, uninstall
 
@@ -284,6 +305,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     if arguments.command == "uninstall":
+        from .package_install import is_package_managed
+
+        if is_package_managed():
+            raise SystemExit("Remove the Arch package with: sudo pacman -Rns omasheets-bin")
         from .installation import uninstall
 
         result = uninstall()

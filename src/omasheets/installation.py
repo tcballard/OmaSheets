@@ -226,6 +226,8 @@ def install(
     check_dependencies: bool = True,
     bundle_path: Path | None = None,
 ) -> dict[str, Any]:
+    if paths is None and Path("/usr/lib/omasheets/package-manager").is_file():
+        raise ConflictError("OmaSheets is managed by Pacman; update the Arch package instead of running the user-local installer")
     paths = paths or InstallPaths.discover()
     with exclusive_lock(paths.journal.parent / ".installation.lock"):
         return _install_locked(source_root, paths, check_dependencies=check_dependencies, bundle_path=bundle_path)
