@@ -1,5 +1,41 @@
 # Install OmaSheets on Omarchy
 
+## Install from your desktop
+
+1. [Open the downloads page](https://github.com/tcballard/OmaSheets/releases).
+2. In the newest development build, download **OmaSheets-Setup-linux-x86_64.tar.gz**.
+3. Extract the archive and open **omasheets-setup** inside it. If your file manager asks, choose **Execute**.
+4. Choose **Install / update OmaSheets**. Setup shows progress and asks for system authentication if required packages are missing. This uses Arch's normal full system update to avoid a partial upgrade.
+5. Choose **Open OmaSheets**. The app is also available in the application launcher.
+
+Setup requires Omarchy on Linux x86_64, its standard GTK 3 runtime, and an
+internet connection. It installs the app in your home directory. System
+package installation uses Polkit; cancelling authentication leaves the app
+installation unstarted. Failed downloads can be retried from the same window.
+
+### Your first workbook
+
+Choose **New workbook** to start blank, **Open workbook** to resume a native
+file, or **Try an example** to save your own practice budget. The four-step
+guide covers editing, formulas, undo and export. Practice files are ordinary
+saved workbooks; trying the example again requires a new filename and never
+replaces earlier work. Close the tour at any time; **Help → Try an example**
+starts another and **F1** opens the full keyboard reference.
+
+Excel and OpenDocument files have a separate opener on the welcome screen.
+Importing an Excel file creates a native copy and shows a report of features
+that could not be preserved.
+
+### Update from the app
+
+Choose **Help → Updates**, confirm closing the current window, and use Setup.
+Close other OmaSheets windows before installing. Setup downloads and verifies
+the latest passing development build, preserves workbooks, and offers to
+reopen the app afterwards. If you enabled the optional systemd service,
+stop it before updating; a running service is reported instead of replaced.
+
+## Optional terminal installation
+
 Close any OmaSheets windows, then install or update the development build:
 
 ```bash

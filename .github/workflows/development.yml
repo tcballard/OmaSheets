@@ -58,7 +58,11 @@ jobs:
 
           These are CI development builds, not signed production releases. Native source and executable provenance are checked by the installer. Excel compatibility and real-device acceptance remain development limitations.
 
-          Install or update using the instructions in INSTALL.md. No GitHub login or local compiler is needed.
+          ## Install OmaSheets
+
+          Download **OmaSheets-Setup-linux-x86_64.tar.gz** below, extract it, and open **omasheets-setup**. The installer handles downloads and offers system dependency setup. Then choose **Open OmaSheets** and **Try an example**.
+
+          Future updates: **Help → Updates** inside the app. No terminal command, GitHub login or compiler is needed. For Omarchy on Linux x86_64; see INSTALL.md for details.
           EOF
             gh release create "$tag" --target "$BUILD_SHA" --draft --prerelease \
               --title "Development build ${BUILD_SHA:0:12}" --notes-file notes.md

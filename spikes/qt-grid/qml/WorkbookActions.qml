@@ -13,13 +13,15 @@ Item {
     property alias openAction: openAction
     property alias importAction: importAction
     property alias compatibilityAction: compatibilityAction
+    property alias exampleAction: exampleAction
+    signal exampleRequested()
     property alias xlsxAction: xlsxAction
     property alias csvAction: csvAction
     property alias parquetAction: parquetAction
     readonly property bool available: !blocked && !gridModel.busy && !report.visible
         && !openFile.visible && !newFile.visible && !importFile.visible
         && !importDestination.visible && !exportFile.visible && !compatibilityFile.visible
-        && !importNotice.visible
+        && !importNotice.visible && !exampleFile.visible
     property url importSource
     property string exportFormat: "xlsx"
 
@@ -30,6 +32,21 @@ Item {
         exportFile.open();
     }
 
+    Action {
+        id: exampleAction
+        text: "Try an example…"
+        enabled: controls.available
+        onTriggered: { if (controls.prepare()) exampleFile.open(); }
+    }
+    FileDialog {
+        id: exampleFile
+        title: "Save your practice workbook — choose a new filename"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "omasheets"
+        nameFilters: ["OmaSheets workbooks (*.omasheets)"]
+        currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+        onAccepted: { controls.exampleRequested(); gridModel.createExample(selectedFile); }
+    }
     Action {
         id: newAction
         text: "New workbook…"

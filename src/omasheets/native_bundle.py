@@ -25,6 +25,7 @@ NATIVE_EXECUTABLES = (
     "omasheets-lok-render",
     "omasheets-service",
     "omasheets-grid",
+    "omasheets-setup",
 )
 RELEASE_SIGNING_KEY = Path("release/signing-key.pub")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")

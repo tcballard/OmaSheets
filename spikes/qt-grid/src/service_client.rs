@@ -195,6 +195,20 @@ pub(crate) fn create_workbook(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn create_example(path: &Path) -> Result<(), String> {
+    create_workbook(path)?;
+    let document = GridDocument::open(path, None)?;
+    let rows = [
+        ["Weekend budget", "Quantity", "Cost each", "Total"],
+        ["Train tickets", "2", "18", "=B2*C2"],
+        ["Lunch", "2", "12", "=B3*C3"],
+        ["Coffee", "2", "3", "=B4*C4"],
+        ["Total", "", "", "=SUM(D2:D4)"],
+    ];
+    let values: Vec<Vec<String>> = rows.iter().map(|row| row.iter().map(|value| (*value).to_string()).collect()).collect();
+    document.set_matrix(0, 0, &values)
+}
+
 pub(crate) fn transfer_summary(manifest: &Value) -> String {
     let mut lines = vec![format!("File written: {}", manifest["output"].as_str().unwrap_or("selected destination"))];
     for key in ["formula_cells_preserved", "formula_cells_flattened", "formula_cells_native",
@@ -729,6 +743,18 @@ mod tests {
         assert_eq!(document.cell(0, 1).unwrap().display, "21");
         drop(document);
         desktop_call(&json!({"kind": "close", "path": imported})).unwrap();
+        let example = directory.join("Practice.omasheets");
+        create_example(&example).unwrap();
+        let practice = GridDocument::open(&example, None).unwrap();
+        assert_eq!(practice.cell(1, 3).unwrap().display, "36");
+        assert_eq!(practice.cell(4, 3).unwrap().display, "66");
+        practice.set_text(1, 1, "3").unwrap();
+        assert_eq!(practice.cell(1, 3).unwrap().display, "54");
+        assert_eq!(practice.cell(4, 3).unwrap().display, "84");
+        assert!(create_example(&example).is_err());
+        assert_eq!(practice.cell(1, 1).unwrap().display, "3");
+        drop(practice);
+        desktop_call(&json!({"kind": "close", "path": example})).unwrap();
         fs::remove_dir_all(directory).unwrap();
     }
 
