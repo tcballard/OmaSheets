@@ -291,13 +291,17 @@ def main(argv: list[str] | None = None) -> int:
         from .installation import InstallPaths
         from .integration import install as install_integration
         from .user_service import install as install_user_service
+        from .package_install import is_package_managed
+        from dataclasses import replace
 
         paths = InstallPaths.discover()
+        packaged = is_package_managed()
+        service_paths = replace(paths.user_service, binary=Path("/usr/bin/omasheets-service")) if packaged else paths.user_service
         result = {
             "omarchy": True,
-            "integration": install_integration(paths.integration, executable=paths.launcher),
+            "integration": {"installed": True, "managed_by": "pacman"} if packaged else install_integration(paths.integration, executable=paths.launcher),
             "user_service": (
-                install_user_service(paths.user_service, enable=True)
+                install_user_service(service_paths, enable=True)
                 if arguments.enable_service
                 else {"requested": False, "enabled": False}
             ),

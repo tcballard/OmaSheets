@@ -20,6 +20,8 @@ install -d -m 700 -o builder -g builder /tmp/omasheets-package-runtime
 runuser -u builder -- env XDG_RUNTIME_DIR=/tmp/omasheets-package-runtime bash -eu <<'SH'
 omasheets doctor --json > /tmp/omasheets-package-runtime/doctor.json
 omasheets update
+omasheets setup --omarchy
+test ! -e "$HOME/.local/share/applications/io.github.tcballard.OmaSheets.desktop"
 mkdir -p "$HOME/Documents"
 printf 'keep my workbook\n' > "$HOME/Documents/keep.omasheets"
 xvfb-run -a env OMASHEETS_UI_CAPTURE=/tmp/omasheets-package-runtime/welcome.png timeout 30 omasheets
