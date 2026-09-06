@@ -24,7 +24,7 @@ jq -e '[.[] | select(.draft == false and .prerelease == true)
   | select(.target_commitish == (.tag_name | ltrimstr("dev-")))
   | select([.assets[].name | select(test("^omasheets-native-[0-9]+\\.[0-9]+\\.[0-9]+-linux-x86_64\\.tar\\.gz$"))] | length == 1)
   | select([.assets[].name | select(test("^omasheets-native-[0-9]+\\.[0-9]+\\.[0-9]+-linux-x86_64\\.tar\\.gz\\.sha256$"))] | length == 1)
-  ][0] // error("No development build has finished publishing yet. Retry after CI completes.")' \
+  ] | max_by(.published_at) // error("No development build has finished publishing yet. Retry after CI completes.")' \
   "$work/releases.json" > "$work/release.json"
 revision=$(jq -r .target_commitish "$work/release.json")
 archive=$(jq -r '.assets[].name | select(test("^omasheets-native-[0-9]+\\.[0-9]+\\.[0-9]+-linux-x86_64\\.tar\\.gz$"))' "$work/release.json")

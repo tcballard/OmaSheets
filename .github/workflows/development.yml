@@ -94,5 +94,6 @@ jobs:
           "$HOME/.local/bin/omasheets" update
           "$HOME/.local/bin/omasheets" doctor --json > doctor.json
           jq -e '.ready == true' doctor.json
+          jq -e ' .source.commit == env.BUILD_SHA ' "$HOME/.local/share/omasheets/app/provenance.json"
           test -x "$HOME/.local/share/omasheets/app/bin/omasheets-update"
           xvfb-run -a timeout 20 "$HOME/.local/share/omasheets/app/bin/omasheets-setup" --capture installed-setup.png
