@@ -1123,7 +1123,8 @@ ApplicationWindow {
         running: backend.capturePath.length > 0 && !backend.busy
             && (backend.captureReview.length === 0 || backend.reviewJson.length > 0)
         onTriggered: {
-            const target = backend.homeMode ? welcomePane : firstSteps;
+            const target = backend.captureReview.length > 0 ? window.contentItem
+                : backend.homeMode ? welcomePane : firstSteps;
             if (!target.grabToImage(result => {
                 if (!result.saveToFile(backend.capturePath)) Qt.exit(1);
                 else Qt.quit();
