@@ -1208,6 +1208,23 @@ mod tests {
     }
 
     #[test]
+    fn matrix_and_database_formulas_match_independent_caches() {
+        let path = temporary_xlsx(&package(
+            &[],
+            "",
+            r#"<c r="B1"><f>MMULT(TRANSPOSE(A1:A2),A1:A2)</f><v>13</v></c><c r="C1"><f>INDEX(TRANSPOSE({1,2,3;4,5,6}),3,2)</f><v>6</v></c><c r="D1"><f>DAVERAGE({"Kind","Value";"A",10;"B",50;"A",20},"Value",{"Kind";"=A"})</f><v>15</v></c><c r="E1"><f>DMAX({"Kind","Value";"A",10;"B",50;"A",20},2,{"Kind";"=A"})</f><v>20</v></c><c r="F1"><f>DMIN({"Kind","Value";"A",10;"B",50;"A",20},2,{"Kind";"=A"})</f><v>10</v></c><c r="G1"><f>DSTDEV({"Kind","Value";"A",10;"B",50;"A",20},2,{"Kind";"=A"})</f><v>7.0710678118654755</v></c>"#,
+            "",
+        ));
+        let report = import_xlsx(&path, ImportLimits::default())
+            .unwrap()
+            .report();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(report.formula_cells_loaded, 7);
+        assert_eq!(report.stored_values_matched, 7);
+        assert_eq!(report.stored_values_mismatched, 0);
+    }
+
+    #[test]
     fn reference_valued_index_matches_xlsx_caches() {
         let bytes = package(
             &[],
