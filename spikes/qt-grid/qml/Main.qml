@@ -792,7 +792,7 @@ ApplicationWindow {
             }
 
             function clearCell() {
-                if (editor.visible)
+                if (hasDraft)
                     return;
                 if (selectionRows > 1 || selectionColumns > 1) {
                     backend.clearCells(selectionRow, selectionColumn, selectionRows, selectionColumns);
@@ -803,7 +803,7 @@ ApplicationWindow {
             }
 
             function copySelection() {
-                if (editor.visible)
+                if (hasDraft)
                     return;
                 if (!backend.copyRange(selectionRow, selectionColumn,
                         selectionRows, selectionColumns))
@@ -812,7 +812,7 @@ ApplicationWindow {
             }
 
             function pasteSelection() {
-                if (editor.visible)
+                if (hasDraft)
                     return;
                 clipboardBuffer.text = "";
                 clipboardBuffer.paste();

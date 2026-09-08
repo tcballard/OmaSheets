@@ -14,7 +14,7 @@ class GridEditRecoveryTests(unittest.TestCase):
     def test_failed_save_preserves_draft_and_selection(self):
         qml = (ROOT / "spikes/qt-grid/qml/Main.qml").read_text()
         functions = []
-        for name in ("selectCell", "beginEdit", "commitEdit", "finishEdit", "clearCell", "switchSheet",
+        for name in ("selectCell", "moveCell", "beginEdit", "commitEdit", "finishEdit", "clearCell", "switchSheet",
                      "copySelection", "pasteSelection", "undoSelection"):
             start = qml.index("function " + name + "(")
             opening = qml.index("{", start)
@@ -34,6 +34,9 @@ for (const [name, getter] of Object.entries({
     selectionRows: () => Math.abs(currentRow - anchorRow) + 1,
     selectionColumns: () => Math.abs(currentColumn - anchorColumn) + 1
 })) Object.defineProperty(globalThis, name, {get: getter});
+const formulaBar = {editing:false, draft:'', original:'', forceActiveFocus() {}};
+const metrics = {rowHeight() { return 27; }, mergeAt() { return null; }};
+Object.defineProperty(globalThis, 'hasDraft', {get: () => editor.visible || formulaBar.editing});
 let systemClipboard = 'original';
 const clipboardBuffer = {text: '', selectAll() {}, copy() { systemClipboard = this.text; },
     paste() { this.text = systemClipboard; }};
@@ -133,6 +136,13 @@ assert.deepEqual(undos, [false,true]);
 editor.visible = true;
 undoSelection(false);
 assert.deepEqual(undos, [false,true]);
+editor.visible=false;
+formulaBar.editing=true;formulaBar.original='old';formulaBar.draft='unsaved';
+backend.setCellText=()=>false;
+assert.equal(selectCell(8,8),false);
+assert.equal(formulaBar.editing,true);assert.equal(formulaBar.draft,'unsaved');
+clearCell();pasteSelection();undoSelection(false);
+assert.equal(formulaBar.editing,true);assert.deepEqual(undos,[false,true]);
 """
         subprocess.run([shutil.which("node"), "-e", script], check=True)
 
