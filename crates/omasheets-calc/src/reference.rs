@@ -1,6 +1,125 @@
 //! Reference-valued selections retain a bounded, stable dependency envelope.
 use super::*;
 
+/// Narrow only provably constant axes, after stable bindings have been applied.
+/// The persisted parsed shape remains unchanged, including legacy INDEX bindings.
+pub(super) fn narrow_reference_dependencies(expression: Expr) -> Expr {
+    match expression {
+        Expr::UnaryMinus(inner) => {
+            Expr::UnaryMinus(Box::new(narrow_reference_dependencies(*inner)))
+        }
+        Expr::Percent(inner) => Expr::Percent(Box::new(narrow_reference_dependencies(*inner))),
+        Expr::Binary(op, left, right) => Expr::Binary(
+            op,
+            Box::new(narrow_reference_dependencies(*left)),
+            Box::new(narrow_reference_dependencies(*right)),
+        ),
+        Expr::Function(function, arguments) => {
+            let mut arguments: Vec<_> = arguments
+                .into_iter()
+                .map(narrow_reference_dependencies)
+                .collect();
+            if function == Function::Index && matches!(arguments.len(), 2 | 3) {
+                narrow_index(&mut arguments);
+            } else if function == Function::ReferenceSpan
+                && arguments.len() == 3
+                && matches!(arguments[2], Expr::Range { members: None, .. })
+                && let (Some((a, b)), Some((c, d))) = (
+                    reference_bounds(&arguments[0]),
+                    reference_bounds(&arguments[1]),
+                )
+                && a.sheet == c.sheet
+                && let Ok(envelope) = expand_range(
+                    CellId::new(a.sheet, a.row.min(c.row), a.column.min(c.column)),
+                    CellId::new(a.sheet, b.row.max(d.row), b.column.max(d.column)),
+                )
+            {
+                arguments[2] = envelope;
+            }
+            Expr::Function(function, arguments)
+        }
+        other => other,
+    }
+}
+
+fn narrow_index(arguments: &mut Vec<Expr>) {
+    let Expr::Range {
+        anchor,
+        members,
+        rows,
+        columns,
+    } = &arguments[0]
+    else {
+        return;
+    };
+    let (anchor, members, rows, columns) = (*anchor, members.clone(), *rows, *columns);
+    let literal = |expression: &Expr, bound: usize| match expression {
+        Expr::Number(value)
+            if value.is_finite() && *value >= 1.0 && value.trunc() <= bound as f64 =>
+        {
+            Some(value.trunc() as usize - 1)
+        }
+        _ => None,
+    };
+    let horizontal = rows == 1 && arguments.len() == 2;
+    let selected_row = if horizontal {
+        None
+    } else {
+        literal(&arguments[1], rows)
+    };
+    let selected_column = if horizontal {
+        literal(&arguments[1], columns)
+    } else {
+        arguments.get(2).and_then(|arg| literal(arg, columns))
+    };
+    if selected_row.is_none() && selected_column.is_none() {
+        return;
+    }
+    // Make the original omitted-column semantics explicit before changing shape.
+    if arguments.len() == 2 && !horizontal {
+        arguments.push(Expr::Number(if columns == 1 { 1.0 } else { 0.0 }));
+    }
+    let first_row = selected_row.unwrap_or(0);
+    let first_column = selected_column.unwrap_or(0);
+    let new_rows = if selected_row.is_some() { 1 } else { rows };
+    let new_columns = if selected_column.is_some() {
+        1
+    } else {
+        columns
+    };
+    let (new_anchor, new_members) = if let Some(members) = members {
+        let selected: Vec<_> = (first_row..first_row + new_rows)
+            .flat_map(|row| {
+                let members = &members;
+                (first_column..first_column + new_columns)
+                    .map(move |column| members[row * columns + column])
+            })
+            .collect();
+        (selected[0], Some(selected))
+    } else {
+        (
+            CellId::new(
+                anchor.sheet,
+                anchor.row + first_row as u32,
+                anchor.column + first_column as u32,
+            ),
+            None,
+        )
+    };
+    arguments[0] = Expr::Range {
+        anchor: new_anchor,
+        members: new_members,
+        rows: new_rows,
+        columns: new_columns,
+    };
+    if selected_row.is_some() || (horizontal && selected_column.is_some()) {
+        arguments[1] = Expr::Number(1.0);
+    }
+    if !horizontal && selected_column.is_some() {
+        arguments[2] = Expr::Number(1.0);
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct ReferenceView {
     node: Option<usize>,
@@ -301,6 +420,46 @@ mod tests {
         assert_eq!(workbook.value(cell(5, 6)), Value::Number(60.0));
         workbook.set_number(cell(2, 0), 40.0);
         assert_eq!(workbook.value(cell(5, 6)), Value::Number(70.0));
+    }
+
+    #[test]
+    fn constant_index_axes_do_not_create_false_cycles() {
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(0, 0), 10.0);
+        workbook.set_number(cell(1, 0), 20.0);
+        workbook.set_number(cell(2, 0), 30.0);
+        workbook.set_number(cell(0, 3), 2.0);
+        workbook
+            .set_formula(cell(0, 1), "=SUM(A1:INDEX(A1:B3,D1,1))")
+            .unwrap();
+        assert_eq!(workbook.value(cell(0, 1)), Value::Number(30.0));
+        workbook.set_number(cell(0, 3), 3.0);
+        assert_eq!(workbook.value(cell(0, 1)), Value::Number(60.0));
+        workbook.set_number(cell(2, 0), 40.0);
+        assert_eq!(workbook.value(cell(0, 1)), Value::Number(70.0));
+        for (formula, expected) in [
+            ("=SUM(INDEX(A1:B3,2))", 20.0),
+            ("=INDEX(A1:B1,1)", 10.0),
+            ("=INDEX(A1:B3,2,1)", 20.0),
+            ("=SUM(INDEX(A1:B3,0,1))", 70.0),
+            ("=IFERROR(INDEX(A1:B3,4,1),99)", 99.0),
+        ] {
+            workbook.set_formula(cell(6, 6), formula).unwrap();
+            assert_eq!(
+                workbook.value(cell(6, 6)),
+                Value::Number(expected),
+                "{formula}"
+            );
+        }
+        assert!(matches!(
+            workbook.set_formula(cell(0, 0), "=INDEX(A1:B3,1,1)"),
+            Err(FormulaError::Cycle(_))
+        ));
+        let parsed = ParsedFormula::parse("=INDEX(A1:B3,2,1)", 0, &HashMap::new()).unwrap();
+        assert_eq!(parsed.reference_count(), 6);
+        let mapped = parsed.map_references(|id| CellId::new(id.sheet, 2 - id.row, id.column));
+        workbook.set_parsed_formula(cell(6, 6), mapped).unwrap();
+        assert_eq!(workbook.value(cell(6, 6)), Value::Number(20.0));
     }
 
     #[test]

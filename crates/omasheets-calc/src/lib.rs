@@ -807,7 +807,7 @@ impl Workbook {
         cell: CellId,
         formula: ParsedFormula,
     ) -> Result<RecalcReport, FormulaError> {
-        let parsed = formula.expression;
+        let parsed = reference::narrow_reference_dependencies(formula.expression);
         let mut cells = BTreeSet::new();
         let mut range_keys = Vec::new();
         collect_dependencies(&parsed, &mut cells, &mut range_keys);
