@@ -13,6 +13,9 @@
 //! unchanged. There is no other mutation path. Calculation is delegated to
 //! `omasheets-calc`; the event core never reads a clock.
 
+pub mod presentation;
+pub use presentation::SheetPresentation;
+
 use omasheets_calc::{
     CalcError, CellId, FormulaError, ParsedFormula, ReferenceGroup, StructuredColumn,
     StructuredContext, StructuredTable, Value, Workbook,
@@ -399,6 +402,14 @@ pub struct ComputedCell {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Operation {
+    SetPresentation {
+        sheet: SheetId,
+        presentation: SheetPresentation,
+    },
+    ReorderRows {
+        sheet: SheetId,
+        rows: Vec<RowId>,
+    },
     CreateDocument {
         document: DocumentId,
         name: String,
@@ -568,6 +579,9 @@ impl Operation {
                 vec![Touch::Document]
             }
             Operation::RecordMerge { .. } => Vec::new(),
+            Operation::SetPresentation { sheet, .. } | Operation::ReorderRows { sheet, .. } => {
+                vec![Touch::Sheet { sheet: *sheet }]
+            }
             Operation::AddSheet { sheet, .. }
             | Operation::RenameSheet { sheet, .. }
             | Operation::DeleteSheet { sheet } => vec![Touch::Sheet { sheet: *sheet }],
@@ -783,6 +797,7 @@ pub enum ApplyError {
     ProposalNotPending(ProposalId),
     TickNotMonotonic,
     InvalidDigest,
+    InvalidPresentation(String),
     UnknownBranch(BranchId),
     UnknownCheck(CheckId),
     UnknownWatch(WatchId),
@@ -814,6 +829,18 @@ impl From<FormulaError> for ApplyError {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum Command {
+    RestoreCell {
+        cell: CellRef,
+        input: Option<CellInput>,
+    },
+    SetPresentation {
+        sheet: SheetId,
+        presentation: SheetPresentation,
+    },
+    ReorderRows {
+        sheet: SheetId,
+        rows: Vec<RowId>,
+    },
     AddSheet {
         name: String,
     },
@@ -960,6 +987,7 @@ struct Sheet {
     occupied: BTreeSet<(usize, usize)>,
     column_types: BTreeMap<ColumnId, ColumnType>,
     cells: BTreeMap<(RowId, ColumnId), CellState>,
+    presentation: SheetPresentation,
 }
 
 impl Sheet {
@@ -1146,6 +1174,8 @@ pub struct SheetSnapshot {
     pub columns: Vec<ColumnId>,
     pub column_types: BTreeMap<ColumnId, ColumnType>,
     pub cells: Vec<CellSnapshot>,
+    #[serde(default, skip_serializing_if = "SheetPresentation::is_default")]
+    pub presentation: SheetPresentation,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1280,6 +1310,7 @@ impl Document {
                     row_ordinals,
                     column_ordinals,
                     column_types: sheet.column_types.clone(),
+                    presentation: sheet.presentation.clone(),
                     cells: BTreeMap::new(),
                 },
             );
@@ -1328,6 +1359,9 @@ impl Document {
         document.watches = snapshot.watches.clone();
         document.merges = snapshot.merges.clone();
         document.calc.end_bulk();
+        for sheet in document.sheets() {
+            document.presentation(*sheet)?.validate(&document, *sheet)?;
+        }
         Ok(document)
     }
 
@@ -1544,8 +1578,16 @@ impl Document {
         Some(inferred)
     }
 
+    pub fn tables(&self) -> &BTreeMap<TableId, Table> {
+        &self.tables
+    }
+
     pub fn table(&self, table: TableId) -> Option<&Table> {
         self.tables.get(&table)
+    }
+
+    pub fn presentation(&self, sheet: SheetId) -> Result<&SheetPresentation, ApplyError> {
+        Ok(&self.sheet(sheet)?.presentation)
     }
 
     pub fn proposals(&self) -> &BTreeMap<ProposalId, ProposalRecord> {
@@ -1618,6 +1660,7 @@ impl Document {
                     rows: sheet.rows.clone(),
                     columns: sheet.columns.clone(),
                     column_types: sheet.column_types.clone(),
+                    presentation: sheet.presentation.clone(),
                     cells: sheet
                         .cells
                         .iter()
@@ -1713,6 +1756,19 @@ impl Document {
                 name,
             },
             Command::RenameSheet { sheet, name } => Operation::RenameSheet { sheet, name },
+            Command::RestoreCell { cell, input } => match input {
+                Some(CellInput::Value { value }) => Operation::SetValue { cell, value },
+                Some(CellInput::Formula { formula }) => Operation::SetFormula { cell, formula },
+                None => Operation::ClearCell { cell },
+            },
+            Command::SetPresentation {
+                sheet,
+                presentation,
+            } => Operation::SetPresentation {
+                sheet,
+                presentation,
+            },
+            Command::ReorderRows { sheet, rows } => Operation::ReorderRows { sheet, rows },
             Command::DeleteSheet { sheet } => Operation::DeleteSheet { sheet },
             Command::AddColumns { sheet, count, at } => {
                 check_batch(count)?;
@@ -2494,9 +2550,37 @@ impl Document {
                         column_positions: BTreeMap::new(),
                         occupied: BTreeSet::new(),
                         column_types: BTreeMap::new(),
+                        presentation: SheetPresentation::default(),
                         cells: BTreeMap::new(),
                     },
                 );
+            }
+            Operation::SetPresentation {
+                sheet,
+                presentation,
+            } => {
+                presentation.validate(self, *sheet)?;
+                let mut presentation = presentation.clone();
+                presentation.canonicalize();
+                self.sheets.get_mut(sheet).expect("checked").presentation = presentation;
+            }
+            Operation::ReorderRows { sheet, rows } => {
+                let state = self.sheet(*sheet)?;
+                if rows.len() != state.rows.len()
+                    || rows.len() > MAX_BATCH
+                    || rows.iter().collect::<BTreeSet<_>>()
+                        != state.rows.iter().collect::<BTreeSet<_>>()
+                {
+                    return Err(ApplyError::InvalidPresentation(
+                        "Row order must be a complete permutation within 10,000 rows".into(),
+                    ));
+                }
+                let mut presentation = state.presentation.clone();
+                presentation.reordered(rows, &state.columns)?;
+                let state = self.sheets.get_mut(sheet).expect("checked");
+                state.rows = rows.clone();
+                state.presentation = presentation;
+                state.rebuild_view();
             }
             Operation::RenameSheet { sheet, name } => {
                 check_name(name)?;
@@ -2537,8 +2621,13 @@ impl Document {
                     return Err(ApplyError::PositionOutOfRange);
                 }
                 self.check_fresh_batch(columns.iter().map(|id| id.0))?;
+                let mut next_columns = state.columns.clone();
+                next_columns.splice(*at..*at, columns.iter().copied());
+                let mut presentation = state.presentation.clone();
+                presentation.inserted(&state.rows, &state.columns, &state.rows, &next_columns)?;
                 let state = self.sheets.get_mut(sheet).expect("checked");
-                state.columns.splice(*at..*at, columns.iter().copied());
+                state.columns = next_columns;
+                state.presentation = presentation;
                 for column in columns {
                     state
                         .column_ordinals
@@ -2572,8 +2661,18 @@ impl Document {
                         }
                     }
                     self.check_fresh_batch(rows.iter().map(|id| id.0))?;
+                    let mut next_rows = state.rows.clone();
+                    next_rows.splice(*at..*at, rows.iter().copied());
+                    let mut presentation = state.presentation.clone();
+                    presentation.inserted(
+                        &state.rows,
+                        &state.columns,
+                        &next_rows,
+                        &state.columns,
+                    )?;
                     let state = self.sheets.get_mut(sheet).expect("checked");
-                    state.rows.splice(*at..*at, rows.iter().copied());
+                    state.rows = next_rows;
+                    state.presentation = presentation;
                     for row in rows {
                         state.row_ordinals.insert(*row, state.next_row_ordinal);
                         state.next_row_ordinal += 1;
@@ -2688,7 +2787,11 @@ impl Document {
                     self.clear_cell(cell);
                 }
                 let state = self.sheets.get_mut(sheet).expect("checked");
+                let old_rows = state.rows.clone();
                 state.rows.retain(|row| !doomed.contains(row));
+                state
+                    .presentation
+                    .deleted(&old_rows, &state.columns, &state.rows, &state.columns);
                 state.rebuild_view();
                 for row in &doomed {
                     state.row_ordinals.remove(row);
@@ -2729,7 +2832,11 @@ impl Document {
                     self.clear_cell(cell);
                 }
                 let state = self.sheets.get_mut(sheet).expect("checked");
+                let old_columns = state.columns.clone();
                 state.columns.retain(|column| !doomed.contains(column));
+                state
+                    .presentation
+                    .deleted(&state.rows, &old_columns, &state.rows, &state.columns);
                 state.rebuild_view();
                 for column in &doomed {
                     state.column_ordinals.remove(column);
@@ -2911,6 +3018,7 @@ impl Document {
             Operation::SetValue { cell, value } => {
                 check_literal(value)?;
                 let state = self.sheet(cell.sheet)?;
+                state.presentation.check_anchor(cell.row, cell.column)?;
                 self.check_cell_exists(state, cell)?;
                 let expected = state
                     .column_types
@@ -3301,6 +3409,7 @@ impl Document {
         provenance: Provenance,
     ) -> Result<(), ApplyError> {
         let state = self.sheet(cell.sheet)?;
+        state.presentation.check_anchor(cell.row, cell.column)?;
         self.check_cell_exists(state, &cell)?;
         if formula.source.chars().count() > MAX_FORMULA_CHARS {
             return Err(ApplyError::FormulaTooLong);
