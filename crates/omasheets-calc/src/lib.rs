@@ -361,10 +361,16 @@ enum Function {
     WorkDay,
     Lookup,
     Pmt,
+    Pv,
+    Irr,
     Npv,
     Xnpv,
     Xirr,
     NormDist,
+    NormSDist,
+    NormSDistLegacy,
+    CovarianceP,
+    CovarianceS,
     AverageA,
     Correl,
     IsBlank,
@@ -1595,12 +1601,20 @@ impl Workbook {
         }
         if matches!(
             function,
-            Function::Pmt | Function::Npv | Function::Xnpv | Function::Xirr
+            Function::Pmt
+                | Function::Pv
+                | Function::Irr
+                | Function::Npv
+                | Function::Xnpv
+                | Function::Xirr
         ) {
             return self.evaluate_financial_function(function, arguments);
         }
-        if function == Function::Correl {
-            return self.evaluate_correl(arguments);
+        if matches!(
+            function,
+            Function::Correl | Function::CovarianceP | Function::CovarianceS
+        ) {
+            return self.evaluate_paired_statistics(function, arguments);
         }
 
         if matches!(
@@ -1637,6 +1651,22 @@ impl Workbook {
         match function {
             Function::Median if !numbers.is_empty() => median(numbers),
             Function::NormDist => normal_distribution(&values),
+            Function::NormSDist | Function::NormSDistLegacy => {
+                let required = if function == Function::NormSDistLegacy {
+                    1
+                } else {
+                    2
+                };
+                if values.len() != required {
+                    return Value::Error(CalcError::InvalidArguments);
+                }
+                normal_distribution(&[
+                    values[0].clone(),
+                    Value::Number(0.0),
+                    Value::Number(1.0),
+                    values.get(1).cloned().unwrap_or(Value::Boolean(true)),
+                ])
+            }
             Function::AverageA => average_a(&values),
             Function::StDev => deviation(&numbers, true, true),
             Function::StDevP => deviation(&numbers, false, true),
@@ -1735,10 +1765,14 @@ impl Workbook {
             | Function::NetworkDays
             | Function::WorkDay
             | Function::Pmt
+            | Function::Pv
+            | Function::Irr
             | Function::Npv
             | Function::Xnpv
             | Function::Xirr
             | Function::Correl
+            | Function::CovarianceP
+            | Function::CovarianceS
             | Function::Date
             | Function::Year
             | Function::Month
@@ -2129,10 +2163,10 @@ impl Workbook {
         }
     }
 
-    /// `PMT`, `NPV`, `XNPV` and `XIRR`.
+    /// Present values, annuity payments, and periodic or dated returns.
     fn evaluate_financial_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
         let result = match function {
-            Function::Pmt => {
+            Function::Pmt | Function::Pv => {
                 if !matches!(arguments.len(), 3..=5) {
                     return Value::Error(CalcError::InvalidArguments);
                 }
@@ -2143,13 +2177,34 @@ impl Workbook {
                         Err(error) => return Value::Error(error),
                     }
                 }
-                payment(
+                let calculate = if function == Function::Pv {
+                    present_value
+                } else {
+                    payment
+                };
+                calculate(
                     numbers[0],
                     numbers[1],
                     numbers[2],
                     numbers.get(3).copied().unwrap_or(0.0),
                     numbers.get(4).copied().unwrap_or(0.0) != 0.0,
                 )
+            }
+            Function::Irr => {
+                if !matches!(arguments.len(), 1 | 2) {
+                    return Value::Error(CalcError::InvalidArguments);
+                }
+                let mut values = Vec::new();
+                self.flatten_values(&arguments[0], &mut values);
+                if let Some(error) = first_error(&values) {
+                    return Value::Error(error);
+                }
+                let guess = arguments
+                    .get(1)
+                    .map_or(Ok(0.1), |argument| number(self.evaluate(argument)));
+                guess.and_then(|guess| {
+                    periodic_internal_rate_of_return(&numeric_only(&values), guess)
+                })
             }
             Function::Npv => {
                 if arguments.len() < 2 {
@@ -2208,9 +2263,8 @@ impl Workbook {
         }
     }
 
-    /// `CORREL(array1, array2)`: Pearson correlation over the positions where
-    /// both sides are numbers.
-    fn evaluate_correl(&self, arguments: &[Expr<usize>]) -> Value {
+    /// Correlation or covariance over positions where both sides are numbers.
+    fn evaluate_paired_statistics(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
         if arguments.len() != 2 {
             return Value::Error(CalcError::InvalidArguments);
         }
@@ -2232,7 +2286,12 @@ impl Workbook {
                 _ => None,
             })
             .collect();
-        match correlation(&pairs) {
+        let result = if function == Function::Correl {
+            correlation(&pairs)
+        } else {
+            covariance(&pairs, function == Function::CovarianceS)
+        };
+        match result {
             Ok(value) => Value::Number(value),
             Err(error) => Value::Error(error),
         }
@@ -2912,7 +2971,10 @@ fn is_elementwise(function: Function) -> bool {
             | Function::YearFrac
             | Function::Days360
             | Function::Pmt
+            | Function::Pv
             | Function::NormDist
+            | Function::NormSDist
+            | Function::NormSDistLegacy
             | Function::IsBlank
             | Function::IsNumber
             | Function::IsText
@@ -3285,6 +3347,94 @@ fn payment(
     }
     let timing = if at_start { 1.0 + rate } else { 1.0 };
     Ok(-(present * growth + future) * rate / (timing * (growth - 1.0)))
+}
+
+fn present_value(
+    rate: f64,
+    periods: f64,
+    payment: f64,
+    future: f64,
+    at_start: bool,
+) -> Result<f64, CalcError> {
+    if ![rate, periods, payment, future]
+        .iter()
+        .all(|value| value.is_finite())
+    {
+        return Err(CalcError::InvalidNumber);
+    }
+    let result = if rate == 0.0 {
+        -payment * periods - future
+    } else {
+        let growth = (1.0 + rate).powf(periods);
+        if growth == 0.0 {
+            return Err(CalcError::DivisionByZero);
+        }
+        let growth_minus_one = if rate > -1.0 {
+            (periods * rate.ln_1p()).exp_m1()
+        } else {
+            growth - 1.0
+        };
+        -(future + payment * if at_start { 1.0 + rate } else { 1.0 } * growth_minus_one / rate)
+            / growth
+    };
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        Err(CalcError::InvalidNumber)
+    }
+}
+
+/// Excel's periodic IRR iteration, keeping text/blanks out of the period count.
+fn periodic_internal_rate_of_return(values: &[f64], guess: f64) -> Result<f64, CalcError> {
+    if !guess.is_finite()
+        || guess <= -1.0
+        || !values.iter().any(|value| *value > 0.0)
+        || !values.iter().any(|value| *value < 0.0)
+    {
+        return Err(CalcError::InvalidNumber);
+    }
+    let mut rate = guess;
+    for _ in 0..20 {
+        let base = 1.0 + rate;
+        let mut value = 0.0;
+        let mut slope = 0.0;
+        for (period, cash) in values.iter().enumerate() {
+            let discount = base.powi(period as i32);
+            value += cash / discount;
+            slope -= period as f64 * cash / (discount * base);
+        }
+        if slope == 0.0 || !slope.is_finite() {
+            return Err(CalcError::InvalidNumber);
+        }
+        let next = rate - value / slope;
+        if !next.is_finite() || next <= -1.0 {
+            return Err(CalcError::InvalidNumber);
+        }
+        if (next - rate).abs() < 1.0e-9 {
+            return Ok(next);
+        }
+        rate = next;
+    }
+    Err(CalcError::InvalidNumber)
+}
+
+fn covariance(pairs: &[(f64, f64)], sample: bool) -> Result<f64, CalcError> {
+    let correction = usize::from(sample);
+    if pairs.len() <= correction {
+        return Err(CalcError::DivisionByZero);
+    }
+    let mean_x = pairs.iter().map(|(x, _)| x).sum::<f64>() / pairs.len() as f64;
+    let mean_y = pairs.iter().map(|(_, y)| y).sum::<f64>() / pairs.len() as f64;
+    let value = pairs
+        .iter()
+        .map(|(x, y)| (x - mean_x) * (y - mean_y))
+        .sum::<f64>()
+        / (pairs.len() - correction) as f64;
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(CalcError::InvalidNumber)
+    }
 }
 
 /// `NPV`: cash flows discounted from the end of the first period.
@@ -4113,6 +4263,22 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
         let mut expression = self.parse_primary()?;
         loop {
             self.skip_space();
+            if self.peek() != Some(b':') {
+                break;
+            }
+            self.offset += 1;
+            // In Sheet!A1:B2 the unqualified second endpoint inherits Sheet.
+            let original_sheet = self.sheet;
+            self.sheet = match &expression {
+                Expr::Reference(cell) | Expr::Range { anchor: cell, .. } => cell.sheet,
+                _ => self.sheet,
+            };
+            let right = self.parse_primary();
+            self.sheet = original_sheet;
+            expression = join_reference_range(expression, right?)?;
+        }
+        loop {
+            self.skip_space();
             if self.peek() != Some(b'%') {
                 break;
             }
@@ -4316,7 +4482,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
             return Ok(Expr::Boolean(false));
         }
         match parse_a1(token, self.sheet) {
-            Ok(first) => self.parse_range_tail(first, self.sheet),
+            Ok(first) => Ok(Expr::Reference(first)),
             Err(_) => self.parse_defined_name(token),
         }
     }
@@ -4439,7 +4605,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
         }
         let token = &self.source[start..self.offset];
         match parse_a1(token, sheet) {
-            Ok(first) => self.parse_range_tail(first, sheet),
+            Ok(first) => Ok(Expr::Reference(first)),
             Err(_)
                 if self
                     .defined_names
@@ -4450,21 +4616,6 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
             }
             Err(error) => Err(error),
         }
-    }
-
-    fn parse_range_tail(&mut self, first: CellId, sheet: u32) -> Result<Expr, FormulaError> {
-        self.skip_space();
-        if self.peek() != Some(b':') {
-            return Ok(Expr::Reference(first));
-        }
-        self.offset += 1;
-        self.skip_space();
-        let second_start = self.offset;
-        while matches!(self.peek(), Some(byte) if byte.is_ascii_alphanumeric() || byte == b'$') {
-            self.offset += 1;
-        }
-        let second = parse_a1(&self.source[second_start..self.offset], sheet)?;
-        expand_range(first, second)
     }
 
     fn resolve_sheet(&self, name: &str) -> Result<u32, FormulaError> {
@@ -4597,10 +4748,18 @@ const FUNCTION_REGISTRY: &[(&str, Function)] = &[
     ("WORKDAY", Function::WorkDay),
     ("LOOKUP", Function::Lookup),
     ("PMT", Function::Pmt),
+    ("PV", Function::Pv),
+    ("IRR", Function::Irr),
     ("NPV", Function::Npv),
     ("XNPV", Function::Xnpv),
     ("XIRR", Function::Xirr),
     ("NORMDIST", Function::NormDist),
+    ("NORM.DIST", Function::NormDist),
+    ("NORMSDIST", Function::NormSDistLegacy),
+    ("NORM.S.DIST", Function::NormSDist),
+    ("COVAR", Function::CovarianceP),
+    ("COVARIANCE.P", Function::CovarianceP),
+    ("COVARIANCE.S", Function::CovarianceS),
     ("AVERAGEA", Function::AverageA),
     ("CORREL", Function::Correl),
     ("ISBLANK", Function::IsBlank),
@@ -4804,9 +4963,170 @@ fn expand_range(first: CellId, second: CellId) -> Result<Expr, FormulaError> {
     })
 }
 
+fn join_reference_range(left: Expr, right: Expr) -> Result<Expr, FormulaError> {
+    fn bounds(expression: &Expr) -> Option<(CellId, CellId)> {
+        match expression {
+            Expr::Reference(cell) => Some((*cell, *cell)),
+            Expr::Range {
+                anchor,
+                rows,
+                columns,
+                members: None,
+            } => Some((
+                *anchor,
+                CellId::new(
+                    anchor.sheet,
+                    anchor.row + *rows as u32 - 1,
+                    anchor.column + *columns as u32 - 1,
+                ),
+            )),
+            _ => None,
+        }
+    }
+    let left_bounds = bounds(&left);
+    let right_bounds = bounds(&right);
+    let left_deleted = matches!(left, Expr::Error(CalcError::InvalidReference));
+    let right_deleted = matches!(right, Expr::Error(CalcError::InvalidReference));
+    if (left_deleted && (right_deleted || right_bounds.is_some()))
+        || (right_deleted && left_bounds.is_some())
+    {
+        return Ok(Expr::Error(CalcError::InvalidReference));
+    }
+    let (Some((first, first_end)), Some((second, second_end))) = (left_bounds, right_bounds) else {
+        return Err(FormulaError::InvalidReference(
+            "range endpoints must be references".into(),
+        ));
+    };
+    if first.sheet != second.sheet {
+        return Err(FormulaError::InvalidReference(
+            "range endpoints cross sheets".into(),
+        ));
+    }
+    expand_range(
+        CellId::new(
+            first.sheet,
+            first.row.min(second.row),
+            first.column.min(second.column),
+        ),
+        CellId::new(
+            first.sheet,
+            first_end.row.max(second_end.row),
+            first_end.column.max(second_end.column),
+        ),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deleted_and_qualified_range_endpoints_follow_reference_semantics() {
+        let mut workbook = Workbook::default();
+        workbook.define_sheet(0, "Input");
+        workbook.define_sheet(1, "Other sheet");
+        workbook.set_number(CellId::new(1, 0, 0), 3.0);
+        workbook.set_number(CellId::new(1, 1, 0), 7.0);
+        for formula in [
+            "=SUM('Other sheet'!A1:A2)",
+            "=SUM('Other sheet'!A1:'Other sheet'!A2)",
+            "=SUM(('Other sheet'!A1):('Other sheet'!A2))",
+        ] {
+            workbook.set_formula(cell(0, 3), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, 3)), Value::Number(10.0), "{formula}");
+        }
+        let changed = workbook.set_number(CellId::new(1, 1, 0), 9.0);
+        assert!(changed.evaluated.contains(&cell(0, 3)));
+        assert_eq!(workbook.value(cell(0, 3)), Value::Number(12.0));
+        for formula in [
+            "=SUM(#REF!:#REF!)",
+            "=SUM(A1:#REF!)",
+            "=SUM(#REF!:A1)",
+            "=SUM('Other sheet'!#REF!:A2)",
+            "=SUM('Other sheet'!A1:'Other sheet'!#REF!)",
+        ] {
+            workbook.set_formula(cell(0, 3), formula).unwrap();
+            assert_eq!(
+                workbook.value(cell(0, 3)),
+                Value::Error(CalcError::InvalidReference),
+                "{formula}"
+            );
+        }
+        workbook
+            .set_formula(cell(0, 3), "=IFERROR(SUM(#REF!:#REF!),17)")
+            .unwrap();
+        assert_eq!(workbook.value(cell(0, 3)), Value::Number(17.0));
+        for formula in [
+            "=SUM(Input!A1:'Other sheet'!A2)",
+            "=SUM(A1:2)",
+            "=SUM(1:A2)",
+            "=SUM(A1:[1]Sheet!B2)",
+        ] {
+            assert!(
+                workbook.set_formula(cell(0, 3), formula).is_err(),
+                "{formula}"
+            );
+            assert_eq!(workbook.value(cell(0, 3)), Value::Number(17.0));
+        }
+    }
+
+    #[test]
+    fn added_financial_and_statistical_functions_match_reference_values() {
+        let mut workbook = Workbook::default();
+        let examples = [
+            ("=PV(0,10,-100)", 1000.0, 1e-10),
+            ("=PV(0,0,0,100)", -100.0, 1e-10),
+            ("=PV(0.1,1,-110)", 100.0, 1e-10),
+            ("=PV(0.1,1,-100,,1)", 100.0, 1e-10),
+            ("=PV(0.08/12,240,500,,0)", -59777.15, 0.005),
+            ("=PV(1e-12,1,-100)", 100.0 / (1.0 + 1e-12), 1e-10),
+            ("=IRR({-100,110})", 0.1, 1e-9),
+            ("=IRR({-100,\"ignore\",FALSE,0,121})", 0.1, 1e-9),
+            ("=IRR({-100,90})", -0.1, 1e-9),
+            (
+                "=IRR({-70000,12000,15000,18000,21000,26000})",
+                0.086630948036531,
+                1e-9,
+            ),
+            ("=COVAR({3,2,4,5,6},{9,7,12,15,17})", 5.2, 1e-10),
+            ("=COVARIANCE.P({0,2},{2,0})", -1.0, 1e-10),
+            ("=COVARIANCE.S({0,2},{2,0})", -2.0, 1e-10),
+            ("=COVAR({1,\"ignored\",3},{2,999,6})", 2.0, 1e-10),
+            ("=NORMSDIST(0)", 0.5, 1e-10),
+            ("=_xlfn.NORM.S.DIST(1.333333,TRUE)", 0.908788726, 1e-9),
+            ("=NORM.S.DIST(1.333333,FALSE)", 0.164010148, 1e-9),
+            (
+                "=NORM.DIST(0,0,1,FALSE)",
+                1.0 / (2.0 * std::f64::consts::PI).sqrt(),
+                1e-10,
+            ),
+        ];
+        for (formula, expected, tolerance) in examples {
+            workbook.set_formula(cell(0, 0), formula).unwrap();
+            let Value::Number(value) = workbook.value(cell(0, 0)) else {
+                panic!("{formula} did not return a number")
+            };
+            assert!(
+                (value - expected).abs() < tolerance,
+                "{formula}: {value} != {expected}"
+            );
+        }
+        for (formula, error) in [
+            ("=IRR({1,2})", CalcError::InvalidNumber),
+            ("=IRR({-1,1},-1)", CalcError::InvalidNumber),
+            ("=IRR({-1,#N/A,2})", CalcError::NotAvailable),
+            ("=PV(-1,1,1)", CalcError::DivisionByZero),
+            ("=PV(0,1,#REF!)", CalcError::InvalidReference),
+            ("=COVARIANCE.S({1},{2})", CalcError::DivisionByZero),
+            ("=COVAR({1,2},{3})", CalcError::NotAvailable),
+            ("=COVAR({1,#N/A},{3,4})", CalcError::NotAvailable),
+            ("=NORMSDIST(0,FALSE)", CalcError::InvalidArguments),
+            ("=NORM.S.DIST(0)", CalcError::InvalidArguments),
+        ] {
+            workbook.set_formula(cell(0, 0), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, 0)), Value::Error(error), "{formula}");
+        }
+    }
 
     #[test]
     fn array_constants_feed_aggregates_broadcasting_and_lookups() {

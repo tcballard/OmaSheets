@@ -28,7 +28,7 @@ jobs:
     steps:
       - name: Set runner-local evidence directories
         run: |
-          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/omasheets-corpus-target" >> "$GITHUB_ENV"
+          echo "CORPUS_TARGETS=$RUNNER_TEMP/omasheets-corpus-targets" >> "$GITHUB_ENV"
           echo "CORPUS_EVIDENCE=$RUNNER_TEMP/omasheets-corpus-evidence" >> "$GITHUB_ENV"
           echo "CORPUS_DATA=$RUNNER_TEMP/omasheets-corpus-data" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -56,20 +56,20 @@ jobs:
           mkdir -p "$CORPUS_EVIDENCE/before" "$CORPUS_EVIDENCE/after"
       - name: Build the baseline scorer
         working-directory: baseline
-        run: cargo build --locked --release -p omasheets-corpus
+        run: cargo build --locked --release -p omasheets-corpus --target-dir "$CORPUS_TARGETS/baseline"
       - name: Verify and score the baseline alone
         working-directory: candidate
         run: |
-          "$CARGO_TARGET_DIR/release/omasheets-corpus" verify corpus/sources/enron-figshare.jsonl "$CORPUS_DATA/enron-figshare" > "$CORPUS_EVIDENCE/verify.json"
-          python scripts/performance.py run --name frozen-corpus-before --timeout 900 --output "$CORPUS_EVIDENCE/before/performance.json" -- "$CARGO_TARGET_DIR/release/omasheets-corpus" score corpus/sources/enron-figshare.jsonl "$CORPUS_DATA/enron-figshare" "$CORPUS_EVIDENCE/before/score.json" --timeout-seconds 30
+          "$CORPUS_TARGETS/baseline/release/omasheets-corpus" verify corpus/sources/enron-figshare.jsonl "$CORPUS_DATA/enron-figshare" > "$CORPUS_EVIDENCE/verify.json"
+          python scripts/performance.py run --name frozen-corpus-before --timeout 900 --output "$CORPUS_EVIDENCE/before/performance.json" -- "$CORPUS_TARGETS/baseline/release/omasheets-corpus" score corpus/sources/enron-figshare.jsonl "$CORPUS_DATA/enron-figshare" "$CORPUS_EVIDENCE/before/score.json" --timeout-seconds 30
           python scripts/update_corpus_summary.py --score "$CORPUS_EVIDENCE/before/score.json" --performance "$CORPUS_EVIDENCE/before/performance.json" --manifest corpus/sources/enron-figshare.jsonl --baseline-summary corpus/sources/enron-figshare.score-summary.json --summary "$CORPUS_EVIDENCE/before/summary.json" --delta "$CORPUS_EVIDENCE/before/delta.json" --engine-commit "$(git -C ../baseline rev-parse HEAD)" --runner "GitHub ubuntu-latest x86_64; sequential baseline then candidate; hosted runner, not Omarchy hardware"
       - name: Build the candidate scorer
         working-directory: candidate
-        run: cargo build --locked --release -p omasheets-corpus
+        run: cargo build --locked --release -p omasheets-corpus --target-dir "$CORPUS_TARGETS/candidate"
       - name: Score the candidate alone and report aggregate changes
         working-directory: candidate
         run: |
-          python scripts/performance.py run --name frozen-corpus-after --timeout 900 --output "$CORPUS_EVIDENCE/after/performance.json" -- "$CARGO_TARGET_DIR/release/omasheets-corpus" score corpus/sources/enron-figshare.jsonl "$CORPUS_DATA/enron-figshare" "$CORPUS_EVIDENCE/after/score.json" --timeout-seconds 30
+          python scripts/performance.py run --name frozen-corpus-after --timeout 900 --output "$CORPUS_EVIDENCE/after/performance.json" -- "$CORPUS_TARGETS/candidate/release/omasheets-corpus" score corpus/sources/enron-figshare.jsonl "$CORPUS_DATA/enron-figshare" "$CORPUS_EVIDENCE/after/score.json" --timeout-seconds 30
           python scripts/update_corpus_summary.py --score "$CORPUS_EVIDENCE/after/score.json" --performance "$CORPUS_EVIDENCE/after/performance.json" --manifest corpus/sources/enron-figshare.jsonl --baseline-summary "$CORPUS_EVIDENCE/before/summary.json" --summary "$CORPUS_EVIDENCE/after/summary.json" --delta "$CORPUS_EVIDENCE/after/delta.json" --runner "GitHub ubuntu-latest x86_64; sequential baseline then candidate; hosted runner, not Omarchy hardware"
           python - <<'PY'
           import json
@@ -77,8 +77,15 @@ jobs:
           from pathlib import Path
 
           root = Path(os.environ["CORPUS_EVIDENCE"])
-          before = json.loads((root / "before/summary.json").read_text())["owned_summary"]
-          after = json.loads((root / "after/summary.json").read_text())["owned_summary"]
+          before_report = json.loads((root / "before/summary.json").read_text())
+          before = before_report["owned_summary"]
+          after_report = json.loads((root / "after/summary.json").read_text())
+          after = after_report["owned_summary"]
+          # Retain aggregate evidence in logs if artifact storage is unavailable.
+          print("FROZEN_CORPUS_BEFORE " + json.dumps(before_report, sort_keys=True))
+          print("FROZEN_CORPUS_AFTER " + json.dumps(after_report, sort_keys=True))
+          print("FROZEN_CORPUS_DELTA " + (root / "after/delta.json").read_text().replace("\n", " "))
+          assert "syntax_failure_tokens" in after, "Candidate scorer lacks the new diagnostic schema"
           keys = ["opened", "formula_cells_observed", "formula_cells_loaded", "formula_cells_compared", "stored_values_matched", "stored_values_mismatched", "formula_parse_rate", "stored_value_match_rate"]
           lines = ["| Metric | Before | After |", "|---|---:|---:|"]
           lines.extend(f"| {key} | {before[key]} | {after[key]} |" for key in keys)

@@ -1,14 +1,16 @@
 # Supported formula functions
 
 The owned M0 engine (`crates/omasheets-calc`) accepts exactly the
-96 function names listed below, grouped for reading.
+104 function names listed below, grouped for reading.
 A test in the calc crate fails when this file and the registry disagree, so
 the count here is never edited by hand: add the function to the registry and
 regenerate this list.
 
 Operators: `+ - * / ^ & %`, unary `+`/`-`, comparisons `= <> < <= > >=`,
 error literals (`#REF!`, `#N/A`, `#DIV/0!`, `#VALUE!`, `#NUM!`, `#NAME?`,
-`#NULL!`, and `Sheet!#REF!` for a deleted cell on another sheet), omitted arguments, bounded rectangular ranges, absolute markers,
+`#NULL!`, and `Sheet!#REF!` for a deleted cell on another sheet), omitted arguments,
+bounded rectangular ranges (including qualified endpoints and deleted endpoints
+such as `A1:#REF!`, which evaluate to `#REF!`), absolute markers,
 cross-sheet references, workbook and sheet-scoped defined names (including
 `Sheet!LocalName`; tokens past
 the grid such as `Table1` are names), implicit intersection of a range in
@@ -56,6 +58,12 @@ unsorted keys are undefined in Excel and are not promised here.
 - `AVERAGEA`
 - `CORREL`
 - `NORMDIST`
+- `NORM.DIST`
+- `NORMSDIST`
+- `NORM.S.DIST`
+- `COVAR`
+- `COVARIANCE.P`
+- `COVARIANCE.S`
 
 ### Conditional aggregates
 
@@ -149,6 +157,8 @@ unsorted keys are undefined in Excel and are not promised here.
 ### Financial
 
 - `PMT`
+- `PV`
+- `IRR`
 - `NPV`
 - `XNPV`
 - `XIRR`
