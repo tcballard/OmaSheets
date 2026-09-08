@@ -1548,6 +1548,10 @@ impl Document {
         self.tables.get(&table)
     }
 
+    pub fn proposals(&self) -> &BTreeMap<ProposalId, ProposalRecord> {
+        &self.proposals
+    }
+
     pub fn proposal(&self, proposal: ProposalId) -> Option<&ProposalRecord> {
         self.proposals.get(&proposal)
     }
@@ -1841,9 +1845,12 @@ impl Document {
     }
 
     /// Builds the first event of a new branch forked at the current head.
-    /// The branch identity derives from the head so replay mints it again.
+    /// Distinct names at the same head produce distinct deterministic identities.
     pub fn fork(&self, name: impl Into<String>, actor: Actor, timestamp: i64) -> Event {
-        let branch = BranchId::derive(&self.seed(), 1);
+        let name = name.into();
+        let mut seed = self.seed();
+        seed.extend_from_slice(name.as_bytes());
+        let branch = BranchId::derive(&seed, 1);
         Event::new(
             self.head,
             branch,
@@ -1851,7 +1858,7 @@ impl Document {
             timestamp,
             Operation::CreateBranch {
                 branch,
-                name: name.into(),
+                name,
                 from: self.head.expect("a created document has a head"),
             },
         )

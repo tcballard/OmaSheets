@@ -645,18 +645,40 @@ impl Store {
         actor: Actor,
         timestamp: i64,
     ) -> Result<BranchId, StoreError> {
+        self.create_branch_with_commands(from, name, actor, timestamp, Vec::new())
+    }
+
+    /// Validate the complete proposal before recording either the branch or its edits.
+    pub fn create_branch_with_commands(
+        &mut self,
+        from: BranchId,
+        name: &str,
+        actor: Actor,
+        timestamp: i64,
+        commands: Vec<Command>,
+    ) -> Result<BranchId, StoreError> {
+        if commands.len() > MAX_MERGE_EVENTS {
+            return Err(StoreError::TooManyEvents(commands.len()));
+        }
         if self.branch_id(name).is_ok() {
             return Err(StoreError::DuplicateBranch(name.into()));
         }
         self.document(from)?;
         let mut document = self.documents[&from].clone();
-        let fork = document.fork(name, actor, timestamp);
+        let fork = document.fork(name, actor.clone(), timestamp);
         document.apply(&fork)?;
         let branch = document.branch();
+        let mut events = Vec::with_capacity(commands.len());
+        for command in commands {
+            events.push(document.command(actor.clone(), timestamp, command)?);
+        }
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         insert_event(&transaction, &fork)?;
+        for event in &events {
+            insert_event(&transaction, event)?;
+        }
         transaction.execute(
             "INSERT INTO branches (id, name, parent, base_event, head) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
@@ -664,7 +686,7 @@ impl Store {
                 name,
                 from.to_string(),
                 fork.parent.expect("forks have a parent").to_string(),
-                fork.id.to_string()
+                document.head().expect("fork has a head").to_string()
             ],
         )?;
         transaction.commit()?;
@@ -782,6 +804,31 @@ impl Store {
         })
     }
 
+    /// Prospective combined state, without appending events or changing either branch.
+    pub fn preview_merge(
+        &mut self,
+        source: BranchId,
+        target: BranchId,
+    ) -> Result<Document, StoreError> {
+        let (base, _) = self.merge_bases(source, target)?;
+        let events = self.events_since(source, base)?;
+        let mut candidate = self.document(target)?.clone();
+        for original in events {
+            if matches!(original.operation, Operation::CreateBranch { .. }) {
+                continue;
+            }
+            let event = Event::new(
+                candidate.head(),
+                candidate.branch(),
+                original.actor,
+                original.timestamp,
+                original.operation,
+            );
+            candidate.apply(&event)?;
+        }
+        Ok(candidate)
+    }
+
     /// Replays the source branch's events since its fork point onto the
     /// target, as new events attributed to their original actors, then
     /// records the merge. Gated: `approver` must be human, every
@@ -839,6 +886,14 @@ impl Store {
             candidate.apply(&event)?;
             replayed.push(event);
         }
+        let failed: Vec<CheckResult> = candidate
+            .check_results()
+            .into_iter()
+            .filter(|result| result.severity == Severity::Error && !result.passed)
+            .collect();
+        if !failed.is_empty() {
+            return Err(StoreError::ChecksFailed(failed));
+        }
         let record = Event::new(
             candidate.head(),
             candidate.branch(),
@@ -856,7 +911,7 @@ impl Store {
         self.persist(target, &all)?;
         let digest = candidate.digest();
         self.documents.insert(target, candidate);
-        self.write_snapshot(target)?;
+        let _ = self.write_snapshot(target);
         Ok(MergeReport {
             source: self.branch_name(source)?,
             target: self.branch_name(target)?,

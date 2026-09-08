@@ -178,6 +178,40 @@ pub(crate) fn desktop_call(request: &Value) -> Result<Value, String> {
     client.call(request)
 }
 
+/// Publish only the user-selected workbook to the bounded agent bridge.
+pub(crate) fn publish_agent_session(path: &Path, sheet: &str, row: i32, column: i32, rows: i32, columns: i32) -> Result<String, String> {
+    use std::os::unix::fs::OpenOptionsExt;
+    if !path.is_absolute() || row < 0 || column < 0 || rows <= 0 || columns <= 0 {
+        return Err("Invalid agent selection".into());
+    }
+    let mut bytes = [0_u8; 16];
+    fs::File::open("/dev/urandom").and_then(|mut file| file.read_exact(&mut bytes)).map_err(|e| e.to_string())?;
+    let session_id = bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let directory = runtime_directory()?;
+    let temporary = directory.join(format!("native-agent-session-{session_id}.tmp"));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600)
+            .open(&temporary).map_err(|e| e.to_string())?;
+        serde_json::to_writer(&mut file, &json!({"schema": 1, "session_id": session_id,
+            "pid": std::process::id(), "path": path,
+            "selection": {"sheet": sheet, "row": row, "column": column, "rows": rows, "columns": columns}}))
+            .map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        fs::rename(&temporary, directory.join("native-agent-session.json")).map_err(|e| e.to_string())
+    })();
+    if result.is_err() { let _ = fs::remove_file(&temporary); }
+    result.map(|()| session_id)
+}
+
+fn clear_agent_session(path: &Path) {
+    let Ok(directory) = runtime_directory() else { return; };
+    let context = directory.join("native-agent-session.json");
+    let selected = fs::read(&context).ok().and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    if selected.is_some_and(|value| value["pid"].as_u64() == Some(std::process::id().into()) && value["path"] == path.to_string_lossy().as_ref()) {
+        let _ = fs::remove_file(context);
+    }
+}
+
 pub(crate) fn create_workbook(path: &Path) -> Result<(), String> {
     let actor = json!({"kind": "human", "id": "omasheets-desktop"});
     let name = path.file_stem().and_then(|name| name.to_str()).unwrap_or("Untitled");
@@ -264,6 +298,7 @@ impl Drop for GridDocument {
         // Checkpoint before the owning launcher stops the service. Do not close
         // the shared store: another window may still be editing this document.
         if let Ok(state) = self.state.get_mut() {
+            clear_agent_session(&state.path);
             let request = json!({"kind": "snapshot", "path": state.path, "branch": state.branch});
             if let Err(error) = state.client.call(&request) {
                 eprintln!("omasheets-grid: final checkpoint unavailable; durable edits will replay on reopen: {error}");

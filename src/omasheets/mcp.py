@@ -377,6 +377,9 @@ TOOLS: list[dict[str, Any]] = [
     },
 ]
 
+from .native_agent import TOOLS as NATIVE_TOOLS
+
+TOOLS.extend(NATIVE_TOOLS)
 TOOLS_BY_NAME = {tool["name"]: tool for tool in TOOLS}
 
 
@@ -531,7 +534,8 @@ class McpServer:
                 elif uri == "omasheets://window":
                     payload = self.service.window_context_resource()
                 elif uri == "omasheets://session":
-                    payload = self.service.agent_session_resource()
+                    from .native_agent import resource
+                    payload = resource() or self.service.agent_session_resource()
                 else:
                     raise InvalidParams("unknown resource URI")
                 return self._result(request_id, {"contents": [{
@@ -556,7 +560,11 @@ class McpServer:
         name = params["name"]
         arguments = validate_tool_arguments(name, params.get("arguments", {}))
         method_name = "apply_plan_handoff" if name == "apply_plan" else name
-        result = getattr(self.service, method_name)(**arguments)
+        if name.startswith("native_"):
+            from .native_agent import call
+            result = call(name, arguments)
+        else:
+            result = getattr(self.service, method_name)(**arguments)
         return self._result(request_id, {
             "content": [{"type": "text", "text": json.dumps(result, sort_keys=True)}],
             "structuredContent": result,

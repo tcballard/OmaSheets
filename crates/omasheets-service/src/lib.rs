@@ -9,6 +9,8 @@
 //! or grants an agent merge authority: merges need a human approver, and an
 //! agent may not append to the `main` branch at all.
 
+pub mod review;
+
 use arrow_array::{ArrayRef, BooleanArray, Float64Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use omasheets_calc::Value;
@@ -204,6 +206,32 @@ pub enum Request {
         #[serde(default)]
         name: Option<String>,
     },
+    NativeLineage {
+        path: PathBuf,
+        sheet: String,
+        a1: String,
+    },
+    ProposeNative {
+        path: PathBuf,
+        expected_revision: String,
+        proposal: review::Proposal,
+    },
+    ReviewNative {
+        path: PathBuf,
+        source: String,
+    },
+    ApproveNative {
+        path: PathBuf,
+        source: String,
+        source_revision: String,
+        target_revision: String,
+    },
+    RejectNative {
+        path: PathBuf,
+        source: String,
+        source_revision: String,
+        reason: String,
+    },
     Snapshot {
         path: PathBuf,
         #[serde(default)]
@@ -222,6 +250,11 @@ impl Request {
             | Self::Close { path }
             | Self::Document { path, .. }
             | Self::Revision { path, .. }
+            | Self::NativeLineage { path, .. }
+            | Self::ProposeNative { path, .. }
+            | Self::ReviewNative { path, .. }
+            | Self::ApproveNative { path, .. }
+            | Self::RejectNative { path, .. }
             | Self::Cells { path, .. }
             | Self::GridPage { path, .. }
             | Self::Cell { path, .. }
@@ -441,6 +474,14 @@ pub enum Response {
     },
     Diff(BranchDiff),
     Merged(MergeReport),
+    NativeProposed {
+        branch: String,
+    },
+    NativeLineage(serde_json::Value),
+    NativeReview(review::Review),
+    NativeRejected {
+        branch: String,
+    },
     ExportedCsv(CsvExportManifest),
     ExportedXlsx(XlsxExportManifest),
     ExportedParquet(ParquetExportManifest),
@@ -2019,6 +2060,85 @@ impl Service {
                 let (_, source) = Self::branch(store, Some(&source))?;
                 let (_, target) = Self::branch(store, target.as_deref())?;
                 Ok(Response::Diff(store.diff(source, target)?))
+            }
+            Request::NativeLineage { path, sheet, a1 } => {
+                let store = self.store(&path)?;
+                let (_, branch) = Self::branch(store, None)?;
+                let document = store.document(branch)?;
+                let sheet = Self::sheet(document, &sheet)?;
+                let cell = document.resolve_a1(sheet, &a1)?;
+                let mut lineage = document.lineage(cell);
+                let input_count = lineage.as_ref().map_or(0, |lineage| lineage.inputs.len());
+                if let Some(lineage) = &mut lineage {
+                    lineage.inputs.truncate(1000);
+                }
+                let project = |cell: CellRef| {
+                    serde_json::json!({"cell": cell, "sheet": document.sheet_name(cell.sheet),
+                    "a1": document.project_a1(cell), "value": document.value(cell)})
+                };
+                let inputs: Vec<_> = lineage
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|lineage| lineage.inputs.iter())
+                    .map(|cell| project(*cell))
+                    .collect();
+                Ok(Response::NativeLineage(
+                    serde_json::json!({"cell": project(cell), "state": document.cell(cell),
+                    "lineage": lineage, "inputs": inputs, "truncated": input_count > 1000, "revision": revision(document)}),
+                ))
+            }
+            Request::ProposeNative {
+                path,
+                expected_revision,
+                proposal,
+            } => {
+                let branch =
+                    review::propose(self.store(&path)?, &expected_revision, now, proposal)?;
+                Ok(Response::NativeProposed { branch })
+            }
+            Request::ReviewNative { path, source } => Ok(Response::NativeReview(review::inspect(
+                self.store(&path)?,
+                &source,
+            )?)),
+            Request::ApproveNative {
+                path,
+                source,
+                source_revision,
+                target_revision,
+            } => {
+                let store = self.store(&path)?;
+                let current = review::inspect(store, &source)?;
+                if current.source_revision != source_revision
+                    || current.target_revision != target_revision
+                {
+                    return Err(ServiceError::new(
+                        "stale_review",
+                        "The proposal or workbook changed; refresh the review.",
+                    ));
+                }
+                if !current.can_approve {
+                    return Err(ServiceError::new(
+                        "review_blocked",
+                        "Resolve the review's blocking issues before approving.",
+                    ));
+                }
+                let source = store.branch_id(&source)?;
+                let target = store.branch_id(MAIN_BRANCH)?;
+                Ok(Response::Merged(store.merge(
+                    source,
+                    target,
+                    review::human(),
+                    now,
+                )?))
+            }
+            Request::RejectNative {
+                path,
+                source,
+                source_revision,
+                reason,
+            } => {
+                review::reject(self.store(&path)?, &source, &source_revision, now, reason)?;
+                Ok(Response::NativeRejected { branch: source })
             }
             Request::Merge {
                 path,

@@ -220,7 +220,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if arguments.command == "agent-session":
         if arguments.agent_session_command == "resource":
-            print(json.dumps(_service().agent_session_resource(), indent=2, sort_keys=True))
+            from .native_agent import resource
+            print(json.dumps(resource() or _service().agent_session_resource(), indent=2, sort_keys=True))
             return 0
         if arguments.agent_session_command == "tools":
             from .mcp import TOOLS
@@ -232,7 +233,11 @@ def main(argv: list[str] | None = None) -> int:
 
             tool_arguments = validate_tool_arguments(arguments.tool, arguments.arguments)
             method_name = "apply_plan_handoff" if arguments.tool == "apply_plan" else arguments.tool
-            result = getattr(_service(), method_name)(**tool_arguments)
+            if arguments.tool.startswith("native_"):
+                from .native_agent import call
+                result = call(arguments.tool, tool_arguments)
+            else:
+                result = getattr(_service(), method_name)(**tool_arguments)
             print(json.dumps(result, indent=2, sort_keys=True))
             return 0
         from .agent_session import launch_agent_session
