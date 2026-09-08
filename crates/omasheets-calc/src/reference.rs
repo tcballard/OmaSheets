@@ -423,6 +423,28 @@ mod tests {
     }
 
     #[test]
+    fn reference_endpoints_keep_function_selectors_on_the_origin_sheet() {
+        let mut workbook = Workbook::default();
+        workbook.define_sheet(0, "Data");
+        workbook.define_sheet(1, "Report");
+        for row in 0..3 {
+            workbook.set_number(CellId::new(0, row, 0), (row + 1) as f64 * 10.0);
+        }
+        workbook.set_number(CellId::new(0, 0, 1), 99.0);
+        workbook.set_number(CellId::new(1, 0, 1), 2.0);
+        for formula in [
+            "=SUM(Data!A1:INDEX(Data!A1:A3,B1))",
+            "=SUM(INDEX(Data!A1:A3,1):INDEX(Data!A1:A3,B1))",
+            "=SUM(Data!A1:(INDEX(Data!A1:A3,B1)))",
+            "=SUM(Data!A1:A2)",
+        ] {
+            let target = CellId::new(1, 0, 2);
+            workbook.set_formula(target, formula).unwrap();
+            assert_eq!(workbook.value(target), Value::Number(30.0), "{formula}");
+        }
+    }
+
+    #[test]
     fn constant_index_axes_do_not_create_false_cycles() {
         let mut workbook = Workbook::default();
         workbook.set_number(cell(0, 0), 10.0);

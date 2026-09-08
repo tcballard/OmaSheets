@@ -4337,15 +4337,22 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
                 break;
             }
             self.offset += 1;
-            // In Sheet!A1:B2 the unqualified second endpoint inherits Sheet.
-            let original_sheet = self.sheet;
-            self.sheet = match &expression {
+            // Only a bare A1 endpoint inherits the left sheet qualifier.
+            // Function arguments retain the formula's origin sheet.
+            self.skip_space();
+            let right_start = self.offset;
+            let mut right = self.parse_primary()?;
+            let spelling = self.source[right_start..self.offset].trim();
+            let inherited_sheet = match &expression {
                 Expr::Reference(cell) | Expr::Range { anchor: cell, .. } => cell.sheet,
-                _ => reference_bounds(&expression).map_or(self.sheet, |(first, _)| first.sheet),
+                _ => self.sheet,
             };
-            let right = self.parse_primary();
-            self.sheet = original_sheet;
-            expression = join_reference_range(expression, right?)?;
+            if matches!(right, Expr::Reference(_))
+                && let Ok(cell) = parse_a1(spelling, inherited_sheet)
+            {
+                right = Expr::Reference(cell);
+            }
+            expression = join_reference_range(expression, right)?;
         }
         loop {
             self.skip_space();
