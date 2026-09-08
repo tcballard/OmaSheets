@@ -191,6 +191,8 @@ enum Expr<R = CellId> {
     Error(CalcError),
     /// An omitted argument, as in `IF(x,,y)`; evaluates to blank.
     Empty,
+    /// A bounded rectangular array of literal values, with no dependencies.
+    Array(ArrayValue),
     Reference(R),
     UnaryMinus(Box<Expr<R>>),
     Percent(Box<Expr<R>>),
@@ -548,6 +550,7 @@ fn visit_references(expression: &Expr<CellId>, visit: &mut impl FnMut(CellId)) {
         | Expr::Boolean(_)
         | Expr::Text(_)
         | Expr::Error(_)
+        | Expr::Array(_)
         | Expr::Empty => {}
     }
 }
@@ -594,6 +597,7 @@ fn rebind_references(expression: &mut Expr<CellId>, map: &mut impl FnMut(CellId)
         | Expr::Boolean(_)
         | Expr::Text(_)
         | Expr::Error(_)
+        | Expr::Array(_)
         | Expr::Empty => {}
     }
 }
@@ -1019,13 +1023,6 @@ impl Workbook {
         statistics
     }
 
-    fn range_len(&self, node: usize) -> usize {
-        match self.range_shape(node) {
-            RangeShape::Rectangle { rows, columns, .. } => rows * columns,
-            RangeShape::Members { .. } => self.cells[node].dependencies.len(),
-        }
-    }
-
     /// The cell at a row-major position inside the range, if it exists.
     fn range_cell(&self, node: usize, index: usize) -> Option<usize> {
         match self.range_shape(node) {
@@ -1378,6 +1375,7 @@ impl Workbook {
             Expr::Text(value) => Value::Text(value.clone()),
             Expr::Error(error) => Value::Error(error.clone()),
             Expr::Empty => Value::Blank,
+            Expr::Array(array) => array.values[0].clone(),
             Expr::Reference(index) => self.cells[*index].value.clone(),
             Expr::UnaryMinus(inner) => match self.evaluate(inner) {
                 Value::Number(value) => number_value(-value),
@@ -2088,39 +2086,40 @@ impl Workbook {
         if matches!(lookup, Value::Error(_)) {
             return lookup;
         }
-        let Some((node, rows, columns)) = range_parts(&arguments[1]) else {
+        let Some(input) = ArrayInput::new(&arguments[1]) else {
             return Value::Error(CalcError::InvalidArguments);
         };
+        let (rows, columns) = input.shape();
         let (candidates, results): (Vec<Value>, Vec<Value>) = if arguments.len() == 3 {
-            let Some((result_node, result_rows, result_columns)) = range_parts(&arguments[2])
-            else {
+            let Some(result_input) = ArrayInput::new(&arguments[2]) else {
                 return Value::Error(CalcError::InvalidArguments);
             };
+            let (result_rows, result_columns) = result_input.shape();
             if (rows != 1 && columns != 1)
                 || (result_rows != 1 && result_columns != 1)
                 || rows * columns != result_rows * result_columns
             {
                 return Value::Error(CalcError::InvalidArguments);
             }
-            (self.range_values(node), self.range_values(result_node))
+            (input.values(self), result_input.values(self))
         } else if rows == 1 || columns == 1 {
-            let values = self.range_values(node);
+            let values = input.values(self);
             (values.clone(), values)
         } else if columns > rows {
             // More columns than rows: search the first row, answer from the last.
             let candidates = (0..columns)
-                .map(|column| self.range_value(node, column))
+                .map(|column| input.value(self, column))
                 .collect();
             let results = (0..columns)
-                .map(|column| self.range_value(node, (rows - 1) * columns + column))
+                .map(|column| input.value(self, (rows - 1) * columns + column))
                 .collect();
             (candidates, results)
         } else {
             let candidates = (0..rows)
-                .map(|row| self.range_value(node, row * columns))
+                .map(|row| input.value(self, row * columns))
                 .collect();
             let results = (0..rows)
-                .map(|row| self.range_value(node, row * columns + columns - 1))
+                .map(|row| input.value(self, row * columns + columns - 1))
                 .collect();
             (candidates, results)
         };
@@ -2333,6 +2332,7 @@ impl Workbook {
     /// `#N/A`. Bounded by [`MAX_RANGE_CELLS`].
     fn evaluate_array(&self, expression: &Expr<usize>) -> Result<ArrayValue, CalcError> {
         match expression {
+            Expr::Array(array) => Ok(array.clone()),
             Expr::RangeNode {
                 node,
                 rows,
@@ -2502,9 +2502,10 @@ impl Workbook {
     fn evaluate_lookup_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
         match function {
             Function::Index if matches!(arguments.len(), 2 | 3) => {
-                let Some((node, rows, columns)) = range_parts(&arguments[0]) else {
+                let Some(input) = ArrayInput::new(&arguments[0]) else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
+                let (rows, columns) = input.shape();
                 // An error row (a failed MATCH) is the result, as in Excel.
                 let row = match positive_index(self.evaluate(&arguments[1])) {
                     Ok(row) => row,
@@ -2519,7 +2520,7 @@ impl Workbook {
                     1
                 } else if rows == 1 {
                     return if row <= columns {
-                        self.range_value(node, row - 1)
+                        input.value(self, row - 1)
                     } else {
                         Value::Error(CalcError::InvalidReference)
                     };
@@ -2529,7 +2530,7 @@ impl Workbook {
                 if row > rows || column > columns {
                     return Value::Error(CalcError::InvalidReference);
                 }
-                self.range_value(node, (row - 1) * columns + column - 1)
+                input.value(self, (row - 1) * columns + column - 1)
             }
             Function::Match if matches!(arguments.len(), 2 | 3) => {
                 let mode = if arguments.len() == 3 {
@@ -2544,13 +2545,14 @@ impl Workbook {
                 if matches!(lookup, Value::Error(_)) {
                     return lookup;
                 }
-                let Some((node, rows, columns)) = range_parts(&arguments[1]) else {
+                let Some(input) = ArrayInput::new(&arguments[1]) else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
+                let (rows, columns) = input.shape();
                 if rows != 1 && columns != 1 {
                     return Value::Error(CalcError::InvalidArguments);
                 }
-                let candidates = self.range_values(node);
+                let candidates = input.values(self);
                 match match_position(&lookup, &candidates, mode) {
                     Ok(position) => Value::Number((position + 1) as f64),
                     Err(error) => Value::Error(error),
@@ -2577,9 +2579,10 @@ impl Workbook {
                 if matches!(lookup, Value::Error(_)) {
                     return lookup;
                 }
-                let Some((node, rows, columns)) = range_parts(&arguments[1]) else {
+                let Some(input) = ArrayInput::new(&arguments[1]) else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
+                let (rows, columns) = input.shape();
                 let Ok(offset) = positive_index(self.evaluate(&arguments[2])) else {
                     return Value::Error(CalcError::InvalidValue);
                 };
@@ -2594,9 +2597,9 @@ impl Workbook {
                 }
                 let at = |lane: usize, position: usize| {
                     if vertical {
-                        self.range_value(node, lane * columns + position)
+                        input.value(self, lane * columns + position)
                     } else {
-                        self.range_value(node, position * columns + lane)
+                        input.value(self, position * columns + lane)
                     }
                 };
                 let candidates: Vec<Value> = (0..lanes).map(|lane| at(lane, 0)).collect();
@@ -2610,25 +2613,25 @@ impl Workbook {
                 if matches!(lookup, Value::Error(_)) {
                     return lookup;
                 }
-                let Some((lookup_node, lookup_rows, lookup_columns)) = range_parts(&arguments[1])
-                else {
+                let Some(lookup_input) = ArrayInput::new(&arguments[1]) else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
-                let Some((return_node, return_rows, return_columns)) = range_parts(&arguments[2])
-                else {
+                let Some(return_input) = ArrayInput::new(&arguments[2]) else {
                     return Value::Error(CalcError::InvalidArguments);
                 };
-                let length = self.range_len(lookup_node);
+                let (lookup_rows, lookup_columns) = lookup_input.shape();
+                let (return_rows, return_columns) = return_input.shape();
+                let length = lookup_rows * lookup_columns;
                 if (lookup_rows != 1 && lookup_columns != 1)
                     || (return_rows != 1 && return_columns != 1)
-                    || length != self.range_len(return_node)
+                    || length != return_rows * return_columns
                 {
                     return Value::Error(CalcError::InvalidArguments);
                 }
                 for index in 0..length {
-                    let candidate = self.range_value(lookup_node, index);
+                    let candidate = lookup_input.value(self, index);
                     if lookup_equal(&lookup, &candidate) {
-                        return self.range_value(return_node, index);
+                        return return_input.value(self, index);
                     }
                 }
                 if arguments.len() == 4 {
@@ -2755,10 +2758,60 @@ fn typed_compare(left: &Value, right: &Value) -> Result<std::cmp::Ordering, Calc
 }
 
 /// An intermediate array inside an aggregate argument, row-major.
+#[derive(Clone, Debug, PartialEq)]
 struct ArrayValue {
     rows: usize,
     columns: usize,
     values: Vec<Value>,
+}
+
+/// Lookup inputs borrow constants and retain the existing range fast path.
+enum ArrayInput<'a> {
+    Range {
+        node: usize,
+        rows: usize,
+        columns: usize,
+    },
+    Constant(&'a ArrayValue),
+}
+
+impl<'a> ArrayInput<'a> {
+    fn new(expression: &'a Expr<usize>) -> Option<Self> {
+        match expression {
+            Expr::RangeNode {
+                node,
+                rows,
+                columns,
+            } => Some(Self::Range {
+                node: *node,
+                rows: *rows,
+                columns: *columns,
+            }),
+            Expr::Array(array) => Some(Self::Constant(array)),
+            _ => None,
+        }
+    }
+
+    fn shape(&self) -> (usize, usize) {
+        match self {
+            Self::Range { rows, columns, .. } => (*rows, *columns),
+            Self::Constant(array) => array.shape(),
+        }
+    }
+
+    fn value(&self, workbook: &Workbook, index: usize) -> Value {
+        match self {
+            Self::Range { node, .. } => workbook.range_value(*node, index),
+            Self::Constant(array) => array.values[index].clone(),
+        }
+    }
+
+    fn values(&self, workbook: &Workbook) -> Vec<Value> {
+        match self {
+            Self::Range { node, .. } => workbook.range_values(*node),
+            Self::Constant(array) => array.values.clone(),
+        }
+    }
 }
 
 impl ArrayValue {
@@ -2802,7 +2855,7 @@ fn broadcast_shape(shapes: &[(usize, usize)]) -> Result<(usize, usize), CalcErro
 /// lookups, criteria functions) produce one value and stop the search.
 fn contains_array_operand(expression: &Expr<usize>) -> bool {
     match expression {
-        Expr::RangeNode { .. } => true,
+        Expr::RangeNode { .. } | Expr::Array(_) => true,
         Expr::UnaryMinus(inner) | Expr::Percent(inner) => contains_array_operand(inner),
         Expr::Binary(_, left, right) => {
             contains_array_operand(left) || contains_array_operand(right)
@@ -2882,17 +2935,6 @@ fn literal(value: Value) -> Expr<usize> {
         Value::Boolean(boolean) => Expr::Boolean(boolean),
         Value::Text(text) => Expr::Text(text),
         Value::Error(error) => Expr::Error(error),
-    }
-}
-
-fn range_parts(expression: &Expr<usize>) -> Option<(usize, usize, usize)> {
-    match expression {
-        Expr::RangeNode {
-            node,
-            rows,
-            columns,
-        } => Some((*node, *rows, *columns)),
-        _ => None,
     }
 }
 
@@ -3800,6 +3842,7 @@ fn compile_expression(
         Expr::Text(value) => Expr::Text(value),
         Expr::Error(error) => Expr::Error(error),
         Expr::Empty => Expr::Empty,
+        Expr::Array(array) => Expr::Array(array),
         Expr::Reference(cell) => Expr::Reference(indices[&cell]),
         Expr::UnaryMinus(inner) => {
             Expr::UnaryMinus(Box::new(compile_expression(*inner, indices, range_nodes)))
@@ -3839,6 +3882,7 @@ fn count_nodes<R>(expression: &Expr<R>) -> usize {
         Expr::Binary(_, left, right) => count_nodes(left) + count_nodes(right),
         Expr::Function(_, arguments) => arguments.iter().map(count_nodes).sum(),
         Expr::Range { members, .. } => members.as_ref().map_or(0, Vec::len),
+        Expr::Array(array) => array.values.len(),
         _ => 0,
     }
 }
@@ -3875,6 +3919,7 @@ fn collect_dependencies(
         | Expr::Boolean(_)
         | Expr::Text(_)
         | Expr::Error(_)
+        | Expr::Array(_)
         | Expr::Empty => {}
     }
 }
@@ -4088,6 +4133,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
                 Ok(expression)
             }
             Some(b'"') => self.parse_string(),
+            Some(b'{') => self.parse_array_constant(),
             Some(b'\'') => self.parse_quoted_sheet_reference(),
             Some(b'#') => self.parse_error_literal(),
             Some(b'[')
@@ -4108,6 +4154,80 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
 
     fn bounded_remainder(&self) -> String {
         self.remaining().chars().take(64).collect()
+    }
+
+    fn parse_array_constant(&mut self) -> Result<Expr, FormulaError> {
+        self.expect(b'{')?;
+        let mut values = Vec::new();
+        let mut rows = 0;
+        let mut columns = None;
+        let mut row_columns = 0;
+        loop {
+            self.skip_space();
+            let start = self.offset;
+            let value = match self.peek() {
+                Some(b'"') => self.parse_string()?,
+                Some(b'#') => self.parse_error_literal()?,
+                Some(b'+') | Some(b'-') => {
+                    let negative = self.peek() == Some(b'-');
+                    self.offset += 1;
+                    self.skip_space();
+                    let Expr::Number(number) = self.parse_number()? else {
+                        unreachable!("number parser returns a number")
+                    };
+                    Expr::Number(if negative { -number } else { number })
+                }
+                Some(byte) if byte.is_ascii_digit() || byte == b'.' => self.parse_number()?,
+                Some(byte) if byte.is_ascii_alphabetic() => {
+                    while matches!(self.peek(), Some(byte) if byte.is_ascii_alphabetic()) {
+                        self.offset += 1;
+                    }
+                    match self.source[start..self.offset]
+                        .to_ascii_uppercase()
+                        .as_str()
+                    {
+                        "TRUE" => Expr::Boolean(true),
+                        "FALSE" => Expr::Boolean(false),
+                        _ => return Err(FormulaError::UnexpectedToken(start)),
+                    }
+                }
+                _ => return Err(FormulaError::UnexpectedToken(start)),
+            };
+            let value = match value {
+                Expr::Number(value) if value.is_finite() => Value::Number(value),
+                Expr::Boolean(value) => Value::Boolean(value),
+                Expr::Text(value) => Value::Text(value),
+                Expr::Error(value) => Value::Error(value),
+                _ => return Err(FormulaError::UnexpectedToken(start)),
+            };
+            if values.len() == MAX_RANGE_CELLS {
+                return Err(FormulaError::RangeTooLarge);
+            }
+            values.push(value);
+            row_columns += 1;
+            self.skip_space();
+            match self.peek() {
+                Some(b',') => self.offset += 1,
+                Some(b';') | Some(b'}') => {
+                    if columns.is_some_and(|width| width != row_columns) {
+                        return Err(FormulaError::UnexpectedToken(self.offset));
+                    }
+                    columns = Some(row_columns);
+                    rows += 1;
+                    row_columns = 0;
+                    let finished = self.peek() == Some(b'}');
+                    self.offset += 1;
+                    if finished {
+                        return Ok(Expr::Array(ArrayValue {
+                            rows,
+                            columns: columns.expect("completed row"),
+                            values,
+                        }));
+                    }
+                }
+                _ => return Err(FormulaError::UnexpectedToken(self.offset)),
+            }
+        }
     }
 
     fn parse_error_literal(&mut self) -> Result<Expr, FormulaError> {
@@ -4205,8 +4325,16 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
     /// same sheet table and a bounded depth for names that use names. A name
     /// scoped to the formula's sheet wins over a workbook-level one.
     fn parse_defined_name(&mut self, token: &str) -> Result<Expr, FormulaError> {
+        self.parse_defined_name_in_sheet(token, self.sheet)
+    }
+
+    fn parse_defined_name_in_sheet(
+        &mut self,
+        token: &str,
+        sheet: u32,
+    ) -> Result<Expr, FormulaError> {
         let name = token.trim_start_matches('$');
-        let Some(definition) = self.defined_names.resolve(self.sheet, &name.to_lowercase()) else {
+        let Some(definition) = self.defined_names.resolve(sheet, &name.to_lowercase()) else {
             return Err(FormulaError::UnknownName(name.into()));
         };
         if self.name_depth >= MAX_NAME_DEPTH {
@@ -4214,7 +4342,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
         }
         let mut inner = Parser::new_structured(
             definition,
-            self.sheet,
+            sheet,
             self.sheet_names,
             self.defined_names,
             self.structured,
@@ -4305,11 +4433,23 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
             return Ok(Expr::Error(CalcError::InvalidReference));
         }
         let start = self.offset;
-        while matches!(self.peek(), Some(byte) if byte.is_ascii_alphanumeric() || byte == b'$') {
+        while matches!(self.peek(), Some(byte) if byte.is_ascii_alphanumeric() || matches!(byte, b'$' | b'_' | b'.'))
+        {
             self.offset += 1;
         }
-        let first = parse_a1(&self.source[start..self.offset], sheet)?;
-        self.parse_range_tail(first, sheet)
+        let token = &self.source[start..self.offset];
+        match parse_a1(token, sheet) {
+            Ok(first) => self.parse_range_tail(first, sheet),
+            Err(_)
+                if self
+                    .defined_names
+                    .resolve(sheet, &token.trim_start_matches('$').to_lowercase())
+                    .is_some() =>
+            {
+                self.parse_defined_name_in_sheet(token, sheet)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn parse_range_tail(&mut self, first: CellId, sheet: u32) -> Result<Expr, FormulaError> {
@@ -4498,9 +4638,11 @@ pub fn supported_function_names() -> impl Iterator<Item = &'static str> {
 
 fn parse_function_name(name: &str) -> Result<Function, FormulaError> {
     let upper = name.to_ascii_uppercase();
+    let registered = upper.strip_prefix("_XLFN.").unwrap_or(&upper);
+    let registered = registered.strip_prefix("_XLWS.").unwrap_or(registered);
     FUNCTION_REGISTRY
         .iter()
-        .find(|(candidate, _)| *candidate == upper)
+        .find(|(candidate, _)| *candidate == registered)
         .map(|(_, function)| *function)
         .ok_or(FormulaError::UnsupportedFunction(upper))
 }
@@ -4665,6 +4807,103 @@ fn expand_range(first: CellId, second: CellId) -> Result<Expr, FormulaError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn array_constants_feed_aggregates_broadcasting_and_lookups() {
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(0, 0), 10.0);
+        workbook.set_number(cell(1, 0), 20.0);
+        let examples = [
+            ("=SUM({1,2;3,4})", Value::Number(10.0)),
+            ("=SUMPRODUCT(A1:A2,{2;3})", Value::Number(80.0)),
+            ("=SUM(IF({TRUE,FALSE},A1,2))", Value::Number(12.0)),
+            ("=SUM({1,2}+{10;20})", Value::Number(66.0)),
+            ("=INDEX({1,2;3,4},2,1)", Value::Number(3.0)),
+            ("=INDEX({1,2,3},2)", Value::Number(2.0)),
+            ("=MATCH(20,{10;20;30},0)", Value::Number(2.0)),
+            ("=VLOOKUP(2,{1,10;2,20},2,FALSE)", Value::Number(20.0)),
+            ("=HLOOKUP(2,{1,2;10,20},2,FALSE)", Value::Number(20.0)),
+            ("=XLOOKUP(2,{1,2},{10,20})", Value::Number(20.0)),
+            ("=LOOKUP(2,{1,2,3},{10,20,30})", Value::Number(20.0)),
+            ("=SUM({-2,+3,1e2})", Value::Number(101.0)),
+            ("=SUM({1,#N/A})", Value::Error(CalcError::NotAvailable)),
+            (
+                "=TEXTJOIN(\"/\",TRUE,{\"a\",\"\";\"b\",\"c\"})",
+                Value::Text("a/b/c".into()),
+            ),
+            ("=SUM(_xlfn.IFERROR({1,#N/A},0))", Value::Number(1.0)),
+        ];
+        for (formula, expected) in examples {
+            workbook.set_formula(cell(0, 3), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, 3)), expected, "{formula}");
+        }
+        workbook.define_name("weights", "{2;3}");
+        workbook
+            .set_formula(cell(0, 3), "=SUMPRODUCT(A1:A2,weights)")
+            .unwrap();
+        let changed = workbook.set_number(cell(1, 0), 30.0);
+        assert!(changed.evaluated.contains(&cell(0, 3)));
+        assert_eq!(workbook.value(cell(0, 3)), Value::Number(110.0));
+    }
+
+    #[test]
+    fn malformed_array_constants_are_rejected_atomically() {
+        let mut workbook = Workbook::default();
+        workbook.set_number(cell(0, 0), 17.0);
+        for formula in [
+            "={}",
+            "={1,}",
+            "={;1}",
+            "={1;}",
+            "={1,2;3}",
+            "={1,A1}",
+            "={SUM(1)}",
+            "={{1}}",
+            "={1+2}",
+            "={1%}",
+            "={1e999}",
+            "={TRUEFALSE}",
+            "={1;2,3}",
+        ] {
+            assert!(
+                workbook.set_formula(cell(0, 0), formula).is_err(),
+                "{formula}"
+            );
+            assert_eq!(workbook.value(cell(0, 0)), Value::Number(17.0));
+        }
+        let oversized = format!("={{{}0}}", "0,".repeat(MAX_RANGE_CELLS));
+        assert_eq!(
+            workbook.set_formula(cell(0, 0), &oversized),
+            Err(FormulaError::RangeTooLarge)
+        );
+        assert_eq!(workbook.value(cell(0, 0)), Value::Number(17.0));
+    }
+
+    #[test]
+    fn qualified_names_bind_to_the_named_sheet_and_recalculate() {
+        let mut workbook = Workbook::default();
+        workbook.define_sheet(0, "Input");
+        workbook.define_sheet(1, "Other sheet");
+        workbook.define_sheet_name(0, "rate.total", "A1*2");
+        workbook.define_sheet_name(1, "rate.total", "A1*3");
+        workbook.set_number(CellId::new(0, 0, 0), 10.0);
+        workbook.set_number(CellId::new(1, 0, 0), 20.0);
+        workbook
+            .set_formula(cell(0, 1), "=Input!rate.total+'Other sheet'!rate.total")
+            .unwrap();
+        assert_eq!(workbook.value(cell(0, 1)), Value::Number(80.0));
+        let changed = workbook.set_number(CellId::new(1, 0, 0), 30.0);
+        assert!(changed.evaluated.contains(&cell(0, 1)));
+        assert_eq!(workbook.value(cell(0, 1)), Value::Number(110.0));
+        assert!(matches!(
+            workbook.set_formula(cell(0, 1), "=_xlfn.MISSING(1)"),
+            Err(FormulaError::UnsupportedFunction(_))
+        ));
+        assert!(matches!(
+            workbook.set_formula(cell(0, 1), "='[1]Other sheet'!rate.total"),
+            Err(FormulaError::ExternalReference(_))
+        ));
+    }
 
     fn cell(row: u32, column: u32) -> CellId {
         CellId::new(0, row, column)

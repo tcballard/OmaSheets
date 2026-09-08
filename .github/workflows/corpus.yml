@@ -1,0 +1,99 @@
+name: Frozen formula corpus
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: Baseline commit or branch to compare on the same runner
+        required: true
+        default: main
+  pull_request:
+    paths:
+      - .github/workflows/corpus.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: corpus-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Frozen Enron before and after
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_TARGET_DIR: ${{ runner.temp }}/omasheets-corpus-target
+      CORPUS_EVIDENCE: ${{ runner.temp }}/omasheets-corpus-evidence
+      CORPUS_DATA: ${{ runner.temp }}/omasheets-corpus-data
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || inputs.baseline }}
+          path: baseline
+          persist-credentials: false
+      - name: Install the minimum toolchain and archive extractor
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes p7zip-full
+          rustup toolchain install 1.88.0 --profile minimal --no-self-update
+          rustup default 1.88.0
+      - name: Fetch the registered archive and preserve the frozen denominator
+        working-directory: candidate
+        run: |
+          cmp corpus/sources/enron-figshare.jsonl ../baseline/corpus/sources/enron-figshare.jsonl
+          cmp corpus/sources/enron-figshare.json ../baseline/corpus/sources/enron-figshare.json
+          python scripts/fetch_corpus.py corpus/sources/enron-figshare.json "$CORPUS_DATA"
+          mkdir -p "$CORPUS_EVIDENCE/before" "$CORPUS_EVIDENCE/after"
+      - name: Build the baseline scorer
+        working-directory: baseline
+        run: cargo build --locked --release -p omasheets-corpus
+      - name: Verify and score the baseline alone
+        working-directory: candidate
+        run: |
+          "$CARGO_TARGET_DIR/release/omasheets-corpus" verify corpus/sources/enron-figshare.jsonl "$CORPUS_DATA/enron-figshare" > "$CORPUS_EVIDENCE/verify.json"
+          python scripts/performance.py run --name frozen-corpus-before --timeout 900 --output "$CORPUS_EVIDENCE/before/performance.json" -- "$CARGO_TARGET_DIR/release/omasheets-corpus" score corpus/sources/enron-figshare.jsonl "$CORPUS_DATA/enron-figshare" "$CORPUS_EVIDENCE/before/score.json" --timeout-seconds 30
+          python scripts/update_corpus_summary.py --score "$CORPUS_EVIDENCE/before/score.json" --performance "$CORPUS_EVIDENCE/before/performance.json" --manifest corpus/sources/enron-figshare.jsonl --baseline-summary corpus/sources/enron-figshare.score-summary.json --summary "$CORPUS_EVIDENCE/before/summary.json" --delta "$CORPUS_EVIDENCE/before/delta.json" --engine-commit "$(git -C ../baseline rev-parse HEAD)" --runner "GitHub ubuntu-latest x86_64; sequential baseline then candidate; hosted runner, not Omarchy hardware"
+      - name: Build the candidate scorer
+        working-directory: candidate
+        run: cargo build --locked --release -p omasheets-corpus
+      - name: Score the candidate alone and report aggregate changes
+        working-directory: candidate
+        run: |
+          python scripts/performance.py run --name frozen-corpus-after --timeout 900 --output "$CORPUS_EVIDENCE/after/performance.json" -- "$CARGO_TARGET_DIR/release/omasheets-corpus" score corpus/sources/enron-figshare.jsonl "$CORPUS_DATA/enron-figshare" "$CORPUS_EVIDENCE/after/score.json" --timeout-seconds 30
+          python scripts/update_corpus_summary.py --score "$CORPUS_EVIDENCE/after/score.json" --performance "$CORPUS_EVIDENCE/after/performance.json" --manifest corpus/sources/enron-figshare.jsonl --baseline-summary "$CORPUS_EVIDENCE/before/summary.json" --summary "$CORPUS_EVIDENCE/after/summary.json" --delta "$CORPUS_EVIDENCE/after/delta.json" --runner "GitHub ubuntu-latest x86_64; sequential baseline then candidate; hosted runner, not Omarchy hardware"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["CORPUS_EVIDENCE"])
+          before = json.loads((root / "before/summary.json").read_text())["owned_summary"]
+          after = json.loads((root / "after/summary.json").read_text())["owned_summary"]
+          keys = ["opened", "formula_cells_observed", "formula_cells_loaded", "formula_cells_compared", "stored_values_matched", "stored_values_mismatched", "formula_parse_rate", "stored_value_match_rate"]
+          lines = ["| Metric | Before | After |", "|---|---:|---:|"]
+          lines.extend(f"| {key} | {before[key]} | {after[key]} |" for key in keys)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
+              output.write("\n".join(lines) + "\n")
+          assert after["opened"] == before["opened"], "Workbook-open denominator changed"
+          assert after["formula_cells_observed"] == before["formula_cells_observed"], "Formula denominator changed"
+          assert after["formula_cells_loaded"] >= before["formula_cells_loaded"], "Formula compilation regressed"
+          assert after["stored_values_matched"] >= before["stored_values_matched"], "Stored-value matches regressed"
+          PY
+      - name: Upload aggregate evidence only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frozen-formula-corpus
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/omasheets-corpus-evidence/before/summary.json
+            ${{ runner.temp }}/omasheets-corpus-evidence/after/summary.json
+            ${{ runner.temp }}/omasheets-corpus-evidence/after/delta.json

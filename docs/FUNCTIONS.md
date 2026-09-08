@@ -9,14 +9,21 @@ regenerate this list.
 Operators: `+ - * / ^ & %`, unary `+`/`-`, comparisons `= <> < <= > >=`,
 error literals (`#REF!`, `#N/A`, `#DIV/0!`, `#VALUE!`, `#NUM!`, `#NAME?`,
 `#NULL!`, and `Sheet!#REF!` for a deleted cell on another sheet), omitted arguments, bounded rectangular ranges, absolute markers,
-cross-sheet references, workbook and sheet-scoped defined names (tokens past
+cross-sheet references, workbook and sheet-scoped defined names (including
+`Sheet!LocalName`; tokens past
 the grid such as `Table1` are names), implicit intersection of a range in
 scalar position, and elementwise evaluation of range expressions inside
 aggregate arguments (`SUM(IF(A1:A5=0,0,B1:B5))`, `SUMPRODUCT((A1:A5>2)*B1:B5)`).
+Rectangular array constants support numbers, text, booleans and error literals,
+comma-separated columns and semicolon-separated rows, up to 1,000,000 values.
+They work in aggregates, elementwise expressions and INDEX/MATCH/LOOKUP,
+VLOOKUP/HLOOKUP/XLOOKUP. A scalar use takes the first value; spilling into
+neighbouring cells is not implemented. `_xlfn.` and `_xlfn._xlws.` prefixes
+resolve only to functions already in the registry.
 
 Deliberately unsupported: `TODAY`, `NOW`, `RAND` and every other volatile
 function (until the calculation context consumes stored tick events), external workbook references,
-3D references, array constants and array formulas, `INDIRECT`, `OFFSET`,
+3D references, spilling array formulas, `INDIRECT`, `OFFSET`,
 `CELL`, add-in (`_xll.`) calls, locale-sensitive parsing such as `DATEVALUE`
 and `TEXT`, and the 1904 date system.
 
