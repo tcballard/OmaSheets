@@ -1,86 +1,108 @@
 {
-  "schema": 1,
-  "source": "enron-figshare",
+  "baseline_engine_commit": "ecf00367004ccbeb56a736fd0aef30dd4e45c1ba",
+  "engine_commit": "12d1c8c69522ee7ee81ce3d7090a1bba60cd2ac5",
   "manifest": "enron-figshare.jsonl",
   "manifest_sha256": "2f5ea94c02ae3779206d6ca1b1da9e77002450bc070fa968ca566cfd526ff80d",
-  "baseline_engine_commit": "3d32520f91d51b63d327202cca82920125e7d36d",
-  "engine_commit": "71f21c5e285c7ec98543b498088c17ee648ef858",
-  "scored": "2026-09-02",
+  "notes": [
+    "Frozen 1,000-workbook manifest and 924,235-formula denominator unchanged.",
+    "Workflow evidence: https://github.com/tcballard/OmaSheets/actions/runs/34254502652",
+    "First-failure categories move as parsing advances: syntax 10,791 -> 0, invalid references 4,260 -> 10,551, unsupported functions 26,617 -> 28,967. This is not a claim that every former syntax failure now evaluates.",
+    "4,513 more formulas compiled; 4,505 more stored-value matches; total mismatches 1,084 -> 1,092. Aggregate evidence cannot assign the eight additional mismatches to individual formulas.",
+    "No performance comparison to Omarchy desktop hardware is implied."
+  ],
   "owned_lane": {
-    "opened": {
-      "before": 996,
-      "after": 996
+    "comparison_coverage": {
+      "after": 0.8975303899982148,
+      "before": 0.8926474327416728
     },
     "failed": {
-      "before": 4,
-      "after": 4
-    },
-    "timed_out": {
-      "before": 0,
-      "after": 0
-    },
-    "formula_cells_observed": {
-      "before": 924235,
-      "after": 924235
-    },
-    "formula_cells_loaded": {
-      "before": 817225,
-      "after": 825016
+      "after": 4,
+      "before": 4
     },
     "formula_cells_compared": {
-      "before": 817225,
-      "after": 825016
+      "after": 829529,
+      "before": 825016
     },
-    "stored_values_matched": {
-      "before": 816141,
-      "after": 823932
+    "formula_cells_loaded": {
+      "after": 829529,
+      "before": 825016
     },
-    "stored_values_mismatched": {
-      "before": 1084,
-      "after": 1084
-    },
-    "unsupported_formulas": {
-      "before": 107010,
-      "after": 99219
+    "formula_cells_observed": {
+      "after": 924235,
+      "before": 924235
     },
     "formula_parse_rate": {
-      "before": 0.8842177584705189,
-      "after": 0.8926474327416728
+      "after": 0.8975303899982148,
+      "before": 0.8926474327416728
     },
-    "comparison_coverage": {
-      "before": 0.8842177584705189,
-      "after": 0.8926474327416728
-    },
-    "stored_value_match_rate": {
-      "before": 0.9986735599131206,
-      "after": 0.9986860860880273
+    "opened": {
+      "after": 996,
+      "before": 996
     },
     "peak_rss_bytes_max": {
-      "before": 116269056,
-      "after": 116408320
+      "after": 142831616,
+      "before": 142925824
+    },
+    "stored_value_match_rate": {
+      "after": 0.9986835903265588,
+      "before": 0.9986860860880273
+    },
+    "stored_values_matched": {
+      "after": 828437,
+      "before": 823932
+    },
+    "stored_values_mismatched": {
+      "after": 1092,
+      "before": 1084
+    },
+    "timed_out": {
+      "after": 0,
+      "before": 0
+    },
+    "unsupported_formulas": {
+      "after": 94706,
+      "before": 99219
     }
   },
   "owned_lane_added": {
-    "workbooks_with_skipped_sheets": {
-      "before": 23,
-      "after": 23
-    },
     "skipped_sheets": {
-      "before": 48,
-      "after": 48
+      "after": 48,
+      "before": 48
+    },
+    "workbooks_with_skipped_sheets": {
+      "after": 23,
+      "before": 23
     }
   },
+  "process_tree_peak_rss_bytes": {
+    "after": 1493118976,
+    "before": 1502441472
+  },
+  "resolved_defects": [
+    "Array constants in aggregate, elementwise and lookup inputs",
+    "Sheet-qualified defined names and known modern function prefixes",
+    "Qualified and deleted reference range endpoints"
+  ],
+  "resolved_functions": [
+    "COVAR",
+    "IRR",
+    "NORMSDIST",
+    "PV"
+  ],
+  "resolved_open_failures": {},
+  "schema": 1,
+  "scored": "2026-09-08",
+  "source": "enron-figshare",
   "unsupported_reasons": {
-    "before": {
-      "cycle": 2286,
-      "external_reference": 47007,
-      "invalid_reference": 12051,
-      "syntax": 10791,
-      "unknown_name": 122,
-      "unsupported_function": 26617,
-      "unsupported_name": 8136
-    },
     "after": {
+      "cycle": 2292,
+      "external_reference": 47007,
+      "invalid_reference": 10551,
+      "unknown_name": 122,
+      "unsupported_function": 28967,
+      "unsupported_name": 5767
+    },
+    "before": {
       "cycle": 2286,
       "external_reference": 47007,
       "invalid_reference": 4260,
@@ -90,20 +112,8 @@
       "unsupported_name": 8136
     }
   },
-  "resolved_functions": [],
-  "resolved_defects": [
-    "a sheet-qualified #REF! (a deleted cell on another sheet) was refused as an invalid reference instead of compiling to the #REF! error"
-  ],
-  "resolved_open_failures": {},
   "wall_seconds": {
-    "before": 139.0,
-    "after": 208.0
-  },
-  "process_tree_peak_rss_bytes": {
-    "before": 1539121152,
-    "after": 1544372224
-  },
-  "notes": [
-    "Timing evidence in this entry comes from a restarted container that is about 35% slower than the one the previous entries ran on: the candidate lane, which this engine change does not touch, went from 44 s to 60 s of summed import time. Per-cell results are identical across two runs on the new container; compare cell counts across entries, not wall seconds."
-  ]
+    "after": 117.606367,
+    "before": 118.763427
+  }
 }
