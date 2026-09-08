@@ -78,7 +78,7 @@ QtObject {
     function askAgent() {actions=actions.concat([{action:"ask"}]);}
     function listProposals() {}
     function reviewProposal(branch) {}
-    function resolveProposal(approve) {}
+    function resolveProposal(approve) {actions=actions.concat([{action:"resolve",approve:approve}]);}
     function createExample(url) {}
     function openDocument(url,create) {}
     function openUpdater() {return false;}

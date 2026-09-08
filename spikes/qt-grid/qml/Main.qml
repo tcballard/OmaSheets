@@ -185,6 +185,12 @@ ApplicationWindow {
                             ["Ctrl+O", "Open a native workbook"],
                             ["Commands → Workbook", "Import, open Excel / ODS, or export a copy"]
                         ] },
+                        { heading: "Agent review", shortcuts: [
+                            ["Ctrl+Shift+A / Ctrl+Shift+R", "Ask Agent / review proposals"],
+                            ["Tab / Shift+Tab", "Move between controls and proposal details"],
+                            ["Arrows / Page Up / Page Down", "Scroll focused proposal details"],
+                            ["Home / End", "First / last proposal details"]
+                        ] },
                         { heading: "Move around", shortcuts: [
                             ["Arrow keys", "Move one cell"],
                             ["Tab / Shift+Tab", "Move right / left"],

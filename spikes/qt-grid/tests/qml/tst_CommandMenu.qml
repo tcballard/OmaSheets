@@ -32,6 +32,8 @@ Item {
             backend.busy=false;
             backend.homeMode=false;
             backend.documentMode=true;
+            backend.reviewJson="";
+            backend.proposalsJson="[]";
             menu.pendingCommand="";
             menu.close();
             for(let i=0;i<4;i++)keyClick(Qt.Key_Escape);
@@ -162,6 +164,29 @@ Item {
             keyClick(Qt.Key_Space,Qt.ControlModifier);compare(menu.visible,false);
             keyClick(Qt.Key_B,Qt.ControlModifier);compare(backend.actions.length,0);
             keyClick(Qt.Key_Escape);
+        }
+        function test_read_long_proposal_and_reject_with_keyboard() {
+            const cell={a1:"B3",value:{type:"number",value:120},state:{input:{}}};
+            backend.proposalsJson='["proposal"]';
+            backend.reviewJson=JSON.stringify({goal:"Review keyboard navigation",
+                explanation:"Details ".repeat(800),assumptions:[],evidence:[],status:"pending",
+                can_approve:true,truncated:false,unsupported_operations:[],diff:{conflicts:[]},
+                checks:[],cells:[{sheet:"Forecast",before:cell,after:cell}]});
+            choose("review proposals");
+            const details=findChild(app,"proposalDetails");
+            let reached=false;
+            for(let i=0;i<10;i++) {
+                keyClick(Qt.Key_Tab);
+                if(details.activeFocus) {reached=true;break;}
+            }
+            verify(reached,"Proposal details must be reachable by Tab");
+            keyClick(Qt.Key_PageDown);
+            tryVerify(() => details.contentItem.contentY>0,1000,"Long proposals need keyboard scrolling");
+            keyClick(Qt.Key_Tab);compare(app.activeFocusItem.text,"Reject proposal");
+            keyClick(Qt.Key_Space);
+            compare(backend.actions.length,1);
+            compare(backend.actions[0].action,"resolve");compare(backend.actions[0].approve,false);
+            keyClick(Qt.Key_Escape);tryCompare(body,"activeFocus",true);
         }
         function test_alternate_shortcut_and_page_navigation() {
             keyClick(Qt.Key_P,Qt.ControlModifier|Qt.ShiftModifier);

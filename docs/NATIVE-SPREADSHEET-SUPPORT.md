@@ -23,7 +23,9 @@ formatting, Ctrl+D/R for fill down/right, Ctrl+F for find/replace and Ctrl+G
 for a cell or range. Existing workbook, clipboard, undo and agent shortcuts
 remain available. The menu displays shortcuts and F1 opens the complete guide.
 Dialogs use Tab/Shift+Tab, Space, Enter and Escape, including find results and
-exact colour entry. Opening and cancelling the menu preserves the active
+exact colour entry. Tab also focuses proposal details, with a visible outline;
+arrows, Page Up/Down and Home/End scroll through a long review before a decision.
+Opening and cancelling the menu preserves the active
 editor and draft; running a command retains the existing failed-save and
 confirmation checks. No shell commands are taken from search text.
 
