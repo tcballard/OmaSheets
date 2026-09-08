@@ -27,8 +27,9 @@ resolve only to functions already in the registry.
 selector in D1, and a zero row or column selects that entire axis. The range
 operator binds a bounded envelope of all possible endpoint selections. Native
 replay preserves that envelope's row and column identities, including after
-sorting. Potential circular dependencies anywhere in the envelope are refused;
-this conservative rule is the same as for INDEX's source range. A moved formula
+sorting. Constant row/column selections narrow the calculation dependencies after
+stable binding, so unused source columns do not create false cycles. Dynamic axes
+retain their bounded envelope; potential cycles within it are still refused. A moved formula
 whose current A1 spelling cannot preserve those identities reports a projection
 refusal instead of exporting different references.
 
