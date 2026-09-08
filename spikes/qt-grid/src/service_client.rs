@@ -4,13 +4,13 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, mpsc};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 const PAGE_ROWS: usize = 64;
 const PAGE_COLUMNS: usize = 16;
-const MAX_CACHED_PAGES: usize = 8;
+const MAX_CACHED_PAGES: usize = 32;
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -18,6 +18,7 @@ pub struct GridCell {
     pub display: String,
     pub input: String,
     pub kind: String,
+    pub presentation: String,
 }
 
 #[derive(Debug)]
@@ -29,7 +30,11 @@ struct CachedPage {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct PageKey { sheet: String, row: usize, column: usize }
+struct PageKey {
+    sheet: String,
+    row: usize,
+    column: usize,
+}
 
 struct PageReply {
     generation: u64,
@@ -47,7 +52,8 @@ struct PageLoader {
 
 impl PageLoader {
     fn spawn(
-        path: PathBuf, branch: Option<String>,
+        path: PathBuf,
+        branch: Option<String>,
         connect: impl FnOnce() -> Result<ServiceClient, String> + Send + 'static,
         notify: impl Fn() + Send + 'static,
     ) -> Self {
@@ -60,33 +66,71 @@ impl PageLoader {
             while let Ok((generation, key)) = work.recv() {
                 if generation != current.load(Ordering::Acquire) {
                     // Wake the viewport when cancelled work frees queue space.
-                    if answers.send(PageReply {generation, key, page: Err("obsolete page".into())}).is_err() { break; }
+                    if answers
+                        .send(PageReply {
+                            generation,
+                            key,
+                            page: Err("obsolete page".into()),
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
                     notify();
                     continue;
                 }
                 let page = match &mut client {
-                    Ok(client) => client.call(&page_request(&path, &branch, &key.sheet, key.row, key.column))
+                    Ok(client) => client
+                        .call(&page_request(
+                            &path, &branch, &key.sheet, key.row, key.column,
+                        ))
                         .and_then(|response| {
                             let page = parse_page(&response, &key.sheet, key.row, key.column);
-                            if page.is_err() { client.usable = false; }
+                            if page.is_err() {
+                                client.usable = false;
+                            }
                             page
                         }),
                     Err(error) => Err(error.clone()),
                 };
-                if answers.send(PageReply {generation, key, page}).is_err() { break; }
+                if answers
+                    .send(PageReply {
+                        generation,
+                        key,
+                        page,
+                    })
+                    .is_err()
+                {
+                    break;
+                }
                 notify();
             }
         });
-        Self {requests, replies, generation, pending: BTreeSet::new(), error: None}
+        Self {
+            requests,
+            replies,
+            generation,
+            pending: BTreeSet::new(),
+            error: None,
+        }
     }
 
     fn request(&mut self, key: PageKey) -> Result<(), String> {
-        if let Some(error) = &self.error { return Err(error.clone()); }
+        if let Some(error) = &self.error {
+            return Err(error.clone());
+        }
         if self.pending.len() < MAX_CACHED_PAGES && !self.pending.contains(&key) {
-            match self.requests.try_send((self.generation.load(Ordering::Acquire), key.clone())) {
-                Ok(()) => { self.pending.insert(key); }
-                Err(mpsc::TrySendError::Full(_)) => {},
-                Err(mpsc::TrySendError::Disconnected(_)) => return Err("page loader stopped; reopen the document".into()),
+            match self
+                .requests
+                .try_send((self.generation.load(Ordering::Acquire), key.clone()))
+            {
+                Ok(()) => {
+                    self.pending.insert(key);
+                }
+                Err(mpsc::TrySendError::Full(_)) => {}
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    return Err("page loader stopped; reopen the document".into());
+                }
             }
         }
         Ok(())
@@ -173,59 +217,94 @@ impl ServiceClient {
 /// the editing connection. Call from a worker, never from the render thread.
 pub(crate) fn desktop_call(request: &Value) -> Result<Value, String> {
     let mut client = ServiceClient::connect()?;
-    client.writer.set_read_timeout(Some(Duration::from_secs(120)))
+    client
+        .writer
+        .set_read_timeout(Some(Duration::from_secs(120)))
         .map_err(|error| error.to_string())?;
     client.call(request)
 }
 
 /// Publish only the user-selected workbook to the bounded agent bridge.
-pub(crate) fn publish_agent_session(path: &Path, sheet: &str, row: i32, column: i32, rows: i32, columns: i32) -> Result<String, String> {
+pub(crate) fn publish_agent_session(
+    path: &Path,
+    sheet: &str,
+    row: i32,
+    column: i32,
+    rows: i32,
+    columns: i32,
+) -> Result<String, String> {
     use std::os::unix::fs::OpenOptionsExt;
     if !path.is_absolute() || row < 0 || column < 0 || rows <= 0 || columns <= 0 {
         return Err("Invalid agent selection".into());
     }
     let mut bytes = [0_u8; 16];
-    fs::File::open("/dev/urandom").and_then(|mut file| file.read_exact(&mut bytes)).map_err(|e| e.to_string())?;
-    let session_id = bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    fs::File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(&mut bytes))
+        .map_err(|e| e.to_string())?;
+    let session_id = bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     let directory = runtime_directory()?;
     let temporary = directory.join(format!("native-agent-session-{session_id}.tmp"));
     let result = (|| {
-        let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600)
-            .open(&temporary).map_err(|e| e.to_string())?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)
+            .map_err(|e| e.to_string())?;
         serde_json::to_writer(&mut file, &json!({"schema": 1, "session_id": session_id,
             "pid": std::process::id(), "path": path,
             "selection": {"sheet": sheet, "row": row, "column": column, "rows": rows, "columns": columns}}))
             .map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
-        fs::rename(&temporary, directory.join("native-agent-session.json")).map_err(|e| e.to_string())
+        fs::rename(&temporary, directory.join("native-agent-session.json"))
+            .map_err(|e| e.to_string())
     })();
-    if result.is_err() { let _ = fs::remove_file(&temporary); }
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
     result.map(|()| session_id)
 }
 
 fn clear_agent_session(path: &Path) {
-    let Ok(directory) = runtime_directory() else { return; };
+    let Ok(directory) = runtime_directory() else {
+        return;
+    };
     let context = directory.join("native-agent-session.json");
-    let selected = fs::read(&context).ok().and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
-    if selected.is_some_and(|value| value["pid"].as_u64() == Some(std::process::id().into()) && value["path"] == path.to_string_lossy().as_ref()) {
+    let selected = fs::read(&context)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    if selected.is_some_and(|value| {
+        value["pid"].as_u64() == Some(std::process::id().into())
+            && value["path"] == path.to_string_lossy().as_ref()
+    }) {
         let _ = fs::remove_file(context);
     }
 }
 
 pub(crate) fn create_workbook(path: &Path) -> Result<(), String> {
     let actor = json!({"kind": "human", "id": "omasheets-desktop"});
-    let name = path.file_stem().and_then(|name| name.to_str()).unwrap_or("Untitled");
+    let name = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Untitled");
     desktop_call(&json!({"kind": "create", "path": path, "name": name, "actor": actor}))?;
     // Creation never overwrites a file. Keep a partially created document on
     // failure: deleting it after a lost reply could destroy confirmed work.
     let sheet = desktop_call(&json!({"kind": "append", "path": path, "actor": actor,
         "command": {"command": "add_sheet", "name": "Sheet1"}}))?;
-    let sheet = sheet["operation"]["sheet"].as_str().ok_or("new sheet has no identity")?;
-    desktop_call(&json!({"kind": "append_batch", "path": path, "actor": actor,
+    let sheet = sheet["operation"]["sheet"]
+        .as_str()
+        .ok_or("new sheet has no identity")?;
+    desktop_call(
+        &json!({"kind": "append_batch", "path": path, "actor": actor,
         "commands": [
             {"command": "add_columns", "sheet": sheet, "count": 26, "at": 0},
             {"command": "add_rows", "sheet": sheet, "count": 1000, "at": 0, "table": null}
-        ]}))?;
+        ]}),
+    )?;
     Ok(())
 }
 
@@ -239,22 +318,43 @@ pub(crate) fn create_example(path: &Path) -> Result<(), String> {
         ["Coffee", "2", "3", "=B4*C4"],
         ["Total", "", "", "=SUM(D2:D4)"],
     ];
-    let values: Vec<Vec<String>> = rows.iter().map(|row| row.iter().map(|value| (*value).to_string()).collect()).collect();
+    let values: Vec<Vec<String>> = rows
+        .iter()
+        .map(|row| row.iter().map(|value| (*value).to_string()).collect())
+        .collect();
     document.set_matrix(0, 0, &values)
 }
 
 pub(crate) fn transfer_summary(manifest: &Value) -> String {
-    let mut lines = vec![format!("File written: {}", manifest["output"].as_str().unwrap_or("selected destination"))];
-    for key in ["formula_cells_preserved", "formula_cells_flattened", "formula_cells_native",
-        "formula_cells_cached_only", "formula_cells_omitted", "error_cells_omitted",
-        "rejected_value_cells_omitted", "skipped_source_sheets", "error_cells_as_null",
-        "potential_formula_injection_cells"] {
+    let mut lines = vec![format!(
+        "File written: {}",
+        manifest["output"]
+            .as_str()
+            .unwrap_or("selected destination")
+    )];
+    for key in [
+        "formula_cells_preserved",
+        "formula_cells_flattened",
+        "formula_cells_native",
+        "formula_cells_cached_only",
+        "formula_cells_omitted",
+        "error_cells_omitted",
+        "rejected_value_cells_omitted",
+        "skipped_source_sheets",
+        "error_cells_as_null",
+        "potential_formula_injection_cells",
+    ] {
         if let Some(count) = manifest[key].as_u64() {
             lines.push(format!("{}: {count}", key.replace('_', " ")));
         }
     }
     if let Some(limitations) = manifest["limitations"].as_array() {
-        lines.extend(limitations.iter().filter_map(Value::as_str).map(str::to_owned));
+        lines.extend(
+            limitations
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned),
+        );
     }
     lines.join("\n\n")
 }
@@ -301,7 +401,9 @@ impl Drop for GridDocument {
             clear_agent_session(&state.path);
             let request = json!({"kind": "snapshot", "path": state.path, "branch": state.branch});
             if let Err(error) = state.client.call(&request) {
-                eprintln!("omasheets-grid: final checkpoint unavailable; durable edits will replay on reopen: {error}");
+                eprintln!(
+                    "omasheets-grid: final checkpoint unavailable; durable edits will replay on reopen: {error}"
+                );
             }
         }
     }
@@ -343,7 +445,10 @@ impl GridDocument {
                 pages: VecDeque::new(),
                 loader: None,
                 requests: 2,
-                revision: summary["revision"].as_str().ok_or("document has no revision")?.to_string(),
+                revision: summary["revision"]
+                    .as_str()
+                    .ok_or("document has no revision")?
+                    .to_string(),
                 undo: Vec::new(),
                 redo: Vec::new(),
             }),
@@ -361,14 +466,11 @@ impl GridDocument {
         }
         let row_start = row / PAGE_ROWS * PAGE_ROWS;
         let column_start = column / PAGE_COLUMNS * PAGE_COLUMNS;
-        let position = state
-            .pages
-            .iter()
-            .position(|page| {
-                page.sheet == sheet.id
-                    && page.row_start == row_start
-                    && page.column_start == column_start
-            });
+        let position = state.pages.iter().position(|page| {
+            page.sheet == sheet.id
+                && page.row_start == row_start
+                && page.column_start == column_start
+        });
         let page = match position {
             Some(position) => state.pages.remove(position).expect("position was found"),
             None => fetch_page(&mut state, &sheet.id, row_start, column_start)?,
@@ -383,22 +485,48 @@ impl GridDocument {
 
     /// Rendering never waits for service I/O. Explicit edit/copy reads still use
     /// `cell`, preserving their validation and save ordering.
-    pub fn display_cell(&self, row: usize, column: usize, notify: impl Fn() + Send + 'static) -> Result<GridCell, String> {
+    pub fn display_cell(
+        &self,
+        row: usize,
+        column: usize,
+        notify: impl Fn() + Send + 'static,
+    ) -> Result<GridCell, String> {
         let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
-        let sheet = self.sheets.get(state.current_sheet).ok_or("the current sheet is unavailable")?;
-        if row >= sheet.rows || column >= sheet.columns { return Ok(GridCell::default()); }
-        let key = PageKey {sheet: sheet.id.clone(), row: row / PAGE_ROWS * PAGE_ROWS, column: column / PAGE_COLUMNS * PAGE_COLUMNS};
-        if let Some(position) = state.pages.iter().position(|p| p.sheet == key.sheet && p.row_start == key.row && p.column_start == key.column) {
+        let sheet = self
+            .sheets
+            .get(state.current_sheet)
+            .ok_or("the current sheet is unavailable")?;
+        if row >= sheet.rows || column >= sheet.columns {
+            return Ok(GridCell::default());
+        }
+        let key = PageKey {
+            sheet: sheet.id.clone(),
+            row: row / PAGE_ROWS * PAGE_ROWS,
+            column: column / PAGE_COLUMNS * PAGE_COLUMNS,
+        };
+        if let Some(position) = state.pages.iter().position(|p| {
+            p.sheet == key.sheet && p.row_start == key.row && p.column_start == key.column
+        }) {
             let page = state.pages.remove(position).expect("found");
             let cell = page.cells.get(&(row, column)).cloned().unwrap_or_default();
             state.pages.push_back(page);
             return Ok(cell);
         }
         if state.loader.is_none() {
-            state.loader = Some(PageLoader::spawn(state.path.clone(), state.branch.clone(), ServiceClient::connect, notify));
+            state.loader = Some(PageLoader::spawn(
+                state.path.clone(),
+                state.branch.clone(),
+                ServiceClient::connect,
+                notify,
+            ));
         }
         state.loader.as_mut().expect("created").request(key)?;
-        Ok(GridCell {display: "…".into(), input: String::new(), kind: "loading".into()})
+        Ok(GridCell {
+            display: "…".into(),
+            input: String::new(),
+            kind: "loading".into(),
+            presentation: String::new(),
+        })
     }
 
     /// Called on the Qt thread after a background reply; stale generations are
@@ -414,21 +542,34 @@ impl GridDocument {
                 requests += 1;
                 // Even an obsolete reply frees a queue slot for the viewport.
                 changed = true;
-                if reply.generation != loader.generation.load(Ordering::Acquire) { continue; }
+                if reply.generation != loader.generation.load(Ordering::Acquire) {
+                    continue;
+                }
                 loader.pending.remove(&reply.key);
                 match reply.page {
                     Ok(page) => accepted.push(page),
-                    Err(message) => { loader.error = Some(message.clone()); error = Some(message); }
+                    Err(message) => {
+                        loader.error = Some(message.clone());
+                        error = Some(message);
+                    }
                 }
             }
         }
         state.requests += requests;
         for page in accepted {
-            state.pages.retain(|old| !(old.sheet == page.sheet && old.row_start == page.row_start && old.column_start == page.column_start));
+            state.pages.retain(|old| {
+                !(old.sheet == page.sheet
+                    && old.row_start == page.row_start
+                    && old.column_start == page.column_start)
+            });
             state.pages.push_back(page);
         }
-        while state.pages.len() > MAX_CACHED_PAGES { state.pages.pop_front(); }
-        if let Some(error) = error { return Err(error); }
+        while state.pages.len() > MAX_CACHED_PAGES {
+            state.pages.pop_front();
+        }
+        if let Some(error) = error {
+            return Err(error);
+        }
         Ok(changed)
     }
 
@@ -436,49 +577,184 @@ impl GridDocument {
         self.set_matrix(row, column, &[vec![text.to_string()]])
     }
 
-    pub fn set_matrix(&self, row: usize, column: usize, values: &[Vec<String>]) -> Result<(), String> {
-        let sheet = self.current_sheet()?;
-        let width = values.first().map_or(0, Vec::len);
-        if width == 0 || values.iter().any(|line| line.len() != width)
-            || values.len().checked_mul(width).is_none_or(|count| count > 1000)
-            || row.checked_add(values.len()).is_none_or(|end| end > sheet.rows)
-            || column.checked_add(width).is_none_or(|end| end > sheet.columns)
+    pub fn set_matrix(
+        &self,
+        row: usize,
+        column: usize,
+        values: &[Vec<String>],
+    ) -> Result<(), String> {
+        self.sheet_action(json!({"action":"set_cells","row":row,"column":column,"values":values}))
+            .map(|_| ())
+    }
+
+    pub fn sheet_action(&self, action: Value) -> Result<Value, String> {
+        let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
+        if state
+            .branch
+            .as_deref()
+            .is_some_and(|branch| branch != "main")
         {
-            return Err("paste must be rectangular, at most 1,000 cells, and fit inside the sheet".into());
+            return Err("Spreadsheet controls require the main workbook".into());
         }
-        let mut record = EditRecord { before: Vec::new(), after: Vec::new(), bytes: 0 };
-        for (dr, line) in values.iter().enumerate() {
-            for (dc, text) in line.iter().enumerate() {
-                let old = self.cell(row + dr, column + dc)?;
-                let a1 = format!("{}{}", column_letters(column + dc), row + dr + 1);
-                record.before.push(restore_command(&sheet.id, &a1, &old));
-                record.after.push(edit_command(&sheet.id, &a1, text));
+        let sheet = self
+            .sheets
+            .get(state.current_sheet)
+            .ok_or("current sheet is unavailable")?;
+        let request = json!({"kind":"edit_sheet","path":state.path,"sheet":sheet.id,
+            "expected_revision":state.revision,"action":action});
+        let response = state.client.call(&request)?;
+        state.requests += 1;
+        let parsed = (|| -> Result<_, String> {
+            if response["kind"] != "sheet_edited" {
+                return Err("unexpected spreadsheet action response".into());
+            }
+            let revision = response["revision"]
+                .as_str()
+                .ok_or("missing edit revision")?
+                .to_string();
+            let before = response["undo"]
+                .as_array()
+                .ok_or("missing undo record")?
+                .clone();
+            let after = response["redo"]
+                .as_array()
+                .ok_or("missing redo record")?
+                .clone();
+            let structural = response["structural"]
+                .as_bool()
+                .ok_or("missing structural status")?;
+            Ok((revision, before, after, structural))
+        })();
+        let (revision, before, after, structural) = match parsed {
+            Ok(record) => record,
+            Err(error) => {
+                state.client.usable = false;
+                return Err(format!(
+                    "{error}; reopen to verify whether the action was saved"
+                ));
+            }
+        };
+        state.revision = revision;
+        state.pages.clear();
+        if let Some(loader) = &mut state.loader {
+            loader.invalidate();
+        }
+        if structural {
+            state.undo.clear();
+            state.redo.clear();
+        } else if !after.is_empty() {
+            state.redo.clear();
+            if !before.is_empty() {
+                let mut record = EditRecord {
+                    before,
+                    after,
+                    bytes: 0,
+                };
+                record.bytes = record_bytes(&record);
+                state.undo.push(record);
+                while state.undo.len() > 32
+                    || state.undo.iter().map(|record| record.bytes).sum::<usize>() > 8 * 1024 * 1024
+                {
+                    state.undo.remove(0);
+                }
             }
         }
-        if record.before == record.after { return self.verify_revision(); }
-        record.bytes = record_bytes(&record);
-        if record.bytes > 4 * 1024 * 1024 {
-            return Err("edit is too large to retain safe undo history".into());
-        }
+        Ok(response)
+    }
+
+    fn sheet_read(&self, kind: &str, extra: Value) -> Result<Value, String> {
         let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
-        apply_commands(&mut state, &record.after)?;
-        state.redo.clear();
-        state.undo.push(record);
-        while state.undo.len() > 32 || state.undo.iter().map(|record| record.bytes).sum::<usize>() > 8 * 1024 * 1024 {
-            state.undo.remove(0);
+        let sheet = self
+            .sheets
+            .get(state.current_sheet)
+            .ok_or("current sheet is unavailable")?;
+        let mut request = json!({"kind":kind,"path":state.path,"sheet":sheet.id});
+        for (key, value) in extra.as_object().ok_or("invalid sheet query")? {
+            request[key] = value.clone();
         }
-        Ok(())
+        let result = state.client.call(&request);
+        state.requests += 1;
+        result
+    }
+
+    pub fn sheet_view(&self) -> Result<Value, String> {
+        self.sheet_read("sheet_view", json!({}))
+    }
+    pub fn inspect_range(&self, range: Value) -> Result<Value, String> {
+        self.sheet_read("inspect_range", json!({"range":range}))
+    }
+    pub fn find_sheet(&self, query: &str) -> Result<Value, String> {
+        self.sheet_read("find_in_sheet", json!({"query":query}))
+    }
+
+    pub fn fill_range(
+        &self,
+        row: usize,
+        column: usize,
+        rows: usize,
+        columns: usize,
+        right: bool,
+    ) -> Result<(), String> {
+        let sheet = self.current_sheet()?;
+        if rows == 0
+            || columns == 0
+            || rows.checked_mul(columns).is_none_or(|count| count > 1000)
+            || row.checked_add(rows).is_none_or(|end| end > sheet.rows)
+            || column
+                .checked_add(columns)
+                .is_none_or(|end| end > sheet.columns)
+        {
+            return Err("Fill a rectangle of at most 1,000 cells inside the sheet".into());
+        }
+        let mut values = Vec::new();
+        for dr in 0..rows {
+            let mut line = Vec::new();
+            for dc in 0..columns {
+                let source = self.cell(
+                    row + if right { dr } else { 0 },
+                    column + if right { 0 } else { dc },
+                )?;
+                let mut value = vec![vec![source.input]];
+                crate::clipboard::translate(
+                    &mut value,
+                    if right { 0 } else { dr as i32 },
+                    if right { dc as i32 } else { 0 },
+                );
+                line.push(value.remove(0).remove(0));
+            }
+            values.push(line);
+        }
+        self.set_matrix(row, column, &values)
     }
 
     pub fn undo(&self, redo: bool) -> Result<(), String> {
         let mut state = self.state.lock().map_err(|_| "grid cache is poisoned")?;
-        let record = if redo { state.redo.pop() } else { state.undo.pop() }
-            .ok_or(if redo { "nothing to redo" } else { "nothing to undo" })?;
-        if let Err(error) = apply_commands(&mut state, if redo { &record.after } else { &record.before }) {
-            if redo { state.redo.push(record); } else { state.undo.push(record); }
+        let record = if redo {
+            state.redo.pop()
+        } else {
+            state.undo.pop()
+        }
+        .ok_or(if redo {
+            "nothing to redo"
+        } else {
+            "nothing to undo"
+        })?;
+        if let Err(error) = apply_commands(
+            &mut state,
+            if redo { &record.after } else { &record.before },
+        ) {
+            if redo {
+                state.redo.push(record);
+            } else {
+                state.undo.push(record);
+            }
             return Err(error);
         }
-        if redo { state.undo.push(record); } else { state.redo.push(record); }
+        if redo {
+            state.undo.push(record);
+        } else {
+            state.redo.push(record);
+        }
         Ok(())
     }
 
@@ -506,11 +782,19 @@ impl GridDocument {
     }
 
     pub(crate) fn export_request(&self, output: &Path, format: &str) -> Result<Value, String> {
-        let state = self.state.lock().map_err(|_| "document state is unavailable")?;
-        let sheet = self.sheets.get(state.current_sheet).ok_or("current sheet is unavailable")?;
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "document state is unavailable")?;
+        let sheet = self
+            .sheets
+            .get(state.current_sheet)
+            .ok_or("current sheet is unavailable")?;
         let mut request = json!({"kind": format!("export_{format}"),
             "path": state.path, "branch": state.branch, "output": output});
-        if format != "xlsx" { request["sheet"] = sheet.id.clone().into(); }
+        if format != "xlsx" {
+            request["sheet"] = sheet.id.clone().into();
+        }
         Ok(request)
     }
 
@@ -524,7 +808,9 @@ impl GridDocument {
         if state.current_sheet != index {
             state.current_sheet = index;
             state.pages.clear();
-            if let Some(loader) = &mut state.loader { loader.invalidate(); }
+            if let Some(loader) = &mut state.loader {
+                loader.invalidate();
+            }
         }
         Ok(sheet)
     }
@@ -548,12 +834,16 @@ fn apply_commands(state: &mut DocumentState, commands: &[Value]) -> Result<(), S
     let response = state.client.call(&request)?;
     if response["kind"] != "appended_batch" || !response["revision"].is_string() {
         state.client.usable = false;
-        return Err("save response was invalid; copy the draft and reopen to verify saved state".into());
+        return Err(
+            "save response was invalid; copy the draft and reopen to verify saved state".into(),
+        );
     }
     state.revision = response["revision"].as_str().unwrap().to_string();
     state.requests += 1;
     state.pages.clear();
-    if let Some(loader) = &mut state.loader { loader.invalidate(); }
+    if let Some(loader) = &mut state.loader {
+        loader.invalidate();
+    }
     Ok(())
 }
 
@@ -574,7 +864,13 @@ fn fetch_page(
     page
 }
 
-fn page_request(path: &Path, branch: &Option<String>, sheet: &str, row: usize, column: usize) -> Value {
+fn page_request(
+    path: &Path,
+    branch: &Option<String>,
+    sheet: &str,
+    row: usize,
+    column: usize,
+) -> Value {
     json!({"kind":"grid_page", "path":path, "branch":branch, "sheet":sheet,
         "row_start":row, "column_start":column, "rows":PAGE_ROWS, "columns":PAGE_COLUMNS})
 }
@@ -592,24 +888,39 @@ fn parse_page(
     {
         return Err("service returned a different grid page".into());
     }
-    let rows = response["rows"].as_u64().filter(|rows| *rows <= PAGE_ROWS as u64)
+    let rows = response["rows"]
+        .as_u64()
+        .filter(|rows| *rows <= PAGE_ROWS as u64)
         .ok_or("service returned invalid page dimensions")?;
-    let columns = response["columns"].as_u64().filter(|columns| *columns <= PAGE_COLUMNS as u64)
+    let columns = response["columns"]
+        .as_u64()
+        .filter(|columns| *columns <= PAGE_COLUMNS as u64)
         .ok_or("service returned invalid page dimensions")?;
-    let entries = response["cells"].as_array().ok_or("service page has no cell list")?;
+    let entries = response["cells"]
+        .as_array()
+        .ok_or("service page has no cell list")?;
     if entries.len() as u64 > rows * columns {
         return Err("service page contains too many cells".into());
     }
     let mut cells = BTreeMap::new();
     for cell in entries {
         let row = cell["row"].as_u64().ok_or("service cell has no row")?;
-        let column = cell["column"].as_u64().ok_or("service cell has no column")?;
-        if row.checked_sub(row_start as u64).is_none_or(|offset| offset >= rows)
-            || column.checked_sub(column_start as u64).is_none_or(|offset| offset >= columns)
+        let column = cell["column"]
+            .as_u64()
+            .ok_or("service cell has no column")?;
+        if row
+            .checked_sub(row_start as u64)
+            .is_none_or(|offset| offset >= rows)
+            || column
+                .checked_sub(column_start as u64)
+                .is_none_or(|offset| offset >= columns)
         {
             return Err("service cell is outside the requested page".into());
         }
-        if cells.insert((row as usize, column as usize), parse_cell(cell)?).is_some() {
+        if cells
+            .insert((row as usize, column as usize), parse_cell(cell)?)
+            .is_some()
+        {
             return Err("service page contains a duplicate cell".into());
         }
     }
@@ -635,13 +946,18 @@ fn parse_sheet(sheet: &Value) -> Result<SheetInfo, String> {
 
 fn parse_cell(cell: &Value) -> Result<GridCell, String> {
     let value = &cell["value"];
-    let value_type = value["type"].as_str().ok_or("service cell has no value type")?;
+    let value_type = value["type"]
+        .as_str()
+        .ok_or("service cell has no value type")?;
     let display = match value_type {
         "number" => value["value"]
             .as_f64()
             .map(format_number)
             .ok_or("service cell has an invalid number")?,
-        "text" | "error" => value["value"].as_str().ok_or("service cell has invalid text")?.to_string(),
+        "text" | "error" => value["value"]
+            .as_str()
+            .ok_or("service cell has invalid text")?
+            .to_string(),
         "boolean" => match value["value"].as_bool() {
             Some(true) => "TRUE".into(),
             Some(false) => "FALSE".into(),
@@ -650,28 +966,50 @@ fn parse_cell(cell: &Value) -> Result<GridCell, String> {
         "blank" => String::new(),
         _ => return Err("service cell has an unknown value type".into()),
     };
-    if cell.get("formula").is_some_and(|formula| !formula.is_null() && !formula.is_string()) {
+    if cell
+        .get("formula")
+        .is_some_and(|formula| !formula.is_null() && !formula.is_string())
+    {
         return Err("service cell has an invalid formula".into());
     }
     let formula = cell["formula"].as_str();
     let input_text = if let Some(formula) = formula {
         formula.to_string()
     } else if value_type == "text"
-        && (display.is_empty() || display.starts_with(['\'', '='])
-            || display.eq_ignore_ascii_case("true") || display.eq_ignore_ascii_case("false")
-            || display.parse::<f64>().is_ok_and(|number| number.is_finite()))
+        && (display.is_empty()
+            || display.starts_with(['\'', '='])
+            || display.eq_ignore_ascii_case("true")
+            || display.eq_ignore_ascii_case("false")
+            || display
+                .parse::<f64>()
+                .is_ok_and(|number| number.is_finite()))
     {
         format!("'{display}")
     } else {
         display.clone()
     };
+    let presentation = if cell.get("display").is_some()
+        || cell["style"].is_object()
+        || cell["note"].as_str().is_some_and(|note| !note.is_empty())
+    {
+        json!({"style":cell["style"],"note":cell["note"],"value_type":value_type,"raw_display":display}).to_string()
+    } else {
+        String::new()
+    };
     Ok(GridCell {
-        display,
+        display: cell["display"].as_str().unwrap_or(&display).into(),
         input: input_text,
-        kind: if formula.is_some() { "formula" } else { value_type }.into(),
+        kind: if formula.is_some() {
+            "formula"
+        } else {
+            value_type
+        }
+        .into(),
+        presentation,
     })
 }
 
+#[cfg(test)]
 fn edit_command(sheet: &str, a1: &str, text: &str) -> Value {
     if let Some(literal) = text.strip_prefix('\'') {
         return json!({ "command": "set_value", "sheet": sheet, "a1": a1,
@@ -697,6 +1035,7 @@ fn edit_command(sheet: &str, a1: &str, text: &str) -> Value {
     json!({ "command": "set_value", "sheet": sheet, "a1": a1, "value": value })
 }
 
+#[cfg(test)]
 fn restore_command(sheet: &str, a1: &str, cell: &GridCell) -> Value {
     match cell.kind.as_str() {
         "formula" => json!({"command":"set_formula","sheet":sheet,"a1":a1,"source":cell.input}),
@@ -741,7 +1080,8 @@ mod tests {
     #[test]
     #[ignore = "requires the authenticated native service; exercised by Qt CI"]
     fn desktop_workflow_service_roundtrip() {
-        let directory = std::env::temp_dir().join(format!("omasheets-desktop-{}", std::process::id()));
+        let directory =
+            std::env::temp_dir().join(format!("omasheets-desktop-{}", std::process::id()));
         fs::create_dir(&directory).unwrap();
         let path = directory.join("My workbook.omasheets");
         create_workbook(&path).unwrap();
@@ -772,8 +1112,11 @@ mod tests {
         drop(reopened);
         desktop_call(&json!({"kind": "close", "path": path})).unwrap();
         let imported = directory.join("Imported.omasheets");
-        desktop_call(&json!({"kind": "import_xlsx", "source": directory.join("copy.xlsx"),
-            "output": imported, "actor": {"kind": "human", "id": "ci"}})).unwrap();
+        desktop_call(
+            &json!({"kind": "import_xlsx", "source": directory.join("copy.xlsx"),
+            "output": imported, "actor": {"kind": "human", "id": "ci"}}),
+        )
+        .unwrap();
         let document = GridDocument::open(&imported, None).unwrap();
         assert_eq!(document.cell(0, 1).unwrap().display, "21");
         drop(document);
@@ -797,7 +1140,11 @@ mod tests {
     fn rendering_returns_while_io_is_blocked_and_old_generations_cannot_fill_cache() {
         let (client, edit_peer) = connected_pair();
         let (read_client, read_peer) = connected_pair();
-        read_client.reader.get_ref().set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        read_client
+            .reader
+            .get_ref()
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         let (seen, started) = mpsc::channel();
         let (release, resume) = mpsc::channel();
         let (notify, notified) = mpsc::channel();
@@ -813,24 +1160,55 @@ mod tests {
             }})).unwrap();
             line.clear();
             reader.read_line(&mut line).unwrap();
-            assert_eq!(serde_json::from_str::<Value>(&line).unwrap()["row_start"], 0);
+            assert_eq!(
+                serde_json::from_str::<Value>(&line).unwrap()["row_start"],
+                0
+            );
             writeln!(&read_peer, "{}", json!({"ok":true,"response":{
                 "kind":"grid_page","sheet":"sheet-id","row_start":0,"column_start":0,
                 "rows":64,"columns":16,"cells":[{"row":0,"column":0,"value":{"type":"number","value":42}}]
             }})).unwrap();
         });
-        let loader = PageLoader::spawn(PathBuf::from("test.omasheets"), None, move || Ok(read_client), move || { let _ = notify.send(()); });
+        let loader = PageLoader::spawn(
+            PathBuf::from("test.omasheets"),
+            None,
+            move || Ok(read_client),
+            move || {
+                let _ = notify.send(());
+            },
+        );
         let document = GridDocument {
-            name:"Test".into(), sheets:vec![SheetInfo {id:"sheet-id".into(),name:"Sheet".into(),rows:4096,columns:16}],
-            state: Mutex::new(DocumentState {client,path:PathBuf::from("test.omasheets"),branch:None,
-                current_sheet:0,actor:"test".into(),pages:VecDeque::new(),loader:Some(loader),requests:0,
-                revision:"r0".into(),undo:Vec::new(),redo:Vec::new()}),
+            name: "Test".into(),
+            sheets: vec![SheetInfo {
+                id: "sheet-id".into(),
+                name: "Sheet".into(),
+                rows: 4096,
+                columns: 16,
+            }],
+            state: Mutex::new(DocumentState {
+                client,
+                path: PathBuf::from("test.omasheets"),
+                branch: None,
+                current_sheet: 0,
+                actor: "test".into(),
+                pages: VecDeque::new(),
+                loader: Some(loader),
+                requests: 0,
+                revision: "r0".into(),
+                undo: Vec::new(),
+                redo: Vec::new(),
+            }),
         };
-        assert_eq!(document.display_cell(0,0,||{}).unwrap().kind, "loading");
+        assert_eq!(document.display_cell(0, 0, || {}).unwrap().kind, "loading");
         started.recv_timeout(Duration::from_secs(5)).unwrap();
         // The peer cannot reply until this thread releases it. All paint reads
         // must return anyway, deduplicating and bounding outstanding requests.
-        for row in (0..4096).step_by(64) { assert_eq!(document.display_cell(row,0,||{}).unwrap().kind, "loading"); }
+        for row in (0..4096).step_by(64) {
+            assert_eq!(
+                document.display_cell(row, 0, || {}).unwrap().kind,
+                "loading"
+            );
+        }
         {
             let mut state = document.state.lock().unwrap();
             let loader = state.loader.as_mut().unwrap();
@@ -842,8 +1220,11 @@ mod tests {
         document.accept_pages().unwrap();
         assert!(document.state.lock().unwrap().pages.is_empty());
         loop {
-            let cell = document.display_cell(0,0,||{}).unwrap();
-            if cell.kind != "loading" { assert_eq!(cell.display, "42"); break; }
+            let cell = document.display_cell(0, 0, || {}).unwrap();
+            if cell.kind != "loading" {
+                assert_eq!(cell.display, "42");
+                break;
+            }
             notified.recv_timeout(Duration::from_secs(5)).unwrap();
             document.accept_pages().unwrap();
         }
@@ -854,60 +1235,109 @@ mod tests {
     #[test]
     fn bulk_edit_undo_redo_and_failed_undo_preserve_history() {
         let (client, peer) = connected_pair();
-        // This integration test uses a real local socket, not a timing timeout.
-        client.reader.get_ref().set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        client
+            .reader
+            .get_ref()
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         let server = std::thread::spawn(move || {
             let mut reader = BufReader::new(peer.try_clone().unwrap());
             let mut writer = peer;
-            for step in 0..10 {
+            for step in 0..7 {
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
                 let request: Value = serde_json::from_str(&line).unwrap();
-                let response = if step == 0 || step == 6 || step == 8 {
-                    assert_eq!(request["kind"], "grid_page");
-                    json!({"ok": true, "response": {"kind":"grid_page", "sheet":"sheet-id",
-                        "row_start":0,"column_start":0,"rows":4,"columns":4,
-                        "cells": if step == 8 { vec![json!({"row":0,"column":0,"value":{"type":"number","value":5}})] } else { vec![] }}})
-                } else if step == 9 {
-                    assert_eq!(request["kind"], "revision");
-                    json!({"ok":true,"response":{"kind":"document","revision":"changed-elsewhere"}})
+                let response = if step == 0 || step == 5 || step == 6 {
+                    assert_eq!(request["kind"], "edit_sheet");
+                    assert_eq!(request["action"]["action"], "set_cells");
+                    assert_eq!(
+                        request["expected_revision"],
+                        if step == 0 {
+                            "d0"
+                        } else if step == 5 {
+                            "d4"
+                        } else {
+                            "d5"
+                        }
+                    );
+                    if step == 6 {
+                        json!({"ok":false,"error":{"code":"document_changed","message":"stale"}})
+                    } else {
+                        json!({"ok":true,"response":{"kind":"sheet_edited","revision":if step==0 {"d1"} else {"d5"},
+                        "structural":false,"undo":[{"command":"clear_cell","sheet":"sheet-id","a1":"A1"}],
+                        "redo":[{"command":"set_value","sheet":"sheet-id","a1":"A1","value":{"type":"number","value":1}}]}})
+                    }
                 } else {
                     assert_eq!(request["kind"], "append_batch");
-                    let (revision, next) = match step {
-                        1 => ("d0", "d1"), 2 => ("d1", "d2"), 3 => ("d2", "d3"),
-                        4 | 5 => ("d3", "d4"), 7 => ("d4", "d5"), _ => unreachable!(),
-                    };
-                    assert_eq!(request["expected_revision"], revision);
-                    let commands = request["commands"].as_array().unwrap();
-                    assert_eq!(commands.len(), if step == 7 { 1 } else { 4 });
-                    if step == 2 || step == 4 || step == 5 {
-                        assert!(commands.iter().all(|command| command["command"] == "clear_cell"));
-                    } else {
-                        assert_eq!(commands[0]["command"], "set_value");
-                        assert_eq!(commands[0]["value"]["value"], if step == 7 { 5.0 } else { 1.0 });
-                    }
-                    if step == 4 {
+                    assert_eq!(
+                        request["expected_revision"],
+                        match step {
+                            1 => "d1",
+                            2 => "d2",
+                            _ => "d3",
+                        }
+                    );
+                    assert_eq!(
+                        request["commands"][0]["command"],
+                        if step == 2 { "set_value" } else { "clear_cell" }
+                    );
+                    if step == 3 {
                         json!({"ok":false,"error":{"code":"document_changed","message":"stale"}})
-                    } else { json!({"ok":true,"response":{"kind":"appended_batch","revision":next}}) }
+                    } else {
+                        json!({"ok":true,"response":{"kind":"appended_batch","revision":match step {1=>"d2",2=>"d3",_=>"d4"}}})
+                    }
                 };
                 writeln!(writer, "{response}").unwrap();
             }
         });
         let document = GridDocument {
             name: "Test".into(),
-            sheets: vec![SheetInfo {id:"sheet-id".into(),name:"Sheet".into(),rows:4,columns:4}],
-            state: Mutex::new(DocumentState {client,path:PathBuf::from("test.omasheets"),branch:None,
-                current_sheet:0,actor:"test".into(),pages:VecDeque::new(),loader:None,requests:0,
-                revision:"d0".into(),undo:Vec::new(),redo:Vec::new()}),
+            sheets: vec![SheetInfo {
+                id: "sheet-id".into(),
+                name: "Sheet".into(),
+                rows: 4,
+                columns: 4,
+            }],
+            state: Mutex::new(DocumentState {
+                client,
+                path: PathBuf::from("test.omasheets"),
+                branch: None,
+                current_sheet: 0,
+                actor: "test".into(),
+                pages: VecDeque::new(),
+                loader: None,
+                requests: 0,
+                revision: "d0".into(),
+                undo: Vec::new(),
+                redo: Vec::new(),
+            }),
         };
-        document.set_matrix(0,0,&[vec!["1".into(),"2".into()],vec!["3".into(),"4".into()]]).unwrap();
+        document
+            .set_matrix(
+                0,
+                0,
+                &[vec!["1".into(), "2".into()], vec!["3".into(), "4".into()]],
+            )
+            .unwrap();
         document.undo(false).unwrap();
         document.undo(true).unwrap();
-        assert!(document.undo(false).unwrap_err().contains("document_changed"));
+        assert!(
+            document
+                .undo(false)
+                .unwrap_err()
+                .contains("document_changed")
+        );
+        assert_eq!(document.state.lock().unwrap().undo.len(), 1);
         document.undo(false).unwrap();
-        document.set_text(0,0,"5").unwrap();
+        document.set_text(0, 0, "5").unwrap();
         assert!(document.undo(true).unwrap_err().contains("nothing to redo"));
-        assert!(document.set_text(0,0,"5").unwrap_err().contains("document changed"));
+        assert!(
+            document
+                .set_text(0, 0, "5")
+                .unwrap_err()
+                .contains("document_changed")
+        );
+        assert_eq!(document.state.lock().unwrap().undo.len(), 1);
         server.join().unwrap();
     }
 
@@ -919,23 +1349,51 @@ mod tests {
             let mut line = String::new();
             reader.read_line(&mut line).unwrap();
             let request: Value = serde_json::from_str(&line).unwrap();
-            assert_eq!(request, json!({"kind":"snapshot","path":"test.omasheets","branch":"draft"}));
-            writeln!(&peer, "{}", json!({"ok":true,"response":{"kind":"snapshotted"}})).unwrap();
+            assert_eq!(
+                request,
+                json!({"kind":"snapshot","path":"test.omasheets","branch":"draft"})
+            );
+            writeln!(
+                &peer,
+                "{}",
+                json!({"ok":true,"response":{"kind":"snapshotted"}})
+            )
+            .unwrap();
         });
         drop(GridDocument {
-            name: "Test".into(), sheets: Vec::new(),
-            state: Mutex::new(DocumentState {client,path:PathBuf::from("test.omasheets"),branch:Some("draft".into()),
-                current_sheet:0,actor:"test".into(),pages:VecDeque::new(),loader:None,requests:0,
-                revision:"r0".into(),undo:Vec::new(),redo:Vec::new()}),
+            name: "Test".into(),
+            sheets: Vec::new(),
+            state: Mutex::new(DocumentState {
+                client,
+                path: PathBuf::from("test.omasheets"),
+                branch: Some("draft".into()),
+                current_sheet: 0,
+                actor: "test".into(),
+                pages: VecDeque::new(),
+                loader: None,
+                requests: 0,
+                revision: "r0".into(),
+                undo: Vec::new(),
+                redo: Vec::new(),
+            }),
         });
         server.join().unwrap();
     }
 
     fn connected_pair() -> (ServiceClient, UnixStream) {
         let (stream, peer) = UnixStream::pair().unwrap();
-        stream.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(20)))
+            .unwrap();
         let writer = stream.try_clone().unwrap();
-        (ServiceClient { reader: BufReader::new(stream), writer, usable: true }, peer)
+        (
+            ServiceClient {
+                reader: BufReader::new(stream),
+                writer,
+                usable: true,
+            },
+            peer,
+        )
     }
 
     #[test]
@@ -950,19 +1408,31 @@ mod tests {
             assert_eq!(serde_json::from_str::<Value>(&request).unwrap()["edit"], 1);
             // A late successful response must not acknowledge a new mutation.
             peer.write_all(b"{\"ok\":true,\"response\":{}}\n").unwrap();
-            assert!(client.call(&json!({"edit": 2})).unwrap_err().contains("reopen"));
+            assert!(
+                client
+                    .call(&json!({"edit": 2}))
+                    .unwrap_err()
+                    .contains("reopen")
+            );
             peer.set_nonblocking(true).unwrap();
             let mut byte = [0];
-            assert_eq!(peer.read(&mut byte).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+            assert_eq!(
+                peer.read(&mut byte).unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
         }
     }
 
     #[test]
     fn complete_rejection_keeps_connection_usable() {
         let (mut client, mut peer) = connected_pair();
-        peer.write_all(b"{\"ok\":false,\"error\":{\"code\":\"validation\",\"message\":\"rejected\"}}\n").unwrap();
+        peer.write_all(
+            b"{\"ok\":false,\"error\":{\"code\":\"validation\",\"message\":\"rejected\"}}\n",
+        )
+        .unwrap();
         assert_eq!(client.call(&json!({})).unwrap_err(), "validation: rejected");
-        peer.write_all(b"{\"ok\":true,\"response\":{\"saved\":true}}\n").unwrap();
+        peer.write_all(b"{\"ok\":true,\"response\":{\"saved\":true}}\n")
+            .unwrap();
         assert_eq!(client.call(&json!({})).unwrap()["saved"], true);
     }
 
@@ -974,7 +1444,12 @@ mod tests {
         });
         assert_eq!(
             parse_cell(&formula).unwrap(),
-            GridCell { display: "8".into(), input: "=A1*2".into(), kind: "formula".into() }
+            GridCell {
+                display: "8".into(),
+                input: "=A1*2".into(),
+                kind: "formula".into(),
+                presentation: String::new()
+            }
         );
         let error = json!({
             "value": { "type": "error", "value": "#REF!" }
@@ -993,9 +1468,13 @@ mod tests {
         assert_eq!(parsed.cells[&(64, 16)].display, "<b>literal</b>");
         assert_eq!(parsed.cells.len(), 1);
         for (key, invalid) in [
-            ("kind", json!("document")), ("sheet", json!("other-sheet")),
-            ("row_start", json!(0)), ("column_start", json!(0)),
-            ("rows", json!(65)), ("columns", json!(17)), ("cells", Value::Null),
+            ("kind", json!("document")),
+            ("sheet", json!("other-sheet")),
+            ("row_start", json!(0)),
+            ("column_start", json!(0)),
+            ("rows", json!(65)),
+            ("columns", json!(17)),
+            ("cells", Value::Null),
         ] {
             let mut changed = page.clone();
             changed[key] = invalid;
@@ -1018,47 +1497,89 @@ mod tests {
         assert!(parse_page(&duplicate, "sheet-id", 64, 16).is_err());
         let mut empty = page;
         empty["cells"] = json!([]);
-        assert!(parse_page(&empty, "sheet-id", 64, 16).unwrap().cells.is_empty());
+        assert!(
+            parse_page(&empty, "sheet-id", 64, 16)
+                .unwrap()
+                .cells
+                .is_empty()
+        );
     }
 
     #[test]
     fn edits_use_native_command_types() {
         assert_eq!(edit_command("sheet-id", "A1", "")["command"], "clear_cell");
-        assert_eq!(edit_command("sheet-id", "A1", "=1+1")["command"], "set_formula");
-        assert_eq!(edit_command("sheet-id", "A1", "12.5")["value"]["type"], "number");
-        assert_eq!(edit_command("sheet-id", "A1", "TRUE")["value"]["type"], "boolean");
-        assert_eq!(edit_command("sheet-id", "A1", "hello")["value"]["type"], "text");
+        assert_eq!(
+            edit_command("sheet-id", "A1", "=1+1")["command"],
+            "set_formula"
+        );
+        assert_eq!(
+            edit_command("sheet-id", "A1", "12.5")["value"]["type"],
+            "number"
+        );
+        assert_eq!(
+            edit_command("sheet-id", "A1", "TRUE")["value"]["type"],
+            "boolean"
+        );
+        assert_eq!(
+            edit_command("sheet-id", "A1", "hello")["value"]["type"],
+            "text"
+        );
     }
 
     #[test]
     fn literal_text_round_trips_without_coercion() {
-        for text in ["00123", "TRUE", "false", "=SUM(A1:A2)", "'quoted", "", "hello", "<b>text</b>"] {
+        for text in [
+            "00123",
+            "TRUE",
+            "false",
+            "=SUM(A1:A2)",
+            "'quoted",
+            "",
+            "hello",
+            "<b>text</b>",
+        ] {
             let cell = parse_cell(&json!({"value": {"type": "text", "value": text}})).unwrap();
             assert_eq!(cell.display, text);
             let command = edit_command("sheet-id", "A1", &cell.input);
             assert_eq!(command["command"], "set_value");
             assert_eq!(command["value"], json!({"type": "text", "value": text}));
         }
-        assert_eq!(edit_command("sheet-id", "A1", "'00123")["value"]["value"], "00123");
-        assert_eq!(edit_command("sheet-id", "A1", "'=1+1")["value"]["type"], "text");
-        assert_eq!(edit_command("sheet-id", "A1", "'TRUE")["value"]["type"], "text");
+        assert_eq!(
+            edit_command("sheet-id", "A1", "'00123")["value"]["value"],
+            "00123"
+        );
+        assert_eq!(
+            edit_command("sheet-id", "A1", "'=1+1")["value"]["type"],
+            "text"
+        );
+        assert_eq!(
+            edit_command("sheet-id", "A1", "'TRUE")["value"]["type"],
+            "text"
+        );
     }
 
     #[test]
     fn undo_retains_formula_and_explicit_blank_inputs() {
-        let formula = parse_cell(&json!({"formula":"A1+1","value":{"type":"number","value":2}})).unwrap();
+        let formula =
+            parse_cell(&json!({"formula":"A1+1","value":{"type":"number","value":2}})).unwrap();
         let restored = restore_command("sheet", "B1", &formula);
         assert_eq!(restored["command"], "set_formula");
         assert_eq!(restored["source"], "A1+1");
         let blank = parse_cell(&json!({"value":{"type":"blank"}})).unwrap();
-        assert_eq!(restore_command("sheet", "B1", &blank)["value"]["type"], "blank");
-        assert_eq!(restore_command("sheet", "B1", &GridCell::default())["command"], "clear_cell");
+        assert_eq!(
+            restore_command("sheet", "B1", &blank)["value"]["type"],
+            "blank"
+        );
+        assert_eq!(
+            restore_command("sheet", "B1", &GridCell::default())["command"],
+            "clear_cell"
+        );
     }
 
     #[test]
     fn page_and_cache_bounds_fit_the_service_contract() {
         assert!(PAGE_ROWS * PAGE_COLUMNS <= 10_000);
-        assert_eq!(MAX_CACHED_PAGES * PAGE_ROWS * PAGE_COLUMNS, 8_192);
+        assert_eq!(MAX_CACHED_PAGES * PAGE_ROWS * PAGE_COLUMNS, 32_768);
     }
 
     #[test]

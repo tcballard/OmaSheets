@@ -23,9 +23,53 @@ ApplicationWindow {
         id: fileActions
         anchors.fill: parent
         gridModel: backend
-        blocked: keyboardHelp.visible || updatePrompt.visible || proposalReview.visible
+        blocked: keyboardHelp.visible || updatePrompt.visible || proposalReview.visible || spreadsheetTools.blocked
         finishEditing: () => grid.commitEdit()
         onExampleRequested: window.examplePending = true
+    }
+
+    SpreadsheetTools {
+        id: spreadsheetTools
+        anchors.fill: parent
+        gridModel: backend
+        grid: grid
+        finishEditing: () => grid.commitEdit()
+    }
+    GridMetrics {
+        id: metrics
+        rowCount: backend.rowCount
+        columnCount: backend.columnCount
+        defaultRowHeight: window.rowHeight
+        defaultColumnWidth: window.cellWidth
+        view: spreadsheetTools.sheetView
+    }
+    Action {
+        id: undoAction
+        text: "Undo"
+        shortcut: StandardKey.Undo
+        enabled: backend.documentMode && fileActions.available && !grid.hasDraft
+        onTriggered: grid.undoSelection(false)
+    }
+    Action {
+        id: redoAction
+        text: "Redo"
+        shortcut: "Ctrl+Shift+Z"
+        enabled: undoAction.enabled
+        onTriggered: grid.undoSelection(true)
+    }
+    Action {
+        id: findAction
+        text: "Find and replace…"
+        shortcut: StandardKey.Find
+        enabled: backend.documentMode && fileActions.available
+        onTriggered: spreadsheetTools.showFind()
+    }
+    Action {
+        id: gotoAction
+        text: "Go to cell or range…"
+        shortcut: "Ctrl+G"
+        enabled: findAction.enabled
+        onTriggered: spreadsheetTools.enter("goto", "Go to cell or range", "")
     }
 
     ProposalReview {
@@ -69,6 +113,66 @@ ApplicationWindow {
             MenuItem { action: fileActions.parquetAction }
             MenuSeparator {}
             MenuItem { text: "Close window"; onTriggered: window.close() }
+        }
+        Menu {
+            title: "Edit"
+            MenuItem {action:undoAction}
+            MenuItem {action:redoAction}
+            MenuSeparator {}
+            MenuItem {text:"Copy selection";enabled:undoAction.enabled;onTriggered:grid.copySelection()}
+            MenuItem {text:"Paste";enabled:undoAction.enabled;onTriggered:grid.pasteSelection()}
+            MenuItem {text:"Fill down";enabled:findAction.enabled;onTriggered:spreadsheetTools.fill(false)}
+            MenuItem {text:"Fill right";enabled:findAction.enabled;onTriggered:spreadsheetTools.fill(true)}
+            MenuSeparator {}
+            MenuItem {action:findAction}
+            MenuItem {action:gotoAction}
+        }
+        Menu {
+            title: "Format"
+            enabled:findAction.enabled
+            MenuItem {text:"Format cells…";onTriggered:spreadsheetTools.showFormat()}
+            MenuItem {text:"Clear formatting";onTriggered:spreadsheetTools.run({action:"clear_format",range:spreadsheetTools.selection})}
+            MenuItem {text:"Edit note…";onTriggered:spreadsheetTools.enter("note","Cell note",spreadsheetTools.cell.note || "")}
+            MenuSeparator {}
+            MenuItem {text:"Dimensions…";onTriggered:spreadsheetTools.showDimensions()}
+            MenuItem {text:"Autofit selected columns";onTriggered:spreadsheetTools.run({action:"dimensions",range:spreadsheetTools.selection,autofit:true,width:null,height:null})}
+            MenuSeparator {}
+            MenuItem {text:"Merge selection";onTriggered:spreadsheetTools.run({action:"merge",range:spreadsheetTools.selection})}
+            MenuItem {text:"Unmerge selection";onTriggered:spreadsheetTools.run({action:"merge",range:spreadsheetTools.selection,unmerge:true})}
+        }
+        Menu {
+            title: "Data"
+            enabled:findAction.enabled
+            MenuItem {text:"Sort selected rows…";onTriggered:spreadsheetTools.showSort()}
+            MenuItem {text:"Filter selection by current cell";onTriggered:spreadsheetTools.run({action:"filter",range:spreadsheetTools.selection,column:grid.currentColumn,text:spreadsheetTools.cell.raw_display || "",header:false})}
+            MenuItem {text:"Clear filter";enabled:!!spreadsheetTools.sheetView.filter_active;onTriggered:spreadsheetTools.run({action:"clear_filter"})}
+            MenuItem {text:"Remove duplicate rows…";onTriggered:spreadsheetTools.confirm({action:"deduplicate",range:spreadsheetTools.selection,header:true},"Remove duplicate rows?","Keeps the first selected row as a header and removes later duplicate rows, including their cells outside the selection.")}
+            MenuSeparator {}
+            MenuItem {text:"Highlight values…";onTriggered:spreadsheetTools.showConditional()}
+            MenuItem {text:"Clear conditional formatting";onTriggered:spreadsheetTools.run({action:"clear_conditional"})}
+            MenuItem {text:"Charts…";onTriggered:spreadsheetTools.showCharts()}
+        }
+        Menu {
+            title: "Sheet"
+            enabled:findAction.enabled
+            MenuItem {text:"Add sheet…";onTriggered:spreadsheetTools.enter("add_sheet","New sheet","")}
+            MenuItem {text:"Rename sheet…";onTriggered:spreadsheetTools.enter("rename_sheet","Rename sheet",backend.sheetName)}
+            MenuItem {text:"Duplicate sheet…";onTriggered:spreadsheetTools.enter("duplicate_sheet","Duplicate sheet",backend.sheetName+" copy")}
+            MenuItem {text:"Delete sheet…";onTriggered:spreadsheetTools.confirm({action:"delete_sheet"},"Delete sheet?","Delete “"+backend.sheetName+"” and all of its cells?")}
+            MenuSeparator {}
+            MenuItem {text:"Insert selected number of rows above";onTriggered:spreadsheetTools.run({action:"insert_rows",at:grid.selectionRow,count:grid.selectionRows})}
+            MenuItem {text:"Insert selected number of columns before";onTriggered:spreadsheetTools.run({action:"insert_columns",at:grid.selectionColumn,count:grid.selectionColumns})}
+            MenuItem {text:"Delete selected rows…";onTriggered:spreadsheetTools.confirm({action:"delete_rows",at:grid.selectionRow,count:grid.selectionRows},"Delete rows?","Delete "+grid.selectionRows+" entire rows starting at row "+(grid.selectionRow+1)+"?")}
+            MenuItem {text:"Delete selected columns…";onTriggered:spreadsheetTools.confirm({action:"delete_columns",at:grid.selectionColumn,count:grid.selectionColumns},"Delete columns?","Delete "+grid.selectionColumns+" entire columns starting at "+backend.columnLabel(grid.selectionColumn)+"?")}
+        }
+        Menu {
+            title: "View"
+            enabled:findAction.enabled
+            MenuItem {text:"Freeze top row";onTriggered:spreadsheetTools.run({action:"freeze",rows:1,columns:0})}
+            MenuItem {text:"Freeze first column";onTriggered:spreadsheetTools.run({action:"freeze",rows:0,columns:1})}
+            MenuItem {text:"Freeze above and before current cell";onTriggered:spreadsheetTools.run({action:"freeze",rows:grid.currentRow,columns:grid.currentColumn})}
+            MenuItem {text:"Unfreeze panes";onTriggered:spreadsheetTools.run({action:"freeze",rows:0,columns:0})}
+            MenuItem {text:spreadsheetTools.sheetView.show_grid_lines===false ? "Show gridlines" : "Hide gridlines";onTriggered:spreadsheetTools.run({action:"grid_lines",visible:spreadsheetTools.sheetView.show_grid_lines===false})}
         }
         Menu {
             title: "Agent"
@@ -429,6 +533,8 @@ ApplicationWindow {
                 }
 
                 Label {
+                    Layout.maximumWidth: 240
+                    elide: Text.ElideRight
                     text: backend.documentName
                     textFormat: Text.PlainText
                     color: window.textColor
@@ -437,6 +543,7 @@ ApplicationWindow {
                 }
 
                 Label {
+                    visible: window.width > 1000
                     text: backend.rowCount.toLocaleString(Qt.locale("en_US"), "f", 0)
                         + " rows  ·  " + backend.columnCount + " columns  ·  " + backend.sheetName
                     color: window.mutedColor
@@ -457,6 +564,27 @@ ApplicationWindow {
             }
         }
 
+        ToolBar {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 36
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
+                spacing: 4
+                ToolButton {text:"B";font.bold:true;checkable:true;checked:!!spreadsheetTools.style.bold;enabled:findAction.enabled;onClicked:spreadsheetTools.toggle("bold");ToolTip.text:"Bold";ToolTip.visible:hovered}
+                ToolButton {text:"I";font.italic:true;checkable:true;checked:!!spreadsheetTools.style.italic;enabled:findAction.enabled;onClicked:spreadsheetTools.toggle("italic");ToolTip.text:"Italic";ToolTip.visible:hovered}
+                ToolButton {text:"%";enabled:findAction.enabled;onClicked:spreadsheetTools.format({number_format:"0.0%"});ToolTip.text:"Percent format";ToolTip.visible:hovered}
+                ToolButton {text:"Format…";enabled:findAction.enabled;onClicked:spreadsheetTools.showFormat()}
+                ToolSeparator {}
+                ToolButton {text:"Find";action:findAction}
+                ToolButton {text:"Charts";enabled:findAction.enabled;onClicked:spreadsheetTools.showCharts()}
+                Item {Layout.fillWidth:true}
+                ToolButton {action:askAgentAction}
+                ToolButton {text:"Review";action:reviewAction}
+            }
+        }
+
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 38
@@ -467,12 +595,15 @@ ApplicationWindow {
                 anchors.fill: parent
                 spacing: 0
 
-                Label {
-                    Layout.preferredWidth: 78
+                TextField {
+                    id: addressBox
+                    Layout.preferredWidth: 96
                     Layout.fillHeight: true
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
+                    selectByMouse: true
                     text: backend.columnLabel(grid.currentColumn) + (grid.currentRow + 1)
+                    onAccepted: {if(!spreadsheetTools.goTo(text))spreadsheetTools.enter("goto","Go to cell or range",text);}
                     color: window.accentColor
                     font.family: "monospace"
                     font.bold: true
@@ -495,24 +626,33 @@ ApplicationWindow {
                     font.italic: true
                 }
 
-                Label {
+                TextField {
+                    id: formulaBar
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    leftPadding: 4
-                    textFormat: Text.PlainText
-                    verticalAlignment: Text.AlignVCenter
-                    elide: Text.ElideRight
-                    text: {
-                        backend.revision;
-                        return backend.cellPreview(grid.currentRow, grid.currentColumn);
+                    leftPadding: 6
+                    selectByMouse: true
+                    property bool editing: false
+                    property string original: ""
+                    property string draft: ""
+                    text: {backend.revision;return editing ? draft : backend.cellPreview(grid.currentRow,grid.currentColumn);}
+                    onActiveFocusChanged: {
+                        if(activeFocus && !editing){
+                            if(!grid.commitEdit() || !backend.prepareCellEdit(grid.currentRow,grid.currentColumn))return;
+                            original=backend.cellInput(grid.currentRow,grid.currentColumn);draft=original;editing=true;forceActiveFocus();
+                        }
                     }
+                    onTextEdited:draft=text
+                    onAccepted:grid.commitEdit()
+                    Keys.onEscapePressed:{editing=false;body.forceActiveFocus();}
                     color: window.textColor
                     font.family: "monospace"
                     font.pixelSize: 12
+                    Accessible.name: "Formula bar"
                 }
 
                 Label {
-                    Layout.preferredWidth: 320
+                    Layout.preferredWidth: window.width > 1000 ? 280 : 180
                     Layout.fillHeight: true
                     rightPadding: 12
                     horizontalAlignment: Text.AlignRight
@@ -556,23 +696,30 @@ ApplicationWindow {
             readonly property int selectionColumn: Math.min(currentColumn, anchorColumn)
             readonly property int selectionRows: Math.abs(currentRow - anchorRow) + 1
             readonly property int selectionColumns: Math.abs(currentColumn - anchorColumn) + 1
-            readonly property int rowCapacity: Math.min(backend.rowCount,
-                Math.ceil(Math.max(1, body.height) / window.rowHeight) + 2)
-            readonly property int columnCapacity: Math.min(backend.columnCount,
-                Math.ceil(Math.max(1, body.width) / window.cellWidth) + 2)
-            readonly property int firstVisibleRow: Math.min(backend.rowCount - rowCapacity,
-                Math.max(0, Math.floor(body.contentY / window.rowHeight)))
-            readonly property int firstVisibleColumn: Math.min(backend.columnCount - columnCapacity,
-                Math.max(0, Math.floor(body.contentX / window.cellWidth)))
-            readonly property int visibleRowCount: rowCapacity
-            readonly property int visibleColumnCount: columnCapacity
-            readonly property int visibleDelegates: Math.max(0, visibleRowCount * visibleColumnCount)
+            readonly property bool hasDraft: editor.visible || formulaBar.editing
+            readonly property var visibleRows: metrics.visibleRows(body.contentY,body.height)
+            readonly property var visibleColumns: metrics.visibleColumns(body.contentX,body.width)
+            readonly property int visibleRowCount: visibleRows.length
+            readonly property int visibleColumnCount: visibleColumns.length
+            readonly property var visibleCells: metrics.cells(visibleRows,visibleColumns,body.contentX,body.contentY,body.width,body.height)
+            readonly property int visibleDelegates: visibleCells.length
+            onCurrentRowChanged: selectionStats.restart()
+            onCurrentColumnChanged: selectionStats.restart()
+            onAnchorRowChanged: selectionStats.restart()
+            onAnchorColumnChanged: selectionStats.restart()
 
             function selectCell(row, column, extend) {
                 if (!commitEdit())
                     return false;
-                currentRow = Math.max(0, Math.min(backend.rowCount - 1, row));
-                currentColumn = Math.max(0, Math.min(backend.columnCount - 1, column));
+                row=Math.max(0,Math.min(backend.rowCount-1,row));
+                column=Math.max(0,Math.min(backend.columnCount-1,column));
+                const direction=row<currentRow ? -1 : 1;
+                while(row>=0 && row<backend.rowCount && metrics.rowHeight(row)===0)row+=direction;
+                if(row<0 || row>=backend.rowCount)return false;
+                const merge=metrics.mergeAt(row,column);
+                if(merge && !extend){row=merge.row;column=merge.column;}
+                currentRow=row;
+                currentColumn=column;
                 if (!extend) {
                     anchorRow = currentRow;
                     anchorColumn = currentColumn;
@@ -583,21 +730,27 @@ ApplicationWindow {
             }
 
             function ensureVisible() {
-                const left = currentColumn * window.cellWidth;
-                const right = left + window.cellWidth;
-                const top = currentRow * window.rowHeight;
-                const bottom = top + window.rowHeight;
-                if (left < body.contentX)
-                    body.contentX = left;
-                else if (right > body.contentX + body.width)
-                    body.contentX = right - body.width;
-                if (top < body.contentY)
-                    body.contentY = top;
-                else if (bottom > body.contentY + body.height)
-                    body.contentY = bottom - body.height;
+                const left=metrics.columnPosition(currentColumn),right=left+metrics.columnWidth(currentColumn);
+                const top=metrics.rowPosition(currentRow),bottom=top+metrics.rowHeight(currentRow);
+                if(currentColumn>=metrics.frozenColumns){
+                    if(left<body.contentX+metrics.frozenWidth)body.contentX=Math.max(0,left-metrics.frozenWidth);
+                    else if(right>body.contentX+body.width)body.contentX=right-body.width;
+                }
+                if(currentRow>=metrics.frozenRows){
+                    if(top<body.contentY+metrics.frozenHeight)body.contentY=Math.max(0,top-metrics.frozenHeight);
+                    else if(bottom>body.contentY+body.height)body.contentY=bottom-body.height;
+                }
+            }
+
+            function moveCell(rowDelta,columnDelta,extend){
+                const merge=metrics.mergeAt(currentRow,currentColumn);
+                return selectCell(currentRow+(merge && rowDelta>0 ? merge.rows : rowDelta),
+                    currentColumn+(merge && columnDelta>0 ? merge.columns : columnDelta),extend);
             }
 
             function beginEdit(replacement) {
+                if(formulaBar.editing && !commitEdit())return;
+                if(metrics.rowHeight(currentRow)===0)return;
                 if (editor.visible) {
                     editor.forceActiveFocus();
                     return;
@@ -615,6 +768,12 @@ ApplicationWindow {
             }
 
             function commitEdit() {
+                if(formulaBar.editing){
+                    if(formulaBar.draft!==formulaBar.original && !backend.setCellText(currentRow,currentColumn,formulaBar.draft)){
+                        formulaBar.forceActiveFocus();return false;
+                    }
+                    formulaBar.editing=false;body.forceActiveFocus();
+                }
                 if (!editor.visible)
                     return true;
                 if (editor.text !== editor.originalText
@@ -629,11 +788,11 @@ ApplicationWindow {
 
             function finishEdit(rowDelta, columnDelta) {
                 if (commitEdit())
-                    selectCell(currentRow + rowDelta, currentColumn + columnDelta);
+                    moveCell(rowDelta,columnDelta);
             }
 
             function clearCell() {
-                if (editor.visible)
+                if (hasDraft)
                     return;
                 if (selectionRows > 1 || selectionColumns > 1) {
                     backend.clearCells(selectionRow, selectionColumn, selectionRows, selectionColumns);
@@ -644,7 +803,7 @@ ApplicationWindow {
             }
 
             function copySelection() {
-                if (editor.visible)
+                if (hasDraft)
                     return;
                 if (!backend.copyRange(selectionRow, selectionColumn,
                         selectionRows, selectionColumns))
@@ -653,7 +812,7 @@ ApplicationWindow {
             }
 
             function pasteSelection() {
-                if (editor.visible)
+                if (hasDraft)
                     return;
                 clipboardBuffer.text = "";
                 clipboardBuffer.paste();
@@ -665,7 +824,7 @@ ApplicationWindow {
             }
 
             function undoSelection(redo) {
-                if (!editor.visible)
+                if (!hasDraft)
                     backend.undoEdit(redo);
             }
 
@@ -711,15 +870,32 @@ ApplicationWindow {
 
                     delegate: Rectangle {
                         required property int index
-                        readonly property int logicalColumn: grid.firstVisibleColumn + index
+                        readonly property int logicalColumn: grid.visibleColumns[index]
 
-                        x: logicalColumn * window.cellWidth - body.contentX
-                        width: window.cellWidth
+                        z: logicalColumn<metrics.frozenColumns ? 2 : 0
+                        x: metrics.screenColumn(logicalColumn,body.contentX)
+                        width: metrics.columnWidth(logicalColumn)
                         height: window.columnHeaderHeight
                         color: logicalColumn === grid.currentColumn
                             ? window.selectedHeaderColor : window.headerColor
                         border.color: window.gridLineColor
 
+                        TapHandler {onDoubleTapped:spreadsheetTools.run({action:"dimensions",range:{row:0,column:parent.logicalColumn,rows:1,columns:1},width:null,height:null,autofit:true})}
+                        Rectangle {
+                            id:columnResize
+                            anchors.right:parent.right
+                            width:5
+                            height:parent.height
+                            color:"transparent"
+                            property real startSize:0
+                            property real proposed:0
+                            HoverHandler {cursorShape:Qt.SizeHorCursor}
+                            DragHandler {
+                                target:null
+                                onActiveChanged:{if(active){columnResize.startSize=columnResize.parent.width;columnResize.proposed=columnResize.startSize;}else spreadsheetTools.run({action:"dimensions",range:{row:0,column:columnResize.parent.logicalColumn,rows:1,columns:1},width:Math.max(24,Math.min(1200,columnResize.proposed)),height:null});}
+                                onTranslationChanged:{if(active)columnResize.proposed=columnResize.startSize+translation.x;}
+                            }
+                        }
                         Label {
                             anchors.centerIn: parent
                             text: backend.columnLabel(parent.logicalColumn)
@@ -744,15 +920,31 @@ ApplicationWindow {
 
                     delegate: Rectangle {
                         required property int index
-                        readonly property int logicalRow: grid.firstVisibleRow + index
+                        readonly property int logicalRow: grid.visibleRows[index]
 
-                        y: logicalRow * window.rowHeight - body.contentY
+                        z: logicalRow<metrics.frozenRows ? 2 : 0
+                        y: metrics.screenRow(logicalRow,body.contentY)
                         width: window.rowHeaderWidth
-                        height: window.rowHeight
+                        height: metrics.rowHeight(logicalRow)
                         color: logicalRow === grid.currentRow
                             ? window.selectedHeaderColor : window.headerColor
                         border.color: window.gridLineColor
 
+                        Rectangle {
+                            id:rowResize
+                            anchors.bottom:parent.bottom
+                            width:parent.width
+                            height:5
+                            color:"transparent"
+                            property real startSize:0
+                            property real proposed:0
+                            HoverHandler {cursorShape:Qt.SizeVerCursor}
+                            DragHandler {
+                                target:null
+                                onActiveChanged:{if(active){rowResize.startSize=rowResize.parent.height;rowResize.proposed=rowResize.startSize;}else spreadsheetTools.run({action:"dimensions",range:{row:rowResize.parent.logicalRow,column:0,rows:1,columns:1},height:Math.max(16,Math.min(600,rowResize.proposed)),width:null});}
+                                onTranslationChanged:{if(active)rowResize.proposed=rowResize.startSize+translation.y;}
+                            }
+                        }
                         Label {
                             anchors.centerIn: parent
                             text: (parent.logicalRow + 1).toLocaleString(Qt.locale("en_US"), "f", 0)
@@ -771,8 +963,8 @@ ApplicationWindow {
                 y: window.columnHeaderHeight
                 width: parent.width - x
                 height: parent.height - y
-                contentWidth: backend.columnCount * window.cellWidth
-                contentHeight: backend.rowCount * window.rowHeight
+                contentWidth: metrics.contentWidth
+                contentHeight: metrics.contentHeight
                 boundsBehavior: Flickable.StopAtBounds
                 flickDeceleration: 5500
                 maximumFlickVelocity: 9000
@@ -800,10 +992,12 @@ ApplicationWindow {
                             id: cell
 
                             required property int index
-                            readonly property int rowOffset: Math.floor(index / grid.visibleColumnCount)
-                            readonly property int columnOffset: index % grid.visibleColumnCount
-                            readonly property int logicalRow: grid.firstVisibleRow + rowOffset
-                            readonly property int logicalColumn: grid.firstVisibleColumn + columnOffset
+                            readonly property int logicalRow: grid.visibleCells[index].row
+                            readonly property int logicalColumn: grid.visibleCells[index].column
+                            readonly property var merge: metrics.mergeAt(logicalRow,logicalColumn)
+                            readonly property bool covered: merge!==null && (merge.row!==logicalRow || merge.column!==logicalColumn)
+                            readonly property var presentation: {backend.revision;return JSON.parse(backend.cellPresentation(logicalRow,logicalColumn) || "{}");}
+                            readonly property var style: presentation.style || ({})
                             readonly property string valueKind: {
                                 backend.revision;
                                 return backend.cellKind(logicalRow, logicalColumn);
@@ -813,14 +1007,17 @@ ApplicationWindow {
                                 && logicalColumn >= grid.selectionColumn
                                 && logicalColumn < grid.selectionColumn + grid.selectionColumns
 
-                            x: logicalColumn * window.cellWidth
-                            y: logicalRow * window.rowHeight
-                            width: window.cellWidth
-                            height: window.rowHeight
+                            visible: !covered
+                            clip: true
+                            z: (logicalRow<metrics.frozenRows ? 2 : 0)+(logicalColumn<metrics.frozenColumns ? 1 : 0)
+                            x: metrics.screenColumn(logicalColumn,body.contentX)+body.contentX
+                            y: metrics.screenRow(logicalRow,body.contentY)+body.contentY
+                            width: merge ? metrics.columnPosition(merge.column+merge.columns)-metrics.columnPosition(merge.column) : metrics.columnWidth(logicalColumn)
+                            height: merge ? metrics.rowPosition(merge.row+merge.rows)-metrics.rowPosition(merge.row) : metrics.rowHeight(logicalRow)
                             color: selectedCell ? window.selectedCellColor
-                                : (logicalRow % 2 === 0 ? window.canvasColor : window.alternateRowColor)
-                            border.width: 1
-                            border.color: selectedCell ? window.accentColor : window.gridLineColor
+                                : (style.background || (logicalRow % 2 === 0 ? window.canvasColor : window.alternateRowColor))
+                            border.width: selectedCell || style.border==="all" || spreadsheetTools.sheetView.show_grid_lines!==false ? 1 : 0
+                            border.color: selectedCell ? window.accentColor : style.border==="all" ? window.textColor : window.gridLineColor
 
                             Accessible.role: Accessible.StaticText
                             Accessible.name: backend.columnLabel(logicalColumn) + (logicalRow + 1)
@@ -837,21 +1034,33 @@ ApplicationWindow {
                                 leftPadding: 7
                                 rightPadding: 7
                                 verticalAlignment: Text.AlignVCenter
-                                horizontalAlignment: parent.valueKind === "number"
-                                    ? Text.AlignRight : Text.AlignLeft
-                                elide: Text.ElideRight
+                                horizontalAlignment: cell.style.alignment==="center" ? Text.AlignHCenter : cell.style.alignment==="left" ? Text.AlignLeft
+                                    : cell.style.alignment==="right" || cell.presentation.value_type==="number" || cell.valueKind==="number" ? Text.AlignRight : Text.AlignLeft
+                                wrapMode: cell.style.wrap ? Text.WordWrap : Text.NoWrap
+                                elide: cell.style.wrap ? Text.ElideNone : Text.ElideRight
                                 text: {
                                     backend.revision;
                                     return backend.cellText(parent.logicalRow, parent.logicalColumn);
                                 }
-                                color: parent.valueKind === "formula"
+                                color: cell.style.foreground || (parent.valueKind === "formula"
                                     ? window.formulaColor
                                     : (parent.logicalColumn % 6 === 5 && text === "Reviewed"
-                                        ? window.successColor : window.textColor)
+                                        ? window.successColor : window.textColor))
                                 font.family: "monospace"
-                                font.pixelSize: 11
+                                font.pointSize: cell.style.font_size || 8.25
+                                font.bold: !!cell.style.bold
+                                font.italic: !!cell.style.italic
+                                font.underline: !!cell.style.underline
                             }
 
+                            Rectangle {anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;height:1;color:window.textColor;visible:cell.style.border==="bottom"}
+                            Rectangle {anchors.top:parent.top;anchors.right:parent.right;width:5;height:5;color:window.accentColor;visible:!!cell.presentation.note}
+                            HoverHandler {id:noteHover}
+                            ToolTip {
+                                visible:noteHover.hovered && !!cell.presentation.note
+                                width:Math.min(380,window.width-32)
+                                contentItem:Text {text:cell.presentation.note || "";textFormat:Text.PlainText;wrapMode:Text.WordWrap;color:window.textColor}
+                            }
                             TapHandler {
                                 acceptedButtons: Qt.LeftButton
                                 onTapped: grid.selectCell(cell.logicalRow, cell.logicalColumn)
@@ -866,10 +1075,11 @@ ApplicationWindow {
                     TextField {
                         id: editor
 
-                        x: grid.currentColumn * window.cellWidth
-                        y: grid.currentRow * window.rowHeight
-                        width: window.cellWidth
-                        height: window.rowHeight
+                        property var merge: metrics.mergeAt(grid.currentRow,grid.currentColumn)
+                        x: metrics.screenColumn(grid.currentColumn,body.contentX)+body.contentX
+                        y: metrics.screenRow(grid.currentRow,body.contentY)+body.contentY
+                        width: merge ? metrics.columnPosition(merge.column+merge.columns)-metrics.columnPosition(merge.column) : metrics.columnWidth(grid.currentColumn)
+                        height: merge ? metrics.rowPosition(merge.row+merge.rows)-metrics.rowPosition(merge.row) : metrics.rowHeight(grid.currentRow)
                         visible: false
                         z: 10
                         leftPadding: 6
@@ -922,13 +1132,13 @@ ApplicationWindow {
                     else if (event.key === Qt.Key_PageDown && control)
                         grid.switchSheet(backend.currentSheet + 1);
                     else if (event.key === Qt.Key_Left)
-                        grid.selectCell(grid.currentRow, grid.currentColumn - 1, shift);
+                        grid.moveCell(0,-1,shift);
                     else if (event.key === Qt.Key_Right)
-                        grid.selectCell(grid.currentRow, grid.currentColumn + 1, shift);
+                        grid.moveCell(0,1,shift);
                     else if (event.key === Qt.Key_Up)
-                        grid.selectCell(grid.currentRow - 1, grid.currentColumn, shift);
+                        grid.moveCell(-1,0,shift);
                     else if (event.key === Qt.Key_Down)
-                        grid.selectCell(grid.currentRow + 1, grid.currentColumn, shift);
+                        grid.moveCell(1,0,shift);
                     else if (event.key === Qt.Key_PageUp)
                         grid.selectCell(grid.currentRow - Math.max(1, grid.visibleRowCount - 2), grid.currentColumn);
                     else if (event.key === Qt.Key_PageDown)
@@ -944,9 +1154,9 @@ ApplicationWindow {
                     else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_F2)
                         grid.beginEdit();
                     else if (event.key === Qt.Key_Tab)
-                        grid.selectCell(grid.currentRow, grid.currentColumn + 1);
+                        grid.moveCell(0,1);
                     else if (event.key === Qt.Key_Backtab)
-                        grid.selectCell(grid.currentRow, grid.currentColumn - 1);
+                        grid.moveCell(0,-1);
                     else if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace)
                         grid.clearCell();
                     else if (event.text.length > 0 && !control
@@ -1042,7 +1252,7 @@ ApplicationWindow {
             Flickable {
                 anchors.fill: parent
                 anchors.leftMargin: window.rowHeaderWidth
-                anchors.rightMargin: helpButton.width + 16
+                anchors.rightMargin: helpButton.width + statsLabel.width + 28
                 contentWidth: sheetTabs.width
                 contentHeight: height
                 clip: true
@@ -1098,6 +1308,19 @@ ApplicationWindow {
                 }
             }
 
+            Label {
+                id:statsLabel
+                anchors.right:helpButton.left
+                anchors.rightMargin:12
+                anchors.verticalCenter:parent.verticalCenter
+                width:Math.min(260,window.width/3)
+                horizontalAlignment:Text.AlignRight
+                elide:Text.ElideRight
+                color:window.mutedColor
+                font.pixelSize:11
+                text:window.stats.numeric_count>0 ? "Sum "+(window.stats.sum===null ? "out of range" : Number(window.stats.sum).toLocaleString(Qt.locale(),"g",8))+" · Avg "+(window.stats.average===null ? "out of range" : Number(window.stats.average).toLocaleString(Qt.locale(),"g",6))+" · Count "+window.stats.count
+                    : window.stats.count ? "Count "+window.stats.count : ""
+            }
             Button {
                 id: helpButton
                 anchors.right: parent.right
@@ -1110,6 +1333,21 @@ ApplicationWindow {
                 onClicked: keyboardHelp.open()
             }
         }
+    }
+
+    property var stats: ({})
+    Timer {
+        id: selectionStats
+        interval: 250
+        onTriggered: {
+            if(backend.documentMode && !backend.busy && !backend.benchmark && grid.selectionRows*grid.selectionColumns<=10000)
+                window.stats=JSON.parse(backend.inspectRange(JSON.stringify(spreadsheetTools.selection)));
+            else window.stats={};
+        }
+    }
+    Connections {
+        target:backend
+        function onRevisionChanged(){selectionStats.restart();}
     }
 
     Component.onCompleted: {

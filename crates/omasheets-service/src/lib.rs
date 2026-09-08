@@ -10,6 +10,7 @@
 //! agent may not append to the `main` branch at all.
 
 pub mod review;
+pub mod spreadsheet;
 
 use arrow_array::{ArrayRef, BooleanArray, Float64Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
@@ -206,6 +207,28 @@ pub enum Request {
         #[serde(default)]
         name: Option<String>,
     },
+    SheetView {
+        path: PathBuf,
+        sheet: String,
+    },
+    InspectRange {
+        path: PathBuf,
+        sheet: String,
+        range: spreadsheet::Rect,
+        #[serde(default)]
+        find: Option<String>,
+    },
+    FindInSheet {
+        path: PathBuf,
+        sheet: String,
+        query: String,
+    },
+    EditSheet {
+        path: PathBuf,
+        sheet: String,
+        expected_revision: String,
+        action: spreadsheet::Action,
+    },
     NativeLineage {
         path: PathBuf,
         sheet: String,
@@ -250,6 +273,10 @@ impl Request {
             | Self::Close { path }
             | Self::Document { path, .. }
             | Self::Revision { path, .. }
+            | Self::SheetView { path, .. }
+            | Self::InspectRange { path, .. }
+            | Self::FindInSheet { path, .. }
+            | Self::EditSheet { path, .. }
             | Self::NativeLineage { path, .. }
             | Self::ProposeNative { path, .. }
             | Self::ReviewNative { path, .. }
@@ -335,6 +362,12 @@ pub struct GridCell {
     pub value: CellValue,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub formula: Option<String>,
+    #[serde(default)]
+    pub style: omasheets_core::presentation::CellStyle,
+    #[serde(default)]
+    pub display: String,
+    #[serde(default)]
+    pub note: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -478,6 +511,9 @@ pub enum Response {
         branch: String,
     },
     NativeLineage(serde_json::Value),
+    SheetView(serde_json::Value),
+    RangeInspection(serde_json::Value),
+    SheetEdited(spreadsheet::EditResult),
     NativeReview(review::Review),
     NativeRejected {
         branch: String,
@@ -1902,10 +1938,17 @@ impl Service {
                             row: *row,
                             column: *column,
                         };
-                        if let Some(state) = document.cell(cell) {
-                            let formula = match &state.input {
-                                CellInput::Formula { formula } => Some(formula.source.clone()),
-                                CellInput::Value { .. } => None,
+                        let style = spreadsheet::effective_style(document, cell);
+                        let presented = document.presentation(sheet)?.cell(cell);
+                        if document.cell(cell).is_some()
+                            || presented.is_some()
+                            || style != omasheets_core::presentation::CellStyle::default()
+                        {
+                            let formula = match document.cell(cell).map(|state| &state.input) {
+                                Some(CellInput::Formula { formula }) => {
+                                    Some(formula.source.clone())
+                                }
+                                _ => None,
                             };
                             cells.push(GridCell {
                                 row: row_start + row_offset,
@@ -1915,6 +1958,11 @@ impl Service {
                                     (column_start + column_offset) as u32,
                                 )),
                                 value: document.value(cell),
+                                display: spreadsheet::display(document.value(cell), &style),
+                                style,
+                                note: presented
+                                    .map(|entry| entry.note.clone())
+                                    .unwrap_or_default(),
                                 formula,
                             });
                         }
@@ -2061,6 +2109,51 @@ impl Service {
                 let (_, target) = Self::branch(store, target.as_deref())?;
                 Ok(Response::Diff(store.diff(source, target)?))
             }
+            Request::SheetView { path, sheet } => {
+                let store = self.store(&path)?;
+                let (_, branch) = Self::branch(store, None)?;
+                let document = store.document(branch)?;
+                let sheet = Self::sheet(document, &sheet)?;
+                Ok(Response::SheetView(spreadsheet::view(document, sheet)?))
+            }
+            Request::InspectRange {
+                path,
+                sheet,
+                range,
+                find,
+            } => {
+                let store = self.store(&path)?;
+                let (_, branch) = Self::branch(store, None)?;
+                let document = store.document(branch)?;
+                let sheet = Self::sheet(document, &sheet)?;
+                Ok(Response::RangeInspection(spreadsheet::inspect(
+                    document,
+                    sheet,
+                    range,
+                    find.as_deref(),
+                )?))
+            }
+            Request::FindInSheet { path, sheet, query } => {
+                let store = self.store(&path)?;
+                let (_, branch) = Self::branch(store, None)?;
+                let document = store.document(branch)?;
+                let sheet = Self::sheet(document, &sheet)?;
+                Ok(Response::RangeInspection(spreadsheet::find(
+                    document, sheet, &query,
+                )?))
+            }
+            Request::EditSheet {
+                path,
+                sheet,
+                expected_revision,
+                action,
+            } => Ok(Response::SheetEdited(spreadsheet::edit(
+                self.store(&path)?,
+                &sheet,
+                &expected_revision,
+                now,
+                action,
+            )?)),
             Request::NativeLineage { path, sheet, a1 } => {
                 let store = self.store(&path)?;
                 let (_, branch) = Self::branch(store, None)?;
