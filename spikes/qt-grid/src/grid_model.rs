@@ -378,7 +378,7 @@ impl qobject::GridModel {
     }
 
     pub fn ask_agent(mut self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) {
-        let result = (|| {
+        let result: Result<String, String> = (|| {
             let document = self.document.as_ref().ok_or("Open a native workbook first")?;
             document.verify_revision()?;
             let sheet = document.current_sheet()?;
@@ -447,7 +447,7 @@ impl qobject::GridModel {
         });
     }
 
-    pub fn resolve_proposal(mut self: Pin<&mut Self>, approve: bool) {
+    pub fn resolve_proposal(self: Pin<&mut Self>, approve: bool) {
         let Ok(review) = serde_json::from_str::<serde_json::Value>(&self.review_json.to_string()) else { return; };
         if self.busy || (approve && review["can_approve"] != true) || review["status"] != "pending" { return; }
         let path = PathBuf::from(self.document_path.to_string());
