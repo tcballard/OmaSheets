@@ -7,6 +7,7 @@ import io.omasheets.grid 1.0
 
 ApplicationWindow {
     id: window
+    objectName: "omasheetsWindow"
 
     width: 1240
     height: 760
@@ -132,7 +133,7 @@ ApplicationWindow {
             enabled:findAction.enabled
             MenuItem {text:"Format cells…";onTriggered:spreadsheetTools.showFormat()}
             MenuItem {text:"Clear formatting";onTriggered:spreadsheetTools.run({action:"clear_format",range:spreadsheetTools.selection})}
-            MenuItem {text:"Edit note…";onTriggered:spreadsheetTools.enter("note","Cell note",spreadsheetTools.cell.note || "")}
+            MenuItem {text:"Edit note…";onTriggered:spreadsheetTools.showNote()}
             MenuSeparator {}
             MenuItem {text:"Dimensions…";onTriggered:spreadsheetTools.showDimensions()}
             MenuItem {text:"Autofit selected columns";onTriggered:spreadsheetTools.run({action:"dimensions",range:spreadsheetTools.selection,autofit:true,width:null,height:null})}
@@ -144,7 +145,7 @@ ApplicationWindow {
             title: "Data"
             enabled:findAction.enabled
             MenuItem {text:"Sort selected rows…";onTriggered:spreadsheetTools.showSort()}
-            MenuItem {text:"Filter selection by current cell";onTriggered:spreadsheetTools.run({action:"filter",range:spreadsheetTools.selection,column:grid.currentColumn,text:spreadsheetTools.cell.raw_display || "",header:false})}
+            MenuItem {text:"Filter selection by current cell";onTriggered:spreadsheetTools.filterCurrent()}
             MenuItem {text:"Clear filter";enabled:!!spreadsheetTools.sheetView.filter_active;onTriggered:spreadsheetTools.run({action:"clear_filter"})}
             MenuItem {text:"Remove duplicate rows…";onTriggered:spreadsheetTools.confirm({action:"deduplicate",range:spreadsheetTools.selection,header:true},"Remove duplicate rows?","Keeps the first selected row as a header and removes later duplicate rows, including their cells outside the selection.")}
             MenuSeparator {}
@@ -1366,13 +1367,8 @@ ApplicationWindow {
         running: backend.capturePath.length > 0 && !backend.busy
             && (backend.captureReview.length === 0 || backend.reviewJson.length > 0)
         onTriggered: {
-            const target = backend.captureReview.length > 0 ? proposalReview.contentItem
-                : backend.capturePanel.length > 0 ? (backend.capturePanel === "grid" ? grid.parent : spreadsheetTools.captureSurface)
-                : backend.homeMode ? welcomePane : firstSteps;
-            if (!target.grabToImage(result => {
-                if (!result.saveToFile(backend.capturePath)) Qt.exit(1);
-                else Qt.quit();
-            })) Qt.exit(1);
+            if (backend.captureWindow()) Qt.quit();
+            else Qt.exit(1);
         }
     }
 }

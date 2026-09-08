@@ -12,6 +12,7 @@ fn main() {
             .qml_file("qml/ChartView.qml"),
     )
     .qt_module("Network")
+    .qt_module("Quick")
     .files(["src/grid_model.rs"])
     .build();
 }

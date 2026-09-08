@@ -61,3 +61,22 @@ Keep the accepted Qt/Rust stack and Omarchy palette. Work in reviewable stacked
 - Produce stacked PRs with exact checks and an honest corpus-delta statement.
   Hardware acceptance, corpus availability and owner release decisions remain
   explicit when this environment cannot supply them.
+
+## Implementation record — 8 September 2026
+
+- #81 (`codex/native-agent-review`): native agent inspection, atomic proposals,
+  prospective review, revision-bound approval, durable rejection and installed
+  workflow. CI passed at `c976de7`.
+- #82 (`codex/native-spreadsheet-controls`): durable presentation, everyday tools,
+  native menus/formula bar/viewport, and failed-draft recovery. CI passed at
+  `bd1a693`.
+- #83 (`codex/native-interchange-formulas`): supported XLSX presentation,
+  independently checked round-trips, exact current formula projection and
+  TEXTJOIN. The installed Qt/interchange checks passed at `55598a0`; visual
+  review then identified and corrected a Qt 6.4 chart compatibility issue and
+  initial style-read timing. Capture diagnostics now reject those errors.
+
+The supported limits and intentional refusals are documented in
+[NATIVE-SPREADSHEET-SUPPORT.md](NATIVE-SPREADSHEET-SUPPORT.md). The native window
+and dialogs are captured for owner taste review. Release, merge, larger-corpus
+scoring and target-hardware acceptance remain separate decisions/evidence.

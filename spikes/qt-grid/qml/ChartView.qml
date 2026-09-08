@@ -35,7 +35,8 @@ ColumnLayout {
                     if(index<10){ctx.fillRect(width*0.66,16+index*19,9,9);ctx.fillStyle=view.textColor;ctx.fillText(chart.categories[index].slice(0,25),width*0.66+15,24+index*19);}
                 }); return;
             }
-            const numbers=chart.series.flatMap(series=>series.values.filter(value=>value!==null));
+            const numbers=[];
+            chart.series.forEach(series=>series.values.forEach(value=>{if(value!==null)numbers.push(value);}));
             if(!numbers.length)return;
             const scale=Math.max(1,...numbers.map(value=>Math.abs(value)));
             const scaled=numbers.map(value=>value/scale);

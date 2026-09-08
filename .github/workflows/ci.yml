@@ -385,8 +385,10 @@ jobs:
             env XDG_CONFIG_HOME="$theme_config" XDG_RUNTIME_DIR="$runtime" \
               OMASHEETS_DOCUMENT="$evidence/interchange/controls.omasheets" \
               OMASHEETS_UI_CAPTURE="$evidence/controls-$panel.png" OMASHEETS_UI_CAPTURE_PANEL="$panel" \
-              xvfb-run -a timeout 20 spikes/qt-grid/target/release/omasheets-grid
+              xvfb-run -a timeout 20 spikes/qt-grid/target/release/omasheets-grid \
+              > "$evidence/controls-$panel.log" 2>&1
             test -s "$evidence/controls-$panel.png"
+            python -c 'import pathlib,sys; log=pathlib.Path(sys.argv[1]).read_text(); assert not any(marker in log for marker in ("TypeError:", "ReferenceError:", "Cannot assign", "Binding loop")), log' "$evidence/controls-$panel.log"
           done
           agent_document="$evidence/agent-review.omasheets"
           PYTHONPATH=src XDG_RUNTIME_DIR="$runtime" python scripts/check_native_agent_install.py \

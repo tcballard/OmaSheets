@@ -22,14 +22,19 @@ Item {
     property string foreground: ""
     property string background: ""
     property bool pickingBackground: false
-    readonly property Item captureSurface: formatDialog.visible ? formatDialog.contentItem : chartDialog.contentItem
 
     function run(action) {
         if (!gridModel.documentMode || gridModel.busy || !finishEditing()) return false;
         return gridModel.sheetAction(JSON.stringify(action));
     }
     function format(patch) { return run({action:"format",range:selection,patch:patch}); }
-    function toggle(name) { const patch={}; patch[name]=!style[name]; format(patch); }
+    function details() {
+        const response=gridModel.selectedCellPresentation(grid.currentRow,grid.currentColumn);
+        return response.length ? JSON.parse(response) : null;
+    }
+    function toggle(name) { const selected=details();if(!selected)return;const patch={}; patch[name]=!(selected.style || {})[name]; format(patch); }
+    function showNote() {if(!finishEditing())return;const selected=details();if(selected)enter("note","Cell note",selected.note || "");}
+    function filterCurrent() {if(!finishEditing())return;const selected=details();if(selected)run({action:"filter",range:selection,column:grid.currentColumn,text:selected.raw_display || "",header:false});}
     function fill(right) { if (finishEditing()) gridModel.fillRange(selection.row,selection.column,selection.rows,selection.columns,right); }
     function enter(kind,title,value) {
         if (!finishEditing()) return;
@@ -53,12 +58,13 @@ Item {
     }
     function showFormat() {
         if (!finishEditing()) return;
-        bold.checked=!!style.bold; italic.checked=!!style.italic; underline.checked=!!style.underline; wrap.checked=!!style.wrap;
-        fontSize.text=style.font_size ? String(style.font_size) : "";
-        foreground=style.foreground || ""; background=style.background || "";
-        alignment.currentIndex=Math.max(0,["general","left","center","right"].indexOf(style.alignment || "general"));
-        border.currentIndex=Math.max(0,["none","all","bottom"].indexOf(style.border || "none"));
-        numberFormat.editText=style.number_format || "General"; formatDialog.open();
+        const selected=details();if(!selected)return;const selectedStyle=selected.style || {};
+        bold.checked=!!selectedStyle.bold; italic.checked=!!selectedStyle.italic; underline.checked=!!selectedStyle.underline; wrap.checked=!!selectedStyle.wrap;
+        fontSize.text=selectedStyle.font_size ? String(selectedStyle.font_size) : "";
+        foreground=selectedStyle.foreground || ""; background=selectedStyle.background || "";
+        alignment.currentIndex=Math.max(0,["general","left","center","right"].indexOf(selectedStyle.alignment || "general"));
+        border.currentIndex=Math.max(0,["none","all","bottom"].indexOf(selectedStyle.border || "none"));
+        numberFormat.editText=selectedStyle.number_format || "General"; formatDialog.open();
     }
     function showFind() { if (finishEditing()) {findSelection=selection; found={matches:[]}; findDialog.open();} }
     function showDimensions() { if (finishEditing()) {columnWidth.text=""; rowHeight.text=""; sizeDialog.open();} }

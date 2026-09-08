@@ -80,3 +80,11 @@ bundles and Arch package workflows. Container and CI results are wiring and
 regression evidence; no Dell or Omarchy hardware acceptance is claimed. No
 larger corpus has been rescored here, so this change claims no aggregate corpus
 delta. The existing observed/loaded/compared denominator remains explicit.
+
+### Recorded calculation fixtures
+
+The [8 September container measurements](evidence/native-completion-2026-09-08/calculation.json)
+use 100,000 formulas and 20 edits per fixture, with the source commit and
+executable digest recorded. Full-chain p95 recalculation was 38.9 ms, fan-out
+32.1 ms, and a 1,000-cell sparse dirty closure 0.24 ms. Peak child RSS was
+43–46 MiB. These measure the calculation engine, not end-to-end grid latency.

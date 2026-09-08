@@ -8,6 +8,8 @@ pub mod qobject {
         include!("omasheets-grid/src/native_clipboard.h");
         fn write_grid_clipboard(text: &QString, origin: &QString);
         fn grid_clipboard_origin(text: &QString) -> QString;
+        include!("omasheets-grid/src/native_capture.h");
+        fn capture_grid_window(path: &QString) -> bool;
     }
 
     extern "RustQt" {
@@ -49,6 +51,10 @@ pub mod qobject {
         type GridModel = super::GridModelRust;
 
         #[qinvokable]
+        #[cxx_name = "captureWindow"]
+        fn capture_window(&self) -> bool;
+
+        #[qinvokable]
         #[cxx_name = "sheetAction"]
         fn sheet_action(self: Pin<&mut Self>, action: &QString) -> bool;
 
@@ -74,6 +80,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "cellPresentation"]
         fn cell_presentation(&self, row: i32, column: i32) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "selectedCellPresentation"]
+        fn selected_cell_presentation(self: Pin<&mut Self>, row: i32, column: i32) -> QString;
 
         #[qinvokable]
         #[cxx_name = "askAgent"]
@@ -1299,6 +1309,36 @@ impl qobject::GridModel {
         self.as_mut()
             .set_theme_magenta(theme.palette.magenta.as_str().into());
         self.as_mut().rust_mut().theme_signature = theme.signature;
+    }
+
+    pub fn selected_cell_presentation(mut self: Pin<&mut Self>, row: i32, column: i32) -> QString {
+        let result = (|| -> Result<String, String> {
+            if row < 0 || column < 0 || row >= self.row_count || column >= self.column_count {
+                return Err("Select a cell inside the sheet".into());
+            }
+            let document = self
+                .document
+                .as_ref()
+                .ok_or("Open a native workbook first")?;
+            let cell = document.cell(row as usize, column as usize)?;
+            document.verify_revision()?;
+            Ok(if cell.presentation.is_empty() {
+                "{}".into()
+            } else {
+                cell.presentation
+            })
+        })();
+        match result {
+            Ok(details) => details.as_str().into(),
+            Err(error) => {
+                self.as_mut().set_operation_message(error.as_str().into());
+                QString::default()
+            }
+        }
+    }
+
+    pub fn capture_window(&self) -> bool {
+        qobject::capture_grid_window(&self.capture_path)
     }
 
     pub fn report_benchmark(
