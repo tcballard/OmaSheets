@@ -25,10 +25,12 @@ jobs:
     timeout-minutes: 45
     env:
       CARGO_INCREMENTAL: "0"
-      CARGO_TARGET_DIR: ${{ runner.temp }}/omasheets-corpus-target
-      CORPUS_EVIDENCE: ${{ runner.temp }}/omasheets-corpus-evidence
-      CORPUS_DATA: ${{ runner.temp }}/omasheets-corpus-data
     steps:
+      - name: Set runner-local evidence directories
+        run: |
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/omasheets-corpus-target" >> "$GITHUB_ENV"
+          echo "CORPUS_EVIDENCE=$RUNNER_TEMP/omasheets-corpus-evidence" >> "$GITHUB_ENV"
+          echo "CORPUS_DATA=$RUNNER_TEMP/omasheets-corpus-data" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
