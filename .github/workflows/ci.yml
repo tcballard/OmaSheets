@@ -377,6 +377,17 @@ jobs:
             xvfb-run -a timeout 20 spikes/qt-grid/target/release/omasheets-grid
           test -s "$evidence/welcome.png"
           test -s "$evidence/guide.png"
+          python -m venv "$RUNNER_TEMP/omasheets-xlsx-check"
+          "$RUNNER_TEMP/omasheets-xlsx-check/bin/pip" install --disable-pip-version-check openpyxl==3.1.5
+          "$RUNNER_TEMP/omasheets-xlsx-check/bin/python" scripts/check_native_interchange.py \
+            --service target/release/omasheets-service --directory "$evidence/interchange"
+          for panel in grid format charts; do
+            env XDG_CONFIG_HOME="$theme_config" XDG_RUNTIME_DIR="$runtime" \
+              OMASHEETS_DOCUMENT="$evidence/interchange/controls.omasheets" \
+              OMASHEETS_UI_CAPTURE="$evidence/controls-$panel.png" OMASHEETS_UI_CAPTURE_PANEL="$panel" \
+              xvfb-run -a timeout 20 spikes/qt-grid/target/release/omasheets-grid
+            test -s "$evidence/controls-$panel.png"
+          done
           agent_document="$evidence/agent-review.omasheets"
           PYTHONPATH=src XDG_RUNTIME_DIR="$runtime" python scripts/check_native_agent_install.py \
             --service target/release/omasheets-service --document "$agent_document" \

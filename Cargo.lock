@@ -1018,6 +1018,7 @@ dependencies = [
  "omasheets-store",
  "omasheets-xlsx",
  "parquet",
+ "quick-xml 0.41.0",
  "serde",
  "serde_json",
  "zip 8.6.0",

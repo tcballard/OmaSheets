@@ -803,8 +803,8 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
     assert_eq!(manifest.branch, "main");
     assert_eq!(manifest.sheets.len(), 2);
     assert_eq!(manifest.formula_cells, 2);
-    assert_eq!(manifest.formula_cells_preserved, 1);
-    assert_eq!(manifest.formula_cells_flattened, 1);
+    assert_eq!(manifest.formula_cells_preserved, 2);
+    assert_eq!(manifest.formula_cells_flattened, 0);
     assert_eq!(manifest.limitations.len(), 4);
     let mut archive = zip::ZipArchive::new(std::fs::File::open(&xlsx).unwrap()).unwrap();
     let mut workbook = String::new();
@@ -821,7 +821,7 @@ fn csv_export_is_bounded_disclosed_and_never_overwrites() {
         .read_to_string(&mut worksheet)
         .unwrap();
     assert!(worksheet.contains("<f>C1*2</f><v>4</v>"));
-    assert!(worksheet.contains("<c r=\"D2\"><v>5</v></c>"));
+    assert!(worksheet.contains("<f>&apos;Renamed &amp; safe&apos;!A1</f><v>5</v>"));
     assert!(!worksheet.contains("Inputs!A1"));
     drop(archive);
     let refused = service.handle(Request::ExportXlsx {
@@ -1098,7 +1098,12 @@ fn xlsx_import_is_bounded_replayable_and_never_overwrites() {
     assert_eq!(manifest.error_cells_omitted, 0);
     assert_eq!(manifest.rejected_value_cells_omitted, 0);
     assert_eq!(manifest.skipped_source_sheets, 0);
-    assert_eq!(manifest.limitations.len(), 4);
+    assert!(
+        manifest
+            .limitations
+            .iter()
+            .any(|item| item.contains("native defaults"))
+    );
 
     let digest = manifest.document_digest.clone();
     let sheet = manifest.sheets[0].id.to_string();

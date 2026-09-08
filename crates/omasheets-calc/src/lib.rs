@@ -333,6 +333,7 @@ enum Function {
     Upper,
     Lower,
     Concat,
+    TextJoin,
     Value,
     Exact,
     CountIf,
@@ -1471,6 +1472,47 @@ impl Workbook {
                 Err(error) => Value::Error(error),
             };
         }
+        if function == Function::TextJoin {
+            if !(3..=254).contains(&arguments.len()) {
+                return Value::Error(CalcError::InvalidArguments);
+            }
+            let delimiter = match text_value(&self.evaluate(&arguments[0])) {
+                Ok(value) => value,
+                Err(error) => return Value::Error(error),
+            };
+            let ignore_empty = match truthy(self.evaluate(&arguments[1])) {
+                Ok(value) => value,
+                Err(error) => return Value::Error(error),
+            };
+            let mut output = String::new();
+            let mut units = 0;
+            let mut count = 0;
+            let delimiter_units = delimiter.encode_utf16().count();
+            for argument in &arguments[2..] {
+                let mut values = Vec::new();
+                self.flatten_values(argument, &mut values);
+                for value in values {
+                    let text = match text_value(&value) {
+                        Ok(value) => value,
+                        Err(error) => return Value::Error(error),
+                    };
+                    if ignore_empty && text.is_empty() {
+                        continue;
+                    }
+                    units +=
+                        text.encode_utf16().count() + if count > 0 { delimiter_units } else { 0 };
+                    if units > 32767 {
+                        return Value::Error(CalcError::InvalidValue);
+                    }
+                    if count > 0 {
+                        output.push_str(&delimiter);
+                    }
+                    output.push_str(&text);
+                    count += 1;
+                }
+            }
+            return Value::Text(output);
+        }
         if function == Function::SubTotal {
             return self.evaluate_subtotal(arguments);
         }
@@ -1717,6 +1759,7 @@ impl Workbook {
             | Function::Median
             | Function::Choose
             | Function::SubTotal
+            | Function::TextJoin
             | Function::Na
             | Function::IsNa
             | Function::HLookup
@@ -4388,6 +4431,7 @@ const FUNCTION_REGISTRY: &[(&str, Function)] = &[
     ("LOWER", Function::Lower),
     ("CONCAT", Function::Concat),
     ("CONCATENATE", Function::Concat),
+    ("TEXTJOIN", Function::TextJoin),
     ("VALUE", Function::Value),
     ("EXACT", Function::Exact),
     ("COUNTIF", Function::CountIf),
@@ -6014,6 +6058,47 @@ mod tests {
             workbook.set_formula(cell(0, column), formula).unwrap();
             assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
         }
+    }
+
+    #[test]
+    fn textjoin_preserves_range_order_empty_cells_errors_and_output_limit() {
+        let mut workbook = Workbook::default();
+        workbook.define_sheet(0, "Data");
+        workbook.set_text(cell(0, 0), "north");
+        workbook.set_boolean(cell(2, 0), true);
+        for (formula, expected) in [
+            (
+                "=TEXTJOIN(\" / \",TRUE,A1:A3,42)",
+                Value::Text("north / TRUE / 42".into()),
+            ),
+            (
+                "=TEXTJOIN(\",\",FALSE,A1:A3,\"\")",
+                Value::Text("north,,TRUE,".into()),
+            ),
+            (
+                "=TEXTJOIN(\"\",TRUE,NA())",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            (
+                "=TEXTJOIN(\"\",TRUE,REPT(\"x\",32767),\"y\")",
+                Value::Error(CalcError::InvalidValue),
+            ),
+            (
+                "=TEXTJOIN(\"\",TRUE,REPT(\"x\",32767))",
+                Value::Text("x".repeat(32767)),
+            ),
+        ] {
+            workbook.set_formula(cell(0, 2), formula).unwrap();
+            assert_eq!(workbook.value(cell(0, 2)), expected, "{formula}");
+        }
+        workbook
+            .set_formula(cell(0, 2), "=TEXTJOIN(\"-\",TRUE,A1:A3)")
+            .unwrap();
+        workbook.set_text(cell(1, 0), "south");
+        assert_eq!(
+            workbook.value(cell(0, 2)),
+            Value::Text("north-south-TRUE".into())
+        );
     }
 
     #[test]

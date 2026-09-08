@@ -24,6 +24,7 @@ pub mod qobject {
         #[qproperty(QString, review_json, cxx_name = "reviewJson")]
         #[qproperty(QString, proposals_json, cxx_name = "proposalsJson")]
         #[qproperty(QString, capture_review, cxx_name = "captureReview")]
+        #[qproperty(QString, capture_panel, cxx_name = "capturePanel")]
         #[qproperty(QString, capture_path, cxx_name = "capturePath")]
         #[qproperty(bool, tour_seen, cxx_name = "tourSeen")]
         #[qproperty(bool, package_managed, cxx_name = "packageManaged")]
@@ -229,6 +230,7 @@ pub struct GridModelRust {
     review_json: QString,
     proposals_json: QString,
     capture_review: QString,
+    capture_panel: QString,
     capture_path: QString,
     tour_seen: bool,
     package_managed: bool,
@@ -339,6 +341,10 @@ impl Default for GridModelRust {
             review_json: QString::default(),
             proposals_json: "[]".into(),
             capture_review: std::env::var("OMASHEETS_UI_CAPTURE_REVIEW")
+                .unwrap_or_default()
+                .as_str()
+                .into(),
+            capture_panel: std::env::var("OMASHEETS_UI_CAPTURE_PANEL")
                 .unwrap_or_default()
                 .as_str()
                 .into(),
@@ -1007,6 +1013,9 @@ impl qobject::GridModel {
                 let mut line = Vec::new();
                 for c in column..column + columns {
                     let cell = document.cell(r as usize, c as usize)?;
+                    if cell.kind == "bound_formula" {
+                        return Err("This formula's stable references cannot be copied as an A1 rectangle. Inspect its lineage first.".into());
+                    }
                     let value = if cell.kind == "formula" && !cell.input.starts_with('=') {
                         format!("={}", cell.input)
                     } else {
@@ -1123,7 +1132,7 @@ impl qobject::GridModel {
             return false;
         }
         if let Some(document) = &self.document {
-            if let Err(error) = document.cell(row as usize, column as usize) {
+            if let Err(error) = document.cell(row as usize, column as usize).and_then(|cell|if cell.kind=="bound_formula" {Err("This formula uses stable bindings without a current A1 spelling. Inspect lineage or clear the cell before replacing it.".into())}else{Ok(cell)}) {
                 self.as_mut().set_source_status(error.as_str().into());
                 return false;
             }

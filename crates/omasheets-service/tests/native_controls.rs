@@ -90,6 +90,127 @@ fn range(row: usize, column: usize, rows: usize, columns: usize) -> Value {
 }
 
 #[test]
+fn moved_formula_text_preserves_absolute_axes_and_refuses_nonrectangular_ranges() {
+    let mut f = Fixture::new();
+    f.number("A1", 30.0);
+    f.number("A2", 10.0);
+    f.number("A3", 20.0);
+    f.formula("B2", "=$A2+A$2+$A$2+LOG10(100)+LEN(\"A2\")");
+    f.formula("E6", "=SUM(A1:A2)");
+    f.edit(json!({"action":"sort","range":range(0,0,3,1),"column":0,"header":false,"descending":false}));
+    let page = f.page();
+    let b1 = page["cells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|cell| cell["a1"] == "B1")
+        .unwrap();
+    assert_eq!(b1["formula"], "=$A1+A$1+$A$1+LOG10(100)+LEN(\"A2\")");
+    assert_eq!(b1["value"]["value"], 34.0);
+    assert!(b1.get("formula_projection_error").is_none());
+    let e6 = page["cells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|cell| cell["a1"] == "E6")
+        .unwrap();
+    assert!(!e6["formula_projection_error"].as_str().unwrap().is_empty());
+    assert_eq!(e6["value"]["value"], 40.0);
+    // The event text is immutable; only the editable view gets new addresses.
+    assert_eq!(
+        f.cell("B1")["state"]["input"]["formula"]["source"],
+        "=$A2+A$2+$A$2+LOG10(100)+LEN(\"A2\")"
+    );
+    f.reopen();
+    assert_eq!(f.cell("B1")["value"]["value"], 34.0);
+}
+
+#[test]
+#[ignore = "requires Python with openpyxl; independent interchange gate"]
+fn independent_reader_verifies_supported_xlsx_presentation() {
+    let mut f = Fixture::new();
+    let source = f.path.with_extension("source.xlsx");
+    let imported = f.path.with_extension("import.omasheets");
+    let exported = f.path.with_extension("export.xlsx");
+    let python = |code: &str, path: &std::path::Path| {
+        let output = std::process::Command::new("python")
+            .args(["-c", code])
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    python(
+        r#"
+from openpyxl import Workbook
+from openpyxl.styles import Font,PatternFill,Alignment,Border,Side
+import sys
+w=Workbook();s=w.active;s.title='Plan'
+s['A1']='Budget';s['B3']=12.5;s['C3']='=B3*2'
+s.merge_cells('A1:D1');s.freeze_panes='C3';s.sheet_view.showGridLines=False
+s.row_dimensions[1].height=24;s.column_dimensions['A'].width=25
+s['B3'].number_format='£#,##0.00'
+s['B3'].font=Font(bold=True,size=12,color='FF112233')
+s['B3'].fill=PatternFill('solid',fgColor='FFCCDD88')
+s['B3'].alignment=Alignment(horizontal='right',wrap_text=True)
+s['B3'].border=Border(bottom=Side(style='thin'))
+s['F9'].font=Font(italic=True,size=17)
+w.save(sys.argv[1])
+"#,
+        &source,
+    );
+    let original = std::fs::read(&source).unwrap();
+    f.service.handle(serde_json::from_value(json!({"kind":"import_xlsx","source":source,"output":imported,"actor":{"kind":"human","id":"test"}})).unwrap()).unwrap();
+    f.call(json!({"kind":"close"}));
+    std::fs::remove_file(&f.path).unwrap();
+    f.path = imported;
+    f.sheet = f.call(json!({"kind":"document"}))["sheets"][0]["id"]
+        .as_str()
+        .unwrap()
+        .into();
+    assert_eq!(f.cell("C3")["value"]["value"], 25.0);
+    let view = f.view();
+    assert_eq!(view["frozen_rows"], 2);
+    assert_eq!(view["frozen_columns"], 2);
+    assert_eq!(view["show_grid_lines"], false);
+    let page = f.page();
+    let blank = page["cells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|cell| cell["a1"] == "F9")
+        .unwrap();
+    assert_eq!(blank["style"]["italic"], true);
+    f.call(json!({"kind":"export_xlsx","output":exported}));
+    python(
+        r#"
+from openpyxl import load_workbook
+import sys
+s=load_workbook(sys.argv[1])['Plan']
+assert s['C3'].value=='=B3*2'
+assert s['B3'].number_format=='£#,##0.00'
+assert s['B3'].font.bold and s['B3'].font.sz==12
+assert s['B3'].fill.fgColor.rgb.upper()=='FFCCDD88'
+assert s['B3'].alignment.horizontal=='right' and s['B3'].alignment.wrap_text
+assert s['B3'].border.bottom.style=='thin'
+assert s['F9'].font.italic and s['F9'].font.sz==17
+assert s.freeze_panes=='C3' and str(s.merged_cells)=='A1:D1'
+assert not s.sheet_view.showGridLines
+assert s.row_dimensions[1].height==24 and abs(s.column_dimensions['A'].width-25)<.01
+assert load_workbook(sys.argv[1],data_only=True)['Plan']['C3'].value==25
+"#,
+        &exported,
+    );
+    assert_eq!(std::fs::read(&source).unwrap(), original);
+    std::fs::remove_file(source).unwrap();
+    std::fs::remove_file(exported).unwrap();
+}
+
+#[test]
 fn formatting_preserves_raw_values_blank_styles_and_replay() {
     let mut f = Fixture::new();
     f.number("A1", 0.125);

@@ -219,18 +219,11 @@ fn input_command(document: &Document, cell: CellRef) -> Result<Command, ServiceE
             value: value.clone(),
         },
         Some(CellInput::Formula { formula }) => {
-            let current = document.compile_formula(cell.sheet, &formula.source)?;
-            if current.references() != formula.references()
-                || current.sheet_bindings != formula.sheet_bindings
-            {
-                return Err(invalid(
-                    "A formula's stable references have moved; re-enter that formula before duplicating it",
-                ));
-            }
+            let source=document.project_formula(cell,formula).ok_or_else(||invalid("This formula's stable bindings cannot be copied as an A1 rectangle; inspect its lineage first"))?;
             Command::SetFormula {
                 sheet: cell.sheet,
                 a1,
-                source: formula.source.clone(),
+                source,
             }
         }
         None => Command::ClearCell {

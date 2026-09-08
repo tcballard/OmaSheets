@@ -22,6 +22,7 @@ Item {
     property string foreground: ""
     property string background: ""
     property bool pickingBackground: false
+    readonly property Item captureSurface: formatDialog.visible ? formatDialog.contentItem : chartDialog.contentItem
 
     function run(action) {
         if (!gridModel.documentMode || gridModel.busy || !finishEditing()) return false;
@@ -131,6 +132,7 @@ Item {
                 }
             }
             CheckBox {id:wrap;text:"Wrap text"}
+            Label {Layout.fillWidth:true;wrapMode:Text.WordWrap;text:"Custom number formats are preserved for export. Unsupported display patterns use General in the grid."}
         }
         onAccepted: tools.format({bold:bold.checked,italic:italic.checked,underline:underline.checked,wrap:wrap.checked,
             font_size:fontSize.text.length ? Number(fontSize.text) : null,foreground:tools.foreground || null,background:tools.background || null,

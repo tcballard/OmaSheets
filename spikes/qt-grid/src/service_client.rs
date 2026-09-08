@@ -714,7 +714,15 @@ impl GridDocument {
                     row + if right { dr } else { 0 },
                     column + if right { 0 } else { dc },
                 )?;
-                let mut value = vec![vec![source.input]];
+                if source.kind == "bound_formula" {
+                    return Err("This formula's stable references cannot be filled as an A1 rectangle. Inspect its lineage first.".into());
+                }
+                let input = if source.kind == "formula" && !source.input.starts_with('=') {
+                    format!("={}", source.input)
+                } else {
+                    source.input
+                };
+                let mut value = vec![vec![input]];
                 crate::clipboard::translate(
                     &mut value,
                     if right { 0 } else { dr as i32 },
@@ -999,7 +1007,12 @@ fn parse_cell(cell: &Value) -> Result<GridCell, String> {
     Ok(GridCell {
         display: cell["display"].as_str().unwrap_or(&display).into(),
         input: input_text,
-        kind: if formula.is_some() {
+        kind: if cell["formula_projection_error"]
+            .as_str()
+            .is_some_and(|error| !error.is_empty())
+        {
+            "bound_formula"
+        } else if formula.is_some() {
             "formula"
         } else {
             value_type

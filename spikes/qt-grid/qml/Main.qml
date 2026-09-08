@@ -794,7 +794,7 @@ ApplicationWindow {
             function clearCell() {
                 if (hasDraft)
                     return;
-                if (selectionRows > 1 || selectionColumns > 1) {
+                if (selectionRows > 1 || selectionColumns > 1 || (typeof backend.cellKind === "function" && backend.cellKind(currentRow,currentColumn)==="bound_formula")) {
                     backend.clearCells(selectionRow, selectionColumn, selectionRows, selectionColumns);
                     return;
                 }
@@ -1352,6 +1352,11 @@ ApplicationWindow {
 
     Component.onCompleted: {
         if (backend.captureReview.length > 0) proposalReview.open();
+        else if (backend.capturePanel.length > 0) {
+            grid.selectCell(2,1);
+            if (backend.capturePanel === "format") spreadsheetTools.showFormat();
+            if (backend.capturePanel === "charts") spreadsheetTools.showCharts();
+        }
         else if (backend.capturePath.length > 0 && backend.documentMode) window.tourVisible = true;
         if (backend.homeMode) newWorkbookButton.forceActiveFocus();
         else body.forceActiveFocus();
@@ -1362,6 +1367,7 @@ ApplicationWindow {
             && (backend.captureReview.length === 0 || backend.reviewJson.length > 0)
         onTriggered: {
             const target = backend.captureReview.length > 0 ? proposalReview.contentItem
+                : backend.capturePanel.length > 0 ? (backend.capturePanel === "grid" ? grid.parent : spreadsheetTools.captureSurface)
                 : backend.homeMode ? welcomePane : firstSteps;
             if (!target.grabToImage(result => {
                 if (!result.saveToFile(backend.capturePath)) Qt.exit(1);

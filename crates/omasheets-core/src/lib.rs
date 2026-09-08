@@ -13,6 +13,7 @@
 //! unchanged. There is no other mutation path. Calculation is delegated to
 //! `omasheets-calc`; the event core never reads a clock.
 
+mod formula_projection;
 pub mod presentation;
 pub use presentation::SheetPresentation;
 

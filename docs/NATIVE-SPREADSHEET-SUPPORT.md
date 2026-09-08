@@ -1,0 +1,82 @@
+# Native spreadsheet support
+
+The native grid now has a formula bar, address navigation, find/replace,
+selection statistics, undo/redo, relative formula fill, sheet management,
+row/column editing, sorting, filters, duplicate removal, notes, conditional
+highlights and bar/line/pie charts. Presentation is saved in native events and
+replayed with stable row and column identities.
+
+The toolbar keeps frequent actions visible; the Edit, Format, Data, Sheet,
+View and Agent menus contain the full supported command set. The window uses
+the existing Omarchy palette. Control density and proposal presentation are
+ready for owner taste review after the captured Qt workflow passes.
+
+## Interchange
+
+Native XLSX import/export preserves explicit RGB foreground/fill colours,
+bold/italic/underline, supported font sizes, horizontal alignment, wrapping,
+all/bottom borders, saved number-format strings, custom row/column dimensions,
+rectangular merges, gridline visibility and frozen panes. Styled blank cells
+are retained. Row height converts between points and 96-dpi pixels; column
+width assumes a seven-pixel maximum digit width, per SpreadsheetML's documented
+conversion. Native and exported values remain numeric when formatted.
+
+Native display supports General, up to three decimal places, grouping, simple
+£/$/€ currency and percent patterns, and the listed date formats. Other saved
+number-format strings use General in the grid and are preserved for XLSX.
+
+Import reports losses for theme/indexed colours, unsupported border layouts,
+font effects, row/column default styles, hidden rows/columns, split panes,
+source filters, comments and conditional formatting. Font families and default
+sheet dimensions use native defaults. Export reports omitted notes, chart
+definitions, conditional rules, filters, native checks, watches and history.
+LibreOfficeKit remains the compatibility path for complex workbooks, legacy
+XLS and read-only XLSM. Conversion never overwrites an existing destination or
+changes the source file.
+
+The width calculation follows the [SpreadsheetML column specification](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.spreadsheet.column?view=openxml-3.0.1).
+
+## Formula and editing boundaries
+
+The parser registry contains 96 function names, including TEXTJOIN. The
+registry and [function list](FUNCTIONS.md) are checked together. Clock and random
+functions remain explicitly refused: calculation does not read hidden time or
+randomness. The core's stored tick events have not been connected to volatile
+formula evaluation.
+
+Formula history retains the original text. Editable views and XLSX export
+project stable references to current A1 addresses, preserving absolute-axis
+markers and renamed sheet references. A stable range that no longer has a
+faithful rectangular spelling blocks copy/fill/duplication and exports its
+calculated value with a disclosure. Undo restores compiled bindings directly.
+
+Ordinary cell, formatting, sort, filter and chart edits participate in bounded
+undo. Structural changes start a new undo history; destructive commands say so
+before applying. Duplication is bounded to 900 occupied cells and refuses native
+tables. Bulk cell edits/fill/copy are bounded to 1,000 cells. Presentation is
+bounded to 10,000 styled cells, 10,000 row heights, 1,000 column widths and merges,
+32 conditional rules, and 16 charts per sheet. Larger or unsupported operations
+are refused without partial commits. Sorting moves entire rows and refuses
+merged ranges. Native filter matching is text containment; replacement changes
+text literals, preserving formulas.
+
+## Verification
+
+The service tests exercise atomic/stale edits, durable styles, sort and formula
+identity, undo after structural movement, merge/freeze anchors, Unicode
+replacement, chart values, independent sheet duplication, and exact formula
+projection. Agent tests cover atomic proposals, combined-state checks, review
+revision guards, approval, rejection, reopen and review truncation.
+
+`scripts/check_native_interchange.py` runs the real installed service and uses
+OpenPyXL 3.1.5 as an independent XLSX writer/reader. It checks styled blanks,
+formulas and caches, dimensions, merges, freeze, chart data, reopen and refusal
+to overwrite. The ignored `independent_reader` Rust integration test runs the
+same public service API without a socket for environments that prohibit
+listeners; it requires Python with OpenPyXL.
+
+CI captures the real Qt viewport and proposal review and verifies installed
+bundles and Arch package workflows. Container and CI results are wiring and
+regression evidence; no Dell or Omarchy hardware acceptance is claimed. No
+larger corpus has been rescored here, so this change claims no aggregate corpus
+delta. The existing observed/loaded/compared denominator remains explicit.
