@@ -1,7 +1,7 @@
 # Supported formula functions
 
 The owned M0 engine (`crates/omasheets-calc`) accepts exactly the
-95 function names listed below, grouped for reading.
+96 function names listed below, grouped for reading.
 A test in the calc crate fails when this file and the registry disagree, so
 the count here is never edited by hand: add the function to the registry and
 regenerate this list.
@@ -15,7 +15,7 @@ scalar position, and elementwise evaluation of range expressions inside
 aggregate arguments (`SUM(IF(A1:A5=0,0,B1:B5))`, `SUMPRODUCT((A1:A5>2)*B1:B5)`).
 
 Deliberately unsupported: `TODAY`, `NOW`, `RAND` and every other volatile
-function (until explicit tick events exist), external workbook references,
+function (until the calculation context consumes stored tick events), external workbook references,
 3D references, array constants and array formulas, `INDIRECT`, `OFFSET`,
 `CELL`, add-in (`_xll.`) calls, locale-sensitive parsing such as `DATEVALUE`
 and `TEXT`, and the 1904 date system.
@@ -108,6 +108,7 @@ unsorted keys are undefined in Excel and are not promised here.
 - `LOWER`
 - `CONCAT`
 - `CONCATENATE`
+- `TEXTJOIN`
 - `VALUE`
 - `EXACT`
 - `FIND`
@@ -145,3 +146,6 @@ unsorted keys are undefined in Excel and are not promised here.
 - `XNPV`
 - `XIRR`
 
+
+`TEXTJOIN` joins scalar and bounded range arguments in row order, can skip blanks
+and empty strings, propagates errors, and refuses output beyond 32,767 UTF-16 units.

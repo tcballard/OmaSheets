@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "scope": "Container calculation fixtures; no Omarchy hardware acceptance or UI latency claim",
+  "source_commit": "55598a094272117fdc202fb8ca0ed0cadf635c29",
+  "executable_sha256": "70319b69ab2cfa8662138578b696fd3ee9b8eb1c6584926e90356a69459f69ac",
+  "cpu_model": "Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz",
+  "available_logical_cpus": 9,
+  "kernel": "6.18.35",
+  "measurements": [
+    {
+      "schema": 1,
+      "fixture": "linear_dirty_closure",
+      "target_os": "linux",
+      "target_arch": "x86_64",
+      "formulas": 100000,
+      "iterations": 20,
+      "cells_evaluated_per_edit": 100001,
+      "build_ns": 377951294,
+      "edit_recalc_p50_ns": 17160545,
+      "edit_recalc_p95_ns": 38875600,
+      "edit_recalc_max_ns": 41503501,
+      "last_value": 100021,
+      "maximum_rss_kib": 46860
+    },
+    {
+      "schema": 1,
+      "fixture": "fan_out_dirty_closure",
+      "target_os": "linux",
+      "target_arch": "x86_64",
+      "formulas": 100000,
+      "iterations": 20,
+      "cells_evaluated_per_edit": 100001,
+      "build_ns": 285640887,
+      "edit_recalc_p50_ns": 20742060,
+      "edit_recalc_p95_ns": 32090405,
+      "edit_recalc_max_ns": 33298594,
+      "last_value": 22,
+      "maximum_rss_kib": 44480
+    },
+    {
+      "schema": 1,
+      "fixture": "sparse_chain_edit",
+      "target_os": "linux",
+      "target_arch": "x86_64",
+      "formulas": 100000,
+      "iterations": 20,
+      "cells_evaluated_per_edit": 1000,
+      "build_ns": 289455685,
+      "edit_recalc_p50_ns": 45142,
+      "edit_recalc_p95_ns": 244377,
+      "edit_recalc_max_ns": 269760,
+      "last_value": 1020,
+      "maximum_rss_kib": 44932
+    }
+  ]
+}

@@ -9,6 +9,7 @@
 //! or grants an agent merge authority: merges need a human approver, and an
 //! agent may not append to the `main` branch at all.
 
+mod interchange;
 pub mod review;
 pub mod spreadsheet;
 
@@ -362,6 +363,8 @@ pub struct GridCell {
     pub value: CellValue,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub formula: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub formula_projection_error: String,
     #[serde(default)]
     pub style: omasheets_core::presentation::CellStyle,
     #[serde(default)]
@@ -1028,23 +1031,12 @@ fn xlsx_error(error: impl fmt::Display) -> ServiceError {
     ServiceError::new("xlsx_export", error.to_string())
 }
 
-fn xlsx_formula_is_portable(
-    document: &Document,
-    cell: CellRef,
-    formula: &omasheets_core::CompiledFormula,
-) -> bool {
-    formula.current_table.is_none()
-        && formula.table_bindings.is_empty()
-        && document
-            .compile_formula(cell.sheet, &formula.source)
-            .is_ok_and(|current| current.references() == formula.references())
-}
-
 fn write_xlsx_value(
     writer: &mut impl Write,
     address: &str,
     value: &CellValue,
     formula: Option<&str>,
+    style: usize,
 ) -> Result<(), ServiceError> {
     let formula = formula
         .map(|source| source.strip_prefix('=').unwrap_or(source))
@@ -1056,31 +1048,31 @@ fn write_xlsx_value(
         .unwrap_or_default();
     let address = xml_text(address)?;
     match value {
-        CellValue::Blank if formula.is_none() => Ok(()),
+        CellValue::Blank if formula.is_none() && style == 0 => Ok(()),
         CellValue::Blank => {
-            write!(writer, "<c r=\"{address}\">{formula_xml}</c>").map_err(export_io_error)
+            write!(writer, "<c r=\"{address}\" s=\"{style}\">{formula_xml}</c>").map_err(export_io_error)
         }
         CellValue::Number(number) => write!(
             writer,
-            "<c r=\"{address}\">{formula_xml}<v>{}</v></c>",
+            "<c r=\"{address}\" s=\"{style}\">{formula_xml}<v>{}</v></c>",
             if *number == 0.0 { 0.0 } else { *number },
         )
         .map_err(export_io_error),
         CellValue::Boolean(flag) => write!(
             writer,
-            "<c r=\"{address}\" t=\"b\">{formula_xml}<v>{}</v></c>",
+            "<c r=\"{address}\" s=\"{style}\" t=\"b\">{formula_xml}<v>{}</v></c>",
             if *flag { 1 } else { 0 },
         )
         .map_err(export_io_error),
         CellValue::Text(text) if formula.is_some() => write!(
             writer,
-            "<c r=\"{address}\" t=\"str\">{formula_xml}<v>{}</v></c>",
+            "<c r=\"{address}\" s=\"{style}\" t=\"str\">{formula_xml}<v>{}</v></c>",
             xml_text(text)?,
         )
         .map_err(export_io_error),
         CellValue::Text(text) => write!(
             writer,
-            "<c r=\"{address}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">{}</t></is></c>",
+            "<c r=\"{address}\" s=\"{style}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">{}</t></is></c>",
             xml_text(text)?,
         )
         .map_err(export_io_error),
@@ -1092,14 +1084,14 @@ fn write_xlsx_value(
         {
             write!(
                 writer,
-                "<c r=\"{address}\" t=\"e\">{formula_xml}<v>{}</v></c>",
+                "<c r=\"{address}\" s=\"{style}\" t=\"e\">{formula_xml}<v>{}</v></c>",
                 xml_text(error)?,
             )
             .map_err(export_io_error)
         }
         CellValue::Error(error) => write!(
             writer,
-            "<c r=\"{address}\" t=\"str\">{formula_xml}<v>{}</v></c>",
+            "<c r=\"{address}\" s=\"{style}\" t=\"str\">{formula_xml}<v>{}</v></c>",
             xml_text(error)?,
         )
         .map_err(export_io_error),
@@ -1176,6 +1168,23 @@ fn export_xlsx(
         ));
     }
 
+    let mut styles = vec![omasheets_core::presentation::CellStyle::default()];
+    let mut style_ids = BTreeMap::new();
+    style_ids.insert(serde_json::to_string(&styles[0]).map_err(xlsx_error)?, 0);
+    let mut cell_styles = BTreeMap::new();
+    for sheet in &sheets {
+        for entry in &document.presentation(sheet.id).expect("known sheet").cells {
+            let key = serde_json::to_string(&entry.style).map_err(xlsx_error)?;
+            let id = *style_ids.entry(key).or_insert_with(|| {
+                let id = styles.len();
+                styles.push(entry.style.clone());
+                id
+            });
+            cell_styles.insert((sheet.id, entry.row, entry.column), id);
+        }
+    }
+    let styles_xml = interchange::export_styles(&styles)?;
+
     let parent = output.parent().expect("canonical output has a parent");
     let file_name = output
         .file_name()
@@ -1213,7 +1222,7 @@ fn export_xlsx(
         for index in 1..=sheets.len() {
             write!(writer, "<Override PartName=\"/xl/worksheets/sheet{index}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>").map_err(export_io_error)?;
         }
-        writer.write_all(b"</Types>").map_err(export_io_error)?;
+        writer.write_all(b"<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/></Types>").map_err(export_io_error)?;
 
         start_xlsx_file(&mut writer, "_rels/.rels")?;
         writer.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>").map_err(export_io_error)?;
@@ -1238,61 +1247,152 @@ fn export_xlsx(
             write!(writer, "<Relationship Id=\"rId{index}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet{index}.xml\"/>").map_err(export_io_error)?;
         }
         writer
-            .write_all(b"</Relationships>")
+            .write_all(b"<Relationship Id=\"styles\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/></Relationships>")
             .map_err(export_io_error)?;
 
+        start_xlsx_file(&mut writer, "xl/styles.xml")?;
+        writer
+            .write_all(styles_xml.as_bytes())
+            .map_err(export_io_error)?;
         let mut stats = XlsxExportStats::default();
         for (sheet_index, sheet_manifest) in sheets.iter().enumerate() {
             start_xlsx_file(
                 &mut writer,
                 &format!("xl/worksheets/sheet{}.xml", sheet_index + 1),
             )?;
-            writer.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>").map_err(export_io_error)?;
+            writer.write_all(b"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">").map_err(export_io_error)?;
+            let presentation = document
+                .presentation(sheet_manifest.id)
+                .expect("known sheet");
+            write!(
+                writer,
+                "<sheetViews><sheetView workbookViewId=\"0\" showGridLines=\"{}\">",
+                u8::from(presentation.show_grid_lines)
+            )
+            .map_err(export_io_error)?;
+            if presentation.frozen_rows > 0 || presentation.frozen_columns > 0 {
+                let pane = match (
+                    presentation.frozen_rows > 0,
+                    presentation.frozen_columns > 0,
+                ) {
+                    (true, true) => "bottomRight",
+                    (true, false) => "bottomLeft",
+                    _ => "topRight",
+                };
+                write!(writer,"<pane xSplit=\"{}\" ySplit=\"{}\" topLeftCell=\"{}\" activePane=\"{pane}\" state=\"frozen\"/>",presentation.frozen_columns,presentation.frozen_rows,a1(presentation.frozen_rows as u32,presentation.frozen_columns as u32)).map_err(export_io_error)?;
+            }
+            writer.write_all(b"</sheetView></sheetViews><sheetFormatPr defaultRowHeight=\"20.25\" defaultColWidth=\"18.85546875\"/>").map_err(export_io_error)?;
+            if !presentation.column_widths.is_empty() {
+                writer.write_all(b"<cols>").map_err(export_io_error)?;
+                for (i, column) in document
+                    .columns(sheet_manifest.id)
+                    .unwrap_or(&[])
+                    .iter()
+                    .enumerate()
+                {
+                    if let Some(width) = presentation.column_widths.get(column) {
+                        write!(
+                            writer,
+                            "<col min=\"{}\" max=\"{}\" width=\"{}\" customWidth=\"1\"/>",
+                            i + 1,
+                            i + 1,
+                            (width / 7.0 * 256.0).round() / 256.0
+                        )
+                        .map_err(export_io_error)?;
+                    }
+                }
+                writer.write_all(b"</cols>").map_err(export_io_error)?;
+            }
+            writer.write_all(b"<sheetData>").map_err(export_io_error)?;
             let rows = document.rows(sheet_manifest.id).unwrap_or(&[]);
             let columns = document.columns(sheet_manifest.id).unwrap_or(&[]);
             for (row_index, row) in rows.iter().enumerate() {
-                let mut row_open = false;
+                let height = presentation.row_heights.get(row);
+                let mut row_open = height.is_some();
+                if let Some(height) = height {
+                    write!(
+                        writer,
+                        "<row r=\"{}\" ht=\"{}\" customHeight=\"1\">",
+                        row_index + 1,
+                        height * 72.0 / 96.0
+                    )
+                    .map_err(export_io_error)?;
+                }
                 for (column_index, column) in columns.iter().enumerate() {
                     let cell = CellRef {
                         sheet: sheet_manifest.id,
                         row: *row,
                         column: *column,
                     };
-                    let Some(state) = document.cell(cell) else {
+                    let state = document.cell(cell);
+                    let style = cell_styles
+                        .get(&(cell.sheet, cell.row, cell.column))
+                        .copied()
+                        .unwrap_or(0);
+                    if state.is_none() && style == 0 {
                         continue;
-                    };
+                    }
                     if !row_open {
                         write!(writer, "<row r=\"{}\">", row_index + 1).map_err(export_io_error)?;
                         row_open = true;
                     }
                     let value = document.value(cell);
-                    let formula = match &state.input {
-                        CellInput::Formula { formula } => {
+                    let formula = match state.map(|state| &state.input) {
+                        Some(CellInput::Formula { formula }) => {
                             stats.formula_cells += 1;
-                            if xlsx_formula_is_portable(document, cell, formula) {
+                            if let Some(source) = document.project_formula(cell, formula) {
                                 stats.formula_cells_preserved += 1;
-                                Some(formula.source.as_str())
+                                Some(source)
                             } else {
                                 stats.formula_cells_flattened += 1;
                                 None
                             }
                         }
-                        CellInput::Value { .. } => None,
+                        _ => None,
                     };
                     write_xlsx_value(
                         &mut writer,
                         &a1(row_index as u32, column_index as u32),
                         &value,
-                        formula,
+                        formula.as_deref(),
+                        style,
                     )?;
                 }
                 if row_open {
                     writer.write_all(b"</row>").map_err(export_io_error)?;
                 }
             }
-            writer
-                .write_all(b"</sheetData></worksheet>")
+            writer.write_all(b"</sheetData>").map_err(export_io_error)?;
+            if !presentation.merges.is_empty() {
+                write!(
+                    writer,
+                    "<mergeCells count=\"{}\">",
+                    presentation.merges.len()
+                )
                 .map_err(export_io_error)?;
+                for region in &presentation.merges {
+                    let first = document
+                        .project_a1(CellRef {
+                            sheet: sheet_manifest.id,
+                            row: region.rows[0],
+                            column: region.columns[0],
+                        })
+                        .expect("validated merge");
+                    let last = document
+                        .project_a1(CellRef {
+                            sheet: sheet_manifest.id,
+                            row: *region.rows.last().unwrap(),
+                            column: *region.columns.last().unwrap(),
+                        })
+                        .expect("validated merge");
+                    write!(writer, "<mergeCell ref=\"{first}:{last}\"/>")
+                        .map_err(export_io_error)?;
+                }
+                writer
+                    .write_all(b"</mergeCells>")
+                    .map_err(export_io_error)?;
+            }
+            writer.write_all(b"</worksheet>").map_err(export_io_error)?;
         }
         let file = writer.finish().map_err(xlsx_error)?;
         file.sync_all().map_err(export_io_error)?;
@@ -1444,7 +1544,7 @@ fn import_native_xlsx(
             "native output already exists",
         ));
     }
-    let imported = import_xlsx(
+    let mut imported = import_xlsx(
         &source,
         ImportLimits {
             max_sheets: MAX_NATIVE_IMPORT_SHEETS,
@@ -1454,6 +1554,13 @@ fn import_native_xlsx(
     )
     .map_err(|error| ServiceError::new("xlsx_import", error.to_string()))?;
 
+    let presentation = interchange::read(&source)?;
+    for sheet in &mut imported.sheets {
+        if let Some(layout) = presentation.sheets.get(&sheet.name) {
+            sheet.rows = sheet.rows.max(layout.rows);
+            sheet.columns = sheet.columns.max(layout.columns);
+        }
+    }
     let occupied_rectangle_cells = imported.sheets.iter().try_fold(0_usize, |total, sheet| {
         sheet
             .rows
@@ -1615,6 +1722,23 @@ fn import_native_xlsx(
     }
 
     planning.end_bulk();
+    for sheet in &sheets {
+        if let Some(layout) = presentation.sheets.get(&sheet.name) {
+            let style = layout.bind(&planning, sheet.id)?;
+            if !style.is_default() {
+                plan_required(
+                    &mut planning,
+                    &import_actor,
+                    timestamp,
+                    &mut events,
+                    Command::SetPresentation {
+                        sheet: sheet.id,
+                        presentation: style,
+                    },
+                )?;
+            }
+        }
+    }
     let expected_digest = planning.digest();
     drop(planning);
     let owned_engine_unsupported_formulas = imported.unsupported.len();
@@ -1680,12 +1804,16 @@ fn import_native_xlsx(
         error_cells_omitted,
         rejected_value_cells_omitted,
         skipped_source_sheets,
-        limitations: vec![
-            "styles_tables_charts_pivots_macros_not_imported".into(),
-            "defined_names_not_imported".into(),
-            "unsupported_formulas_use_cached_values_when_available".into(),
-            "cached_error_values_not_imported".into(),
-        ],
+        limitations: presentation
+            .losses
+            .into_iter()
+            .chain([
+                "Tables, charts, pivots and macros are not imported.".into(),
+                "defined_names_not_imported".into(),
+                "unsupported_formulas_use_cached_values_when_available".into(),
+                "cached_error_values_not_imported".into(),
+            ])
+            .collect(),
     };
     Ok((store, manifest))
 }
@@ -1944,9 +2072,13 @@ impl Service {
                             || presented.is_some()
                             || style != omasheets_core::presentation::CellStyle::default()
                         {
+                            let mut formula_projection_error = String::new();
                             let formula = match document.cell(cell).map(|state| &state.input) {
                                 Some(CellInput::Formula { formula }) => {
-                                    Some(formula.source.clone())
+                                    Some(document.project_formula(cell,formula).unwrap_or_else(|| {
+                                        formula_projection_error="This formula uses stable references that cannot be represented as a current A1 range. Inspect its lineage; clear or replace it explicitly before copying or filling.".into();
+                                        formula.source.clone()
+                                    }))
                                 }
                                 _ => None,
                             };
@@ -1964,6 +2096,7 @@ impl Service {
                                     .map(|entry| entry.note.clone())
                                     .unwrap_or_default(),
                                 formula,
+                                formula_projection_error,
                             });
                         }
                     }
@@ -2306,10 +2439,10 @@ impl Service {
                     formula_cells_preserved: stats.formula_cells_preserved,
                     formula_cells_flattened: stats.formula_cells_flattened,
                     limitations: vec![
-                        "styles_and_number_formats_omitted".into(),
+                        "Cell notes, chart definitions, conditional formatting rules and filter criteria are omitted; all rows are exported.".into(),
                         "tables_checks_watches_lineage_and_branch_history_omitted".into(),
-                        "formulas_with_table_or_stale_positional_bindings_flattened".into(),
-                        "date_serials_exported_as_unformatted_1900_system_numbers".into(),
+                        "Formulas whose stable bindings cannot be expressed as a current A1 rectangle are exported as calculated values.".into(),
+                        "Dates use the 1900 serial system; saved number formats are preserved. Font families use Calibri and border colours use automatic colour.".into(),
                     ],
                 }))
             }
