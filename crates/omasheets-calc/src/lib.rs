@@ -4993,9 +4993,14 @@ fn join_reference_range(left: Expr, right: Expr) -> Result<Expr, FormulaError> {
         return Ok(Expr::Error(CalcError::InvalidReference));
     }
     let (Some((first, first_end)), Some((second, second_end))) = (left_bounds, right_bounds) else {
-        return Err(FormulaError::InvalidReference(
-            "range endpoints must be references".into(),
-        ));
+        let kind = if matches!(left, Expr::Number(_)) || matches!(right, Expr::Number(_)) {
+            "range endpoint is number"
+        } else if matches!(left, Expr::Function(_, _)) || matches!(right, Expr::Function(_, _)) {
+            "range endpoint is function"
+        } else {
+            "range endpoints must be references"
+        };
+        return Err(FormulaError::InvalidReference(kind.into()));
     };
     if first.sheet != second.sheet {
         return Err(FormulaError::InvalidReference(

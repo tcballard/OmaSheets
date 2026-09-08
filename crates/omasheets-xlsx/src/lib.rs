@@ -114,6 +114,11 @@ pub struct ScoreReport {
     /// Syntax failures grouped by a fixed token class, never formula text.
     #[serde(default)]
     pub syntax_failure_tokens: BTreeMap<String, usize>,
+    /// Fixed failure classes, with no source references or cell values.
+    #[serde(default)]
+    pub reference_failure_kinds: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub mismatch_value_kinds: BTreeMap<String, usize>,
     /// Sheet entries without a worksheet part that the importer skipped.
     #[serde(default)]
     pub skipped_sheets: Vec<String>,
@@ -217,6 +222,31 @@ impl ImportedWorkbook {
 
     pub fn report(&self) -> ScoreReport {
         let parity = self.parity();
+        let mut reference_failure_kinds = BTreeMap::new();
+        for failure in &self.unsupported {
+            if let FormulaError::InvalidReference(reference) = &failure.error {
+                let kind = match reference.as_str() {
+                    "range endpoint is number" => "numeric_range_endpoint",
+                    "range endpoint is function" => "dynamic_range_endpoint",
+                    "range endpoints must be references" => "non_reference_endpoint",
+                    "range endpoints cross sheets" => "cross_sheet_range",
+                    "" => "empty_reference",
+                    token if token.bytes().all(|b| b.is_ascii_alphabetic() || b == b'$') => {
+                        "column_without_row"
+                    }
+                    token if token.bytes().all(|b| b.is_ascii_digit() || b == b'$') => {
+                        "row_without_column"
+                    }
+                    _ => "invalid_a1",
+                };
+                *reference_failure_kinds.entry(kind.to_string()).or_insert(0) += 1;
+            }
+        }
+        let mut mismatch_value_kinds = BTreeMap::new();
+        for (_, stored, calculated) in self.mismatched_cells() {
+            let kind = format!("{} -> {}", value_kind(stored), value_kind(&calculated));
+            *mismatch_value_kinds.entry(kind).or_insert(0) += 1;
+        }
         let mut syntax_failure_tokens = BTreeMap::new();
         for failure in &self.unsupported {
             let FormulaError::UnexpectedToken(offset) = failure.error else {
@@ -264,6 +294,8 @@ impl ImportedWorkbook {
             unsupported_functions: self.unsupported_functions(),
             unsupported_reasons: self.unsupported_reasons(),
             syntax_failure_tokens,
+            reference_failure_kinds,
+            mismatch_value_kinds,
             skipped_sheets: self.skipped_sheets.clone(),
         }
     }
@@ -931,6 +963,16 @@ fn bounded_formula_error(error: &FormulaError) -> String {
     error.to_string().chars().take(256).collect()
 }
 
+fn value_kind(value: &Value) -> &str {
+    match value {
+        Value::Blank => "blank",
+        Value::Number(_) => "number",
+        Value::Boolean(_) => "boolean",
+        Value::Text(_) => "text",
+        Value::Error(error) => error.label(),
+    }
+}
+
 fn values_match(stored: &Value, calculated: &Value) -> bool {
     match (stored, calculated) {
         (Value::Number(stored), Value::Number(calculated)) => {
@@ -1117,6 +1159,31 @@ mod tests {
             .unwrap();
         assert_eq!(formula.stored, Value::Number(5.0));
         assert_eq!(formula.formula.as_deref(), Some("A1+A2"));
+    }
+
+    #[test]
+    fn reference_diagnostics_expose_only_fixed_failure_classes() {
+        let bytes = package(
+            &[],
+            "",
+            r#"<c r="B1"><f>SUM(1:2)</f><v>0</v></c><c r="C1"><f>SUM(Data!A:A)</f><v>0</v></c><c r="D1"><f>SUM(A1:INDEX(A1:A2,2))</f><v>0</v></c><c r="E1"><f>1+1</f><v>9</v></c>"#,
+            "",
+        );
+        let path = temporary_xlsx(&bytes);
+        let report = import_xlsx(&path).unwrap().report();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(
+            report.reference_failure_kinds,
+            BTreeMap::from([
+                ("column_without_row".into(), 1),
+                ("dynamic_range_endpoint".into(), 1),
+                ("numeric_range_endpoint".into(), 1),
+            ])
+        );
+        assert_eq!(
+            report.mismatch_value_kinds,
+            BTreeMap::from([("number -> number".into(), 1)])
+        );
     }
 
     #[test]

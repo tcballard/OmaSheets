@@ -129,6 +129,8 @@ struct OwnedSummary {
     unsupported_functions: BTreeMap<String, FunctionMiss>,
     unsupported_reasons: BTreeMap<String, u64>,
     syntax_failure_tokens: BTreeMap<String, u64>,
+    reference_failure_kinds: BTreeMap<String, u64>,
+    mismatch_value_kinds: BTreeMap<String, u64>,
     /// Workbooks the importer opened only after skipping sheet entries that
     /// have no worksheet part, and how many such entries it skipped in all.
     workbooks_with_skipped_sheets: u64,
@@ -758,7 +760,11 @@ fn score_command(
     let owned_failed = owned_summary.failed;
     let report = ScoreReport {
         schema: 2,
-        engine: "formualizer-calamine-0.8.4",
+        engine: if cfg!(feature = "formualizer") {
+            "formualizer-calamine-0.8.4"
+        } else {
+            "disabled"
+        },
         owned_engine: omasheets_xlsx::ENGINE_NAME,
         stored_value_comparison: "owned-m0",
         summary: ScoreSummary {
@@ -821,6 +827,18 @@ fn accumulate_owned(summary: &mut OwnedSummary, owned: &OwnedProbe) {
             .syntax_failure_tokens
             .entry(token.clone())
             .or_default() += *cells as u64;
+    }
+    for (kind, cells) in &report.reference_failure_kinds {
+        *summary
+            .reference_failure_kinds
+            .entry(kind.clone())
+            .or_insert(0) += *cells as u64;
+    }
+    for (kind, cells) in &report.mismatch_value_kinds {
+        *summary
+            .mismatch_value_kinds
+            .entry(kind.clone())
+            .or_insert(0) += *cells as u64;
     }
     if !report.skipped_sheets.is_empty() {
         summary.workbooks_with_skipped_sheets += 1;
@@ -1079,6 +1097,8 @@ mod tests {
                     10 - loaded,
                 )]),
                 syntax_failure_tokens: BTreeMap::new(),
+                reference_failure_kinds: BTreeMap::new(),
+                mismatch_value_kinds: BTreeMap::new(),
                 skipped_sheets: if loaded == 8 {
                     vec!["Module1".to_string(), "Module2".to_string()]
                 } else {

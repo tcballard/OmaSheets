@@ -56,21 +56,21 @@ jobs:
           mkdir -p "$CORPUS_EVIDENCE/before" "$CORPUS_EVIDENCE/after"
       - name: Build the baseline scorer
         working-directory: baseline
-        run: cargo build --locked --release -p omasheets-corpus --target-dir "$CORPUS_TARGETS/baseline"
+        run: cargo build --locked --release --no-default-features -p omasheets-corpus --target-dir "$CORPUS_TARGETS/baseline"
       - name: Verify and score the baseline alone
         working-directory: candidate
         run: |
           "$CORPUS_TARGETS/baseline/release/omasheets-corpus" verify corpus/sources/enron-figshare.jsonl "$CORPUS_DATA/enron-figshare" > "$CORPUS_EVIDENCE/verify.json"
           python scripts/performance.py run --name frozen-corpus-before --timeout 900 --output "$CORPUS_EVIDENCE/before/performance.json" -- "$CORPUS_TARGETS/baseline/release/omasheets-corpus" score corpus/sources/enron-figshare.jsonl "$CORPUS_DATA/enron-figshare" "$CORPUS_EVIDENCE/before/score.json" --timeout-seconds 30
-          python scripts/update_corpus_summary.py --score "$CORPUS_EVIDENCE/before/score.json" --performance "$CORPUS_EVIDENCE/before/performance.json" --manifest corpus/sources/enron-figshare.jsonl --baseline-summary corpus/sources/enron-figshare.score-summary.json --summary "$CORPUS_EVIDENCE/before/summary.json" --delta "$CORPUS_EVIDENCE/before/delta.json" --engine-commit "$(git -C ../baseline rev-parse HEAD)" --runner "GitHub ubuntu-latest x86_64; sequential baseline then candidate; hosted runner, not Omarchy hardware"
+          python scripts/update_corpus_summary.py --score "$CORPUS_EVIDENCE/before/score.json" --performance "$CORPUS_EVIDENCE/before/performance.json" --manifest corpus/sources/enron-figshare.jsonl --baseline-summary corpus/sources/enron-figshare.score-summary.json --summary "$CORPUS_EVIDENCE/before/summary.json" --delta "$CORPUS_EVIDENCE/before/delta.json" --engine-commit "$(git -C ../baseline rev-parse HEAD)" --runner "GitHub ubuntu-latest x86_64; native-only build; sequential baseline then candidate; hosted runner, not Omarchy hardware" --note "Formualizer candidate lane disabled for this native compatibility iteration; only the owned lane is measured."
       - name: Build the candidate scorer
         working-directory: candidate
-        run: cargo build --locked --release -p omasheets-corpus --target-dir "$CORPUS_TARGETS/candidate"
+        run: cargo build --locked --release --no-default-features -p omasheets-corpus --target-dir "$CORPUS_TARGETS/candidate"
       - name: Score the candidate alone and report aggregate changes
         working-directory: candidate
         run: |
           python scripts/performance.py run --name frozen-corpus-after --timeout 900 --output "$CORPUS_EVIDENCE/after/performance.json" -- "$CORPUS_TARGETS/candidate/release/omasheets-corpus" score corpus/sources/enron-figshare.jsonl "$CORPUS_DATA/enron-figshare" "$CORPUS_EVIDENCE/after/score.json" --timeout-seconds 30
-          python scripts/update_corpus_summary.py --score "$CORPUS_EVIDENCE/after/score.json" --performance "$CORPUS_EVIDENCE/after/performance.json" --manifest corpus/sources/enron-figshare.jsonl --baseline-summary "$CORPUS_EVIDENCE/before/summary.json" --summary "$CORPUS_EVIDENCE/after/summary.json" --delta "$CORPUS_EVIDENCE/after/delta.json" --runner "GitHub ubuntu-latest x86_64; sequential baseline then candidate; hosted runner, not Omarchy hardware"
+          python scripts/update_corpus_summary.py --score "$CORPUS_EVIDENCE/after/score.json" --performance "$CORPUS_EVIDENCE/after/performance.json" --manifest corpus/sources/enron-figshare.jsonl --baseline-summary "$CORPUS_EVIDENCE/before/summary.json" --summary "$CORPUS_EVIDENCE/after/summary.json" --delta "$CORPUS_EVIDENCE/after/delta.json" --runner "GitHub ubuntu-latest x86_64; native-only build; sequential baseline then candidate; hosted runner, not Omarchy hardware" --note "Formualizer candidate lane disabled for this native compatibility iteration; only the owned lane is measured."
           python - <<'PY'
           import json
           import os
