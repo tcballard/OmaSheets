@@ -90,6 +90,24 @@ fn range(row: usize, column: usize, rows: usize, columns: usize) -> Value {
 }
 
 #[test]
+fn index_reference_ranges_keep_their_bound_rows_after_sort_and_reopen() {
+    let mut f = Fixture::new();
+    f.number("A1", 30.0);
+    f.number("A2", 10.0);
+    f.number("A3", 20.0);
+    f.formula("B6", "=SUM(A1:INDEX(A1:A3,2))");
+    assert_eq!(f.cell("B6")["value"]["value"], 40.0);
+    f.edit(json!({"action":"sort","range":range(0,0,3,1),"column":0,"header":false,"descending":false}));
+    assert_eq!(f.cell("B6")["value"]["value"], 40.0);
+    f.number("A3", 50.0);
+    assert_eq!(f.cell("B6")["value"]["value"], 60.0);
+    let revision = f.call(json!({"kind":"revision"}));
+    f.reopen();
+    assert_eq!(f.call(json!({"kind":"revision"})), revision);
+    assert_eq!(f.cell("B6")["value"]["value"], 60.0);
+}
+
+#[test]
 fn array_and_financial_formulas_keep_stable_bindings_through_sort_and_reopen() {
     let mut f = Fixture::new();
     f.number("A1", 10.0);

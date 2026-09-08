@@ -23,6 +23,15 @@ VLOOKUP/HLOOKUP/XLOOKUP. A scalar use takes the first value; spilling into
 neighbouring cells is not implemented. `_xlfn.` and `_xlfn._xlws.` prefixes
 resolve only to functions already in the registry.
 
+`INDEX` also returns references: `SUM(A1:INDEX(A1:A100,D1))` follows the
+selector in D1, and a zero row or column selects that entire axis. The range
+operator binds a bounded envelope of all possible endpoint selections. Native
+replay preserves that envelope's row and column identities, including after
+sorting. Potential circular dependencies anywhere in the envelope are refused;
+this conservative rule is the same as for INDEX's source range. A moved formula
+whose current A1 spelling cannot preserve those identities reports a projection
+refusal instead of exporting different references.
+
 Deliberately unsupported: `TODAY`, `NOW`, `RAND` and every other volatile
 function (until the calculation context consumes stored tick events), external workbook references,
 3D references, spilling array formulas, `INDIRECT`, `OFFSET`,

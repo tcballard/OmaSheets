@@ -7,6 +7,7 @@
 //! Dates are Excel 1900-system serial numbers; see [`serial_date`] for the
 //! boundary rules and the deliberately unsupported cases.
 
+mod reference;
 pub mod serial_date;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
@@ -298,6 +299,8 @@ enum BinaryOp {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Function {
+    /// Internal reference operator; deliberately absent from the function registry.
+    ReferenceSpan,
     Sum,
     Average,
     Min,
@@ -1453,6 +1456,12 @@ impl Workbook {
     }
 
     fn evaluate_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+        if function == Function::ReferenceSpan {
+            return match self.reference_span(arguments) {
+                Ok(reference) => reference.scalar(self),
+                Err(error) => Value::Error(error),
+            };
+        }
         if function == Function::If {
             if !matches!(arguments.len(), 2 | 3) {
                 return Value::Error(CalcError::InvalidArguments);
@@ -1796,7 +1805,8 @@ impl Workbook {
             | Function::IsNa
             | Function::HLookup
             | Function::Row
-            | Function::Column => Value::Error(CalcError::InvalidArguments),
+            | Function::Column
+            | Function::ReferenceSpan => Value::Error(CalcError::InvalidArguments),
         }
     }
 
@@ -2120,13 +2130,15 @@ impl Workbook {
         if matches!(lookup, Value::Error(_)) {
             return lookup;
         }
-        let Some(input) = ArrayInput::new(&arguments[1]) else {
-            return Value::Error(CalcError::InvalidArguments);
+        let input = match ArrayInput::new(&arguments[1], self) {
+            Ok(input) => input,
+            Err(error) => return Value::Error(error),
         };
         let (rows, columns) = input.shape();
         let (candidates, results): (Vec<Value>, Vec<Value>) = if arguments.len() == 3 {
-            let Some(result_input) = ArrayInput::new(&arguments[2]) else {
-                return Value::Error(CalcError::InvalidArguments);
+            let result_input = match ArrayInput::new(&arguments[2], self) {
+                Ok(input) => input,
+                Err(error) => return Value::Error(error),
             };
             let (result_rows, result_columns) = result_input.shape();
             if (rows != 1 && columns != 1)
@@ -2346,6 +2358,16 @@ impl Workbook {
                         }
                     }
                 },
+                Expr::Function(Function::ReferenceSpan | Function::Index, _) => {
+                    match self.reference_view(argument) {
+                        Ok(reference) => reference.visit(self, &mut visit),
+                        Err(CalcError::InvalidArguments) => match self.evaluate_array(argument) {
+                            Ok(array) => array.values.iter().for_each(&mut visit),
+                            Err(error) => visit(&Value::Error(error)),
+                        },
+                        Err(error) => visit(&Value::Error(error)),
+                    }
+                }
                 Expr::Empty => {}
                 other if contains_array_operand(other) => match self.evaluate_array(other) {
                     Ok(array) => array.values.iter().for_each(&mut visit),
@@ -2392,6 +2414,10 @@ impl Workbook {
     fn evaluate_array(&self, expression: &Expr<usize>) -> Result<ArrayValue, CalcError> {
         match expression {
             Expr::Array(array) => Ok(array.clone()),
+            Expr::Function(Function::Index, arguments) => self.index_array(arguments),
+            Expr::Function(Function::ReferenceSpan, arguments) => self
+                .reference_span(arguments)
+                .map(|reference| reference.array(self)),
             Expr::RangeNode {
                 node,
                 rows,
@@ -2561,35 +2587,17 @@ impl Workbook {
     fn evaluate_lookup_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
         match function {
             Function::Index if matches!(arguments.len(), 2 | 3) => {
-                let Some(input) = ArrayInput::new(&arguments[0]) else {
-                    return Value::Error(CalcError::InvalidArguments);
-                };
-                let (rows, columns) = input.shape();
-                // An error row (a failed MATCH) is the result, as in Excel.
-                let row = match positive_index(self.evaluate(&arguments[1])) {
-                    Ok(row) => row,
-                    Err(error) => return Value::Error(error),
-                };
-                let column = if arguments.len() == 3 {
-                    match positive_index(self.evaluate(&arguments[2])) {
-                        Ok(column) => column,
+                if !matches!(arguments[0], Expr::Array(_)) {
+                    match self.reference_view(&Expr::Function(function, arguments.to_vec())) {
+                        Ok(reference) => return reference.scalar(self),
+                        Err(CalcError::InvalidArguments) => {}
                         Err(error) => return Value::Error(error),
                     }
-                } else if columns == 1 {
-                    1
-                } else if rows == 1 {
-                    return if row <= columns {
-                        input.value(self, row - 1)
-                    } else {
-                        Value::Error(CalcError::InvalidReference)
-                    };
-                } else {
-                    return Value::Error(CalcError::InvalidArguments);
-                };
-                if row > rows || column > columns {
-                    return Value::Error(CalcError::InvalidReference);
                 }
-                input.value(self, (row - 1) * columns + column - 1)
+                match self.index_array(arguments) {
+                    Ok(array) => array.values[0].clone(),
+                    Err(error) => Value::Error(error),
+                }
             }
             Function::Match if matches!(arguments.len(), 2 | 3) => {
                 let mode = if arguments.len() == 3 {
@@ -2604,8 +2612,9 @@ impl Workbook {
                 if matches!(lookup, Value::Error(_)) {
                     return lookup;
                 }
-                let Some(input) = ArrayInput::new(&arguments[1]) else {
-                    return Value::Error(CalcError::InvalidArguments);
+                let input = match ArrayInput::new(&arguments[1], self) {
+                    Ok(input) => input,
+                    Err(error) => return Value::Error(error),
                 };
                 let (rows, columns) = input.shape();
                 if rows != 1 && columns != 1 {
@@ -2638,8 +2647,9 @@ impl Workbook {
                 if matches!(lookup, Value::Error(_)) {
                     return lookup;
                 }
-                let Some(input) = ArrayInput::new(&arguments[1]) else {
-                    return Value::Error(CalcError::InvalidArguments);
+                let input = match ArrayInput::new(&arguments[1], self) {
+                    Ok(input) => input,
+                    Err(error) => return Value::Error(error),
                 };
                 let (rows, columns) = input.shape();
                 let Ok(offset) = positive_index(self.evaluate(&arguments[2])) else {
@@ -2672,11 +2682,13 @@ impl Workbook {
                 if matches!(lookup, Value::Error(_)) {
                     return lookup;
                 }
-                let Some(lookup_input) = ArrayInput::new(&arguments[1]) else {
-                    return Value::Error(CalcError::InvalidArguments);
+                let lookup_input = match ArrayInput::new(&arguments[1], self) {
+                    Ok(input) => input,
+                    Err(error) => return Value::Error(error),
                 };
-                let Some(return_input) = ArrayInput::new(&arguments[2]) else {
-                    return Value::Error(CalcError::InvalidArguments);
+                let return_input = match ArrayInput::new(&arguments[2], self) {
+                    Ok(input) => input,
+                    Err(error) => return Value::Error(error),
                 };
                 let (lookup_rows, lookup_columns) = lookup_input.shape();
                 let (return_rows, return_columns) = return_input.shape();
@@ -2832,22 +2844,35 @@ enum ArrayInput<'a> {
         columns: usize,
     },
     Constant(&'a ArrayValue),
+    Selection(reference::ReferenceView),
+    Computed(ArrayValue),
 }
 
 impl<'a> ArrayInput<'a> {
-    fn new(expression: &'a Expr<usize>) -> Option<Self> {
+    fn new(expression: &'a Expr<usize>, workbook: &Workbook) -> Result<Self, CalcError> {
         match expression {
             Expr::RangeNode {
                 node,
                 rows,
                 columns,
-            } => Some(Self::Range {
+            } => Ok(Self::Range {
                 node: *node,
                 rows: *rows,
                 columns: *columns,
             }),
-            Expr::Array(array) => Some(Self::Constant(array)),
-            _ => None,
+            Expr::Array(array) => Ok(Self::Constant(array)),
+            Expr::Reference(_) | Expr::Function(Function::ReferenceSpan, _) => {
+                workbook.reference_view(expression).map(Self::Selection)
+            }
+            Expr::Function(Function::Index, _) => match workbook.reference_view(expression) {
+                Ok(reference) => Ok(Self::Selection(reference)),
+                Err(CalcError::InvalidArguments) => {
+                    workbook.evaluate_array(expression).map(Self::Computed)
+                }
+                Err(error) => Err(error),
+            },
+            Expr::Error(error) => Err(error.clone()),
+            _ => Err(CalcError::InvalidArguments),
         }
     }
 
@@ -2855,6 +2880,8 @@ impl<'a> ArrayInput<'a> {
         match self {
             Self::Range { rows, columns, .. } => (*rows, *columns),
             Self::Constant(array) => array.shape(),
+            Self::Selection(reference) => (reference.rows, reference.columns),
+            Self::Computed(array) => array.shape(),
         }
     }
 
@@ -2862,6 +2889,8 @@ impl<'a> ArrayInput<'a> {
         match self {
             Self::Range { node, .. } => workbook.range_value(*node, index),
             Self::Constant(array) => array.values[index].clone(),
+            Self::Selection(reference) => reference.value(workbook, index),
+            Self::Computed(array) => array.values[index].clone(),
         }
     }
 
@@ -2869,6 +2898,8 @@ impl<'a> ArrayInput<'a> {
         match self {
             Self::Range { node, .. } => workbook.range_values(*node),
             Self::Constant(array) => array.values.clone(),
+            Self::Selection(reference) => reference.array(workbook).values,
+            Self::Computed(array) => array.values.clone(),
         }
     }
 }
@@ -2914,7 +2945,9 @@ fn broadcast_shape(shapes: &[(usize, usize)]) -> Result<(usize, usize), CalcErro
 /// lookups, criteria functions) produce one value and stop the search.
 fn contains_array_operand(expression: &Expr<usize>) -> bool {
     match expression {
-        Expr::RangeNode { .. } | Expr::Array(_) => true,
+        Expr::RangeNode { .. }
+        | Expr::Array(_)
+        | Expr::Function(Function::Index | Function::ReferenceSpan, _) => true,
         Expr::UnaryMinus(inner) | Expr::Percent(inner) => contains_array_operand(inner),
         Expr::Binary(_, left, right) => {
             contains_array_operand(left) || contains_array_operand(right)
@@ -4271,7 +4304,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
             let original_sheet = self.sheet;
             self.sheet = match &expression {
                 Expr::Reference(cell) | Expr::Range { anchor: cell, .. } => cell.sheet,
-                _ => self.sheet,
+                _ => reference_bounds(&expression).map_or(self.sheet, |(first, _)| first.sheet),
             };
             let right = self.parse_primary();
             self.sheet = original_sheet;
@@ -4963,28 +4996,33 @@ fn expand_range(first: CellId, second: CellId) -> Result<Expr, FormulaError> {
     })
 }
 
-fn join_reference_range(left: Expr, right: Expr) -> Result<Expr, FormulaError> {
-    fn bounds(expression: &Expr) -> Option<(CellId, CellId)> {
-        match expression {
-            Expr::Reference(cell) => Some((*cell, *cell)),
-            Expr::Range {
-                anchor,
-                rows,
-                columns,
-                members: None,
-            } => Some((
-                *anchor,
-                CellId::new(
-                    anchor.sheet,
-                    anchor.row + *rows as u32 - 1,
-                    anchor.column + *columns as u32 - 1,
-                ),
-            )),
-            _ => None,
+fn reference_bounds(expression: &Expr) -> Option<(CellId, CellId)> {
+    match expression {
+        Expr::Reference(cell) => Some((*cell, *cell)),
+        Expr::Range {
+            anchor,
+            rows,
+            columns,
+            members: None,
+        } => Some((
+            *anchor,
+            CellId::new(
+                anchor.sheet,
+                anchor.row + *rows as u32 - 1,
+                anchor.column + *columns as u32 - 1,
+            ),
+        )),
+        Expr::Function(Function::Index, arguments) => arguments.first().and_then(reference_bounds),
+        Expr::Function(Function::ReferenceSpan, arguments) => {
+            arguments.get(2).and_then(reference_bounds)
         }
+        _ => None,
     }
-    let left_bounds = bounds(&left);
-    let right_bounds = bounds(&right);
+}
+
+fn join_reference_range(left: Expr, right: Expr) -> Result<Expr, FormulaError> {
+    let left_bounds = reference_bounds(&left);
+    let right_bounds = reference_bounds(&right);
     let left_deleted = matches!(left, Expr::Error(CalcError::InvalidReference));
     let right_deleted = matches!(right, Expr::Error(CalcError::InvalidReference));
     if (left_deleted && (right_deleted || right_bounds.is_some()))
@@ -5007,7 +5045,7 @@ fn join_reference_range(left: Expr, right: Expr) -> Result<Expr, FormulaError> {
             "range endpoints cross sheets".into(),
         ));
     }
-    expand_range(
+    let envelope = expand_range(
         CellId::new(
             first.sheet,
             first.row.min(second.row),
@@ -5018,7 +5056,15 @@ fn join_reference_range(left: Expr, right: Expr) -> Result<Expr, FormulaError> {
             first_end.row.max(second_end.row),
             first_end.column.max(second_end.column),
         ),
-    )
+    )?;
+    if matches!(left, Expr::Function(_, _)) || matches!(right, Expr::Function(_, _)) {
+        Ok(Expr::Function(
+            Function::ReferenceSpan,
+            vec![left, right, envelope],
+        ))
+    } else {
+        Ok(envelope)
+    }
 }
 
 #[cfg(test)]
