@@ -1166,11 +1166,13 @@ mod tests {
         let bytes = package(
             &[],
             "",
-            r#"<c r="B1"><f>SUM(1:2)</f><v>0</v></c><c r="C1"><f>SUM(Data!A:A)</f><v>0</v></c><c r="D1"><f>SUM(A1:INDEX(A1:A2,2))</f><v>0</v></c><c r="E1"><f>1+1</f><v>9</v></c>"#,
+            r#"<c r="B1"><f>SUM(1:2)</f><v>0</v></c><c r="C1"><f>SUM(Data!A:A)</f><v>0</v></c><c r="D1"><f>SUM(A1:SUM(A1:A2))</f><v>0</v></c><c r="E1"><f>1+1</f><v>9</v></c>"#,
             "",
         );
         let path = temporary_xlsx(&bytes);
-        let report = import_xlsx(&path).unwrap().report();
+        let report = import_xlsx(&path, ImportLimits::default())
+            .unwrap()
+            .report();
         std::fs::remove_file(path).unwrap();
         assert_eq!(
             report.reference_failure_kinds,
@@ -1203,6 +1205,24 @@ mod tests {
         );
         assert_eq!(report.unsupported_reasons["syntax"], 2);
         assert_eq!(report.formula_cells_compared, 1);
+    }
+
+    #[test]
+    fn reference_valued_index_matches_xlsx_caches() {
+        let bytes = package(
+            &[],
+            "",
+            r#"<c r="B1"><f>SUM(A1:INDEX(A1:A2,2))</f><v>5</v></c><c r="C1"><f>SUM(INDEX(A1:A2,0))</f><v>5</v></c><c r="D1"><f>MATCH(3,INDEX(A1:A2,0),0)</f><v>2</v></c>"#,
+            "",
+        );
+        let path = temporary_xlsx(&bytes);
+        let report = import_xlsx(&path, ImportLimits::default())
+            .unwrap()
+            .report();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(report.formula_cells_loaded, 4);
+        assert_eq!(report.stored_values_matched, 4);
+        assert_eq!(report.stored_values_mismatched, 0);
     }
 
     #[test]
