@@ -1120,6 +1120,43 @@ mod tests {
     }
 
     #[test]
+    fn syntax_diagnostics_expose_only_fixed_token_classes() {
+        let path = temporary_xlsx(&package(
+            &[],
+            "",
+            r#"<c r="B1"><f>SUM(1;2)</f><v>3</v></c><c r="C1"><f>SUM({1,})</f><v>1</v></c>"#,
+            "",
+        ));
+        let imported = import_xlsx(&path, ImportLimits::default()).unwrap();
+        std::fs::remove_file(path).unwrap();
+        let report = imported.report();
+        assert_eq!(
+            report.syntax_failure_tokens,
+            BTreeMap::from([("semicolon".into(), 1), ("array_brace".into(), 1),])
+        );
+        assert_eq!(report.unsupported_reasons["syntax"], 2);
+        assert_eq!(report.formula_cells_compared, 1);
+    }
+
+    #[test]
+    fn array_financial_and_deleted_reference_formulas_match_xlsx_caches() {
+        let path = temporary_xlsx(&package(
+            &[],
+            r#"<definedName name="weights">{2;3}</definedName><definedName name="rate" localSheetId="0">0.1</definedName>"#,
+            r#"<c r="B1"><f>SUMPRODUCT({10;20},weights)</f><v>80</v></c><c r="C1"><f>PV(Data!rate,1,-110)</f><v>100</v></c><c r="D1"><f>_xlfn.XLOOKUP(2,{1,2},{10,20})</f><v>20</v></c><c r="E1" t="e"><f>SUM(#REF!:#REF!)</f><v>#REF!</v></c><c r="F1"><f>IFERROR(SUM(A1:#REF!),17)</f><v>17</v></c>"#,
+            "",
+        ));
+        let imported = import_xlsx(&path, ImportLimits::default()).unwrap();
+        std::fs::remove_file(path).unwrap();
+        let report = imported.report();
+        assert_eq!(report.formula_cells_observed, 6);
+        assert_eq!(report.formula_cells_loaded, 6);
+        assert_eq!(report.stored_values_matched, 6);
+        assert_eq!(report.stored_values_mismatched, 0);
+        assert!(report.unsupported_reasons.is_empty());
+    }
+
+    #[test]
     fn shared_formulas_expand_from_their_anchor_cell() {
         // The shared group is anchored at B5 with ref A5:B6; A5 carries its
         // own formula. A6 is therefore B5's template shifted one row down

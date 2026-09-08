@@ -125,7 +125,8 @@ access terms. See `corpus/sources/README.md` for what is registered.
 ## Corpus policy
 
 The **Frozen formula corpus** Actions workflow scores a baseline and candidate
-sequentially on the same hosted runner, using the registered archive and the
+sequentially on the same hosted runner, in separate build directories, using
+the registered archive and the
 unchanged 1,000-workbook manifest. Run it manually with a baseline revision;
 changes to the workflow itself also exercise it in a pull request. Only
 aggregate before/after summaries are uploaded. Syntax failures include a fixed

@@ -90,6 +90,36 @@ fn range(row: usize, column: usize, rows: usize, columns: usize) -> Value {
 }
 
 #[test]
+fn array_and_financial_formulas_keep_stable_bindings_through_sort_and_reopen() {
+    let mut f = Fixture::new();
+    f.number("A1", 10.0);
+    f.number("A2", 20.0);
+    f.formula("B2", "=SUM(A2*{2,3})+PV(0,1,-5)");
+    f.formula("E5", "=IFERROR(SUM(#REF!:#REF!),7)");
+    assert_eq!(f.cell("B2")["value"]["value"], 105.0);
+    f.edit(
+        json!({"action":"sort","range":range(0,0,2,1),"column":0,"header":false,"descending":true}),
+    );
+    let page = f.page();
+    let moved = page["cells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|cell| cell["a1"] == "B1")
+        .unwrap();
+    assert_eq!(moved["formula"], "=SUM(A1*{2,3})+PV(0,1,-5)");
+    assert_eq!(moved["value"]["value"], 105.0);
+    assert!(moved.get("formula_projection_error").is_none());
+    let revision = f.call(json!({"kind":"revision"}));
+    f.reopen();
+    assert_eq!(f.call(json!({"kind":"revision"})), revision);
+    assert_eq!(f.cell("B1")["value"]["value"], 105.0);
+    assert_eq!(f.cell("E5")["value"]["value"], 7.0);
+    f.number("A1", 30.0);
+    assert_eq!(f.cell("B1")["value"]["value"], 155.0);
+}
+
+#[test]
 fn moved_formula_text_preserves_absolute_axes_and_refuses_nonrectangular_ranges() {
     let mut f = Fixture::new();
     f.number("A1", 30.0);
