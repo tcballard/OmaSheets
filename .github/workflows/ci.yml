@@ -283,7 +283,7 @@ jobs:
             qml6-module-qtqml-workerscript qml6-module-qtquick \
             qml6-module-qtquick-controls qml6-module-qtquick-layouts \
             qml6-module-qtquick-templates qml6-module-qtquick-window \
-            qml6-module-qtquick-dialogs qml6-module-qtcore
+            qml6-module-qtquick-dialogs qml6-module-qtcore qml6-module-qttest
       - name: Check the grid contract and Rust model
         run: |
           evidence="$RUNNER_TEMP/omasheets-qt-grid"
@@ -293,6 +293,14 @@ jobs:
           cargo build --locked --release -p omasheets-service
           cargo test --locked --release --manifest-path spikes/qt-grid/Cargo.toml
           cargo build --locked --release --manifest-path spikes/qt-grid/Cargo.toml
+      - name: Exercise command menu and dialog keyboard workflows
+        run: |
+          evidence="$RUNNER_TEMP/omasheets-qt-grid"
+          QT_QUICK_BACKEND=software xvfb-run -a timeout 60 /usr/lib/qt6/bin/qmltestrunner \
+            -input spikes/qt-grid/tests/qml -import spikes/qt-grid/tests/qml/mocks \
+            > "$evidence/keyboard-tests.txt" 2>&1 || { cat "$evidence/keyboard-tests.txt"; exit 1; }
+          cat "$evidence/keyboard-tests.txt"
+          python -c 'import pathlib,sys; log=pathlib.Path(sys.argv[1]).read_text(); assert not any(marker in log for marker in ("TypeError:", "ReferenceError:", "Cannot assign", "Binding loop")), log' "$evidence/keyboard-tests.txt"
       - name: Exercise bounded viewport rendering headlessly
         run: |
           evidence="$RUNNER_TEMP/omasheets-qt-grid"
@@ -381,7 +389,7 @@ jobs:
           "$RUNNER_TEMP/omasheets-xlsx-check/bin/pip" install --disable-pip-version-check openpyxl==3.1.5
           "$RUNNER_TEMP/omasheets-xlsx-check/bin/python" scripts/check_native_interchange.py \
             --service target/release/omasheets-service --directory "$evidence/interchange"
-          for panel in grid format charts; do
+          for panel in grid format charts commands command-search; do
             env XDG_CONFIG_HOME="$theme_config" XDG_RUNTIME_DIR="$runtime" \
               OMASHEETS_DOCUMENT="$evidence/interchange/controls.omasheets" \
               OMASHEETS_UI_CAPTURE="$evidence/controls-$panel.png" OMASHEETS_UI_CAPTURE_PANEL="$panel" \

@@ -90,7 +90,8 @@ omasheets launch document.omasheets
 ```
 
 Ctrl+N creates a real native document with one sheet, 1,000 rows and 26 columns.
-Ctrl+O opens an existing document. The File menu includes bounded XLSX import,
+Ctrl+O opens an existing document. Ctrl+Space opens the command menu for every
+spreadsheet tool. Its Workbook category includes bounded XLSX import,
 XLSX/CSV/Parquet export with conversion reports, and the compatibility opener.
 File operations run off the UI thread. A rejected open keeps the current
 document; a failed save keeps its draft. Existing files are never overwritten

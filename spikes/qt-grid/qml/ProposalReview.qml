@@ -13,7 +13,7 @@ Dialog {
     focus: true
     standardButtons: Dialog.Close
     closePolicy: gridModel.busy ? Popup.NoAutoClose : Popup.CloseOnEscape
-    onOpened: gridModel.listProposals()
+    onOpened: {gridModel.listProposals();proposals.forceActiveFocus();}
 
     function valueText(cell) {
         if (!cell || !cell.value || cell.value.type === "blank") return "(blank)";

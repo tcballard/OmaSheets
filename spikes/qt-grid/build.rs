@@ -8,6 +8,8 @@ fn main() {
             .qml_file("qml/FirstSteps.qml")
             .qml_file("qml/ProposalReview.qml")
             .qml_file("qml/SpreadsheetTools.qml")
+            .qml_file("qml/CommandActions.qml")
+            .qml_file("qml/CommandMenu.qml")
             .qml_file("qml/GridMetrics.qml")
             .qml_file("qml/ChartView.qml"),
     )

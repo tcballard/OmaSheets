@@ -6,6 +6,7 @@ import QtQuick.Dialogs
 
 Item {
     id: tools
+    signal finished()
     required property var gridModel
     required property var grid
     property var finishEditing: () => true
@@ -83,6 +84,9 @@ Item {
 
     Dialog {
         id: entryDialog
+        objectName: "entryDialog"
+        focus: true
+        onClosed: tools.finished()
         anchors.centerIn: parent
         width: Math.min(500,tools.width-32)
         modal: true
@@ -111,6 +115,10 @@ Item {
 
     Dialog {
         id: formatDialog
+        objectName: "formatDialog"
+        onOpened: bold.forceActiveFocus()
+        focus: true
+        onClosed: tools.finished()
         anchors.centerIn:parent
         width:Math.min(550,tools.width-32)
         title:"Format selection"
@@ -128,13 +136,13 @@ Item {
                 ComboBox {id:numberFormat;Layout.fillWidth:true;editable:true;model:["General","0","0.0","0.00","#,##0","#,##0.00","0%","0.0%","£#,##0.00","$#,##0.00","€#,##0.00","yyyy-mm-dd","dd/mm/yyyy","mm/dd/yyyy"]}
                 Label {text:"Text colour"}
                 RowLayout {
-                    Button {text:tools.foreground || "Default";onClicked:{tools.pickingBackground=false;colour.selectedColor=tools.foreground || tools.gridModel.themeForeground;colour.open();}}
-                    Button {text:"Reset";onClicked:tools.foreground=""}
+                    TextField {objectName:"textColourEntry";Layout.fillWidth:true;text:tools.foreground;placeholderText:"Default or #RRGGBB";Accessible.name:"Text colour hex value";validator:RegularExpressionValidator {regularExpression:/#[0-9a-fA-F]{6}/} onTextEdited:tools.foreground=text}
+                    Button {text:"Choose…";Accessible.name:"Choose text colour";onClicked:{tools.pickingBackground=false;colour.selectedColor=tools.foreground || tools.gridModel.themeForeground;colour.open();}}
                 }
                 Label {text:"Cell colour"}
                 RowLayout {
-                    Button {text:tools.background || "Default";onClicked:{tools.pickingBackground=true;colour.selectedColor=tools.background || tools.gridModel.themeBackground;colour.open();}}
-                    Button {text:"Reset";onClicked:tools.background=""}
+                    TextField {objectName:"cellColourEntry";Layout.fillWidth:true;text:tools.background;placeholderText:"Default or #RRGGBB";Accessible.name:"Cell colour hex value";validator:RegularExpressionValidator {regularExpression:/#[0-9a-fA-F]{6}/} onTextEdited:tools.background=text}
+                    Button {text:"Choose…";Accessible.name:"Choose cell colour";onClicked:{tools.pickingBackground=true;colour.selectedColor=tools.background || tools.gridModel.themeBackground;colour.open();}}
                 }
             }
             CheckBox {id:wrap;text:"Wrap text"}
@@ -152,6 +160,9 @@ Item {
 
     Dialog {
         id:findDialog
+        objectName: "findDialog"
+        focus: true
+        onClosed: tools.finished()
         anchors.centerIn:parent
         title:"Find and replace"
         width:Math.min(650,tools.width-32)
@@ -172,12 +183,21 @@ Item {
             Label {Layout.fillWidth:true;wrapMode:Text.WordWrap;text:"Replacement changes text cells only; formulas keep their meaning."}
             Label {visible:!!tools.found.truncated;text:"Showing a bounded search. Refine the text for more specific results.";wrapMode:Text.WordWrap;Layout.fillWidth:true}
             ListView {
+                objectName: "findResults"
                 Layout.fillWidth:true
                 Layout.fillHeight:true
                 clip:true
+                activeFocusOnTab:true
+                keyNavigationEnabled:true
+                currentIndex:count>0 ? 0 : -1
+                Keys.onReturnPressed: {if(currentIndex>=0)tools.reveal(model[currentIndex]);}
+                Keys.onEnterPressed: {if(currentIndex>=0)tools.reveal(model[currentIndex]);}
                 model:tools.found.matches || []
                 delegate:ItemDelegate {
                     required property var modelData
+                    required property int index
+                    objectName: "findResult_"+index
+                    highlighted:ListView.isCurrentItem
                     width:ListView.view.width
                     text:modelData.a1+" · "+String(modelData.value.value === undefined ? "" : modelData.value.value)
                         +((tools.sheetView.hidden_rows || []).indexOf(modelData.row)>=0 ? " · Reveal and clear filter" : "")
@@ -189,6 +209,10 @@ Item {
 
     Dialog {
         id:sizeDialog
+        objectName: "sizeDialog"
+        onOpened: columnWidth.forceActiveFocus()
+        focus: true
+        onClosed: tools.finished()
         anchors.centerIn:parent
         title:"Selection dimensions"
         width:Math.min(430,tools.width-32)
@@ -204,6 +228,10 @@ Item {
 
     Dialog {
         id:sortDialog
+        objectName: "sortDialog"
+        onOpened: sortColumn.forceActiveFocus()
+        focus: true
+        onClosed: tools.finished()
         anchors.centerIn:parent
         width:Math.min(480,tools.width-32)
         title:"Sort selected rows"
@@ -220,6 +248,10 @@ Item {
 
     Dialog {
         id:conditionalDialog
+        objectName: "conditionalDialog"
+        onOpened: comparison.forceActiveFocus()
+        focus: true
+        onClosed: tools.finished()
         anchors.centerIn:parent
         width:Math.min(450,tools.width-32)
         title:"Highlight values"
@@ -235,6 +267,10 @@ Item {
 
     Dialog {
         id:chartDialog
+        objectName: "chartDialog"
+        onOpened: chartTitle.forceActiveFocus()
+        focus: true
+        onClosed: tools.finished()
         anchors.centerIn:parent
         width:Math.min(920,tools.width-32)
         height:Math.min(660,tools.height-32)
@@ -265,6 +301,9 @@ Item {
 
     Dialog {
         id:confirmDialog
+        objectName: "confirmDialog"
+        focus: true
+        onClosed: tools.finished()
         anchors.centerIn:parent
         width:Math.min(470,tools.width-32)
         modal:true

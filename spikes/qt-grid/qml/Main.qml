@@ -27,6 +27,7 @@ ApplicationWindow {
         blocked: keyboardHelp.visible || updatePrompt.visible || proposalReview.visible || spreadsheetTools.blocked
         finishEditing: () => grid.commitEdit()
         onExampleRequested: window.examplePending = true
+        onFinished: window.restoreAfterDialog()
     }
 
     SpreadsheetTools {
@@ -35,6 +36,7 @@ ApplicationWindow {
         gridModel: backend
         grid: grid
         finishEditing: () => grid.commitEdit()
+        onFinished: window.restoreAfterDialog()
     }
     GridMetrics {
         id: metrics
@@ -44,157 +46,54 @@ ApplicationWindow {
         defaultColumnWidth: window.cellWidth
         view: spreadsheetTools.sheetView
     }
-    Action {
-        id: undoAction
-        text: "Undo"
-        shortcut: StandardKey.Undo
-        enabled: backend.documentMode && fileActions.available && !grid.hasDraft
-        onTriggered: grid.undoSelection(false)
+    function restoreEditorFocus() {
+        if (backend.homeMode) newWorkbookButton.forceActiveFocus();
+        else if (formulaBar.editing) formulaBar.forceActiveFocus();
+        else if (editor.visible) editor.forceActiveFocus();
+        else body.forceActiveFocus();
     }
-    Action {
-        id: redoAction
-        text: "Redo"
-        shortcut: "Ctrl+Shift+Z"
-        enabled: undoAction.enabled
-        onTriggered: grid.undoSelection(true)
+    function restoreAfterDialog() {
+        Qt.callLater(() => {if(fileActions.available && !commandMenu.visible)restoreEditorFocus();});
     }
-    Action {
-        id: findAction
-        text: "Find and replace…"
-        shortcut: StandardKey.Find
-        enabled: backend.documentMode && fileActions.available
-        onTriggered: spreadsheetTools.showFind()
+    function toggleCommands() {
+        if(commandMenu.visible)commandMenu.close();
+        else if(fileActions.available)commandMenu.show(window.activeFocusItem);
     }
-    Action {
-        id: gotoAction
-        text: "Go to cell or range…"
-        shortcut: "Ctrl+G"
-        enabled: findAction.enabled
-        onTriggered: spreadsheetTools.enter("goto", "Go to cell or range", "")
+    CommandActions {
+        id: commands
+        gridModel: backend
+        grid: grid
+        tools: spreadsheetTools
+        files: fileActions
+        shortcutsEnabled: !commandMenu.visible
+        gridHasFocus: body.activeFocus
+        onReviewRequested: proposalReview.open()
+        onHelpRequested: keyboardHelp.open()
+        onUpdatesRequested: updatePrompt.open()
+        onCloseRequested: window.close()
     }
-
+    CommandMenu {
+        id: commandMenu
+        parent: Overlay.overlay
+        entries: commands.entries
+        backgroundColor: window.canvasColor
+        textColor: window.textColor
+        accentColor: window.accentColor
+        mutedColor: window.mutedColor
+        onCommandChosen: commandId => commands.trigger(commandId)
+    }
+    Shortcut {
+        sequences: ["Ctrl+Space", "Ctrl+Shift+P"]
+        enabled: !backend.busy && (commandMenu.visible || fileActions.available)
+        onActivated: window.toggleCommands()
+    }
     ProposalReview {
         id: proposalReview
         anchors.centerIn: parent
         gridModel: backend
         width: Math.min(1000, window.width - 32)
         height: Math.min(700, window.height - 32)
-    }
-
-    Action {
-        id: askAgentAction
-        text: "Ask Agent"
-        shortcut: "Ctrl+Shift+A"
-        enabled: backend.documentMode && !backend.homeMode && !backend.busy && fileActions.available
-        onTriggered: { if (grid.commitEdit()) backend.askAgent(grid.selectionRow, grid.selectionColumn, grid.selectionRows, grid.selectionColumns); }
-    }
-    Action {
-        id: reviewAction
-        text: "Review proposals…"
-        shortcut: "Ctrl+Shift+R"
-        enabled: askAgentAction.enabled
-        onTriggered: { if (grid.commitEdit()) proposalReview.open(); }
-    }
-
-    menuBar: MenuBar {
-        Menu {
-            title: "File"
-            MenuItem { action: fileActions.newAction }
-            MenuItem { action: fileActions.openAction }
-            MenuItem { action: fileActions.importAction }
-            MenuItem { action: fileActions.compatibilityAction }
-            MenuSeparator {}
-            MenuItem {
-                text: "Save cell draft"
-                enabled: !backend.homeMode && !backend.busy && fileActions.available
-                onTriggered: grid.commitEdit()
-            }
-            MenuItem { action: fileActions.xlsxAction }
-            MenuItem { action: fileActions.csvAction }
-            MenuItem { action: fileActions.parquetAction }
-            MenuSeparator {}
-            MenuItem { text: "Close window"; onTriggered: window.close() }
-        }
-        Menu {
-            title: "Edit"
-            MenuItem {action:undoAction}
-            MenuItem {action:redoAction}
-            MenuSeparator {}
-            MenuItem {text:"Copy selection";enabled:undoAction.enabled;onTriggered:grid.copySelection()}
-            MenuItem {text:"Paste";enabled:undoAction.enabled;onTriggered:grid.pasteSelection()}
-            MenuItem {text:"Fill down";enabled:findAction.enabled;onTriggered:spreadsheetTools.fill(false)}
-            MenuItem {text:"Fill right";enabled:findAction.enabled;onTriggered:spreadsheetTools.fill(true)}
-            MenuSeparator {}
-            MenuItem {action:findAction}
-            MenuItem {action:gotoAction}
-        }
-        Menu {
-            title: "Format"
-            enabled:findAction.enabled
-            MenuItem {text:"Format cells…";onTriggered:spreadsheetTools.showFormat()}
-            MenuItem {text:"Clear formatting";onTriggered:spreadsheetTools.run({action:"clear_format",range:spreadsheetTools.selection})}
-            MenuItem {text:"Edit note…";onTriggered:spreadsheetTools.showNote()}
-            MenuSeparator {}
-            MenuItem {text:"Dimensions…";onTriggered:spreadsheetTools.showDimensions()}
-            MenuItem {text:"Autofit selected columns";onTriggered:spreadsheetTools.run({action:"dimensions",range:spreadsheetTools.selection,autofit:true,width:null,height:null})}
-            MenuSeparator {}
-            MenuItem {text:"Merge selection";onTriggered:spreadsheetTools.run({action:"merge",range:spreadsheetTools.selection})}
-            MenuItem {text:"Unmerge selection";onTriggered:spreadsheetTools.run({action:"merge",range:spreadsheetTools.selection,unmerge:true})}
-        }
-        Menu {
-            title: "Data"
-            enabled:findAction.enabled
-            MenuItem {text:"Sort selected rows…";onTriggered:spreadsheetTools.showSort()}
-            MenuItem {text:"Filter selection by current cell";onTriggered:spreadsheetTools.filterCurrent()}
-            MenuItem {text:"Clear filter";enabled:!!spreadsheetTools.sheetView.filter_active;onTriggered:spreadsheetTools.run({action:"clear_filter"})}
-            MenuItem {text:"Remove duplicate rows…";onTriggered:spreadsheetTools.confirm({action:"deduplicate",range:spreadsheetTools.selection,header:true},"Remove duplicate rows?","Keeps the first selected row as a header and removes later duplicate rows, including their cells outside the selection.")}
-            MenuSeparator {}
-            MenuItem {text:"Highlight values…";onTriggered:spreadsheetTools.showConditional()}
-            MenuItem {text:"Clear conditional formatting";onTriggered:spreadsheetTools.run({action:"clear_conditional"})}
-            MenuItem {text:"Charts…";onTriggered:spreadsheetTools.showCharts()}
-        }
-        Menu {
-            title: "Sheet"
-            enabled:findAction.enabled
-            MenuItem {text:"Add sheet…";onTriggered:spreadsheetTools.enter("add_sheet","New sheet","")}
-            MenuItem {text:"Rename sheet…";onTriggered:spreadsheetTools.enter("rename_sheet","Rename sheet",backend.sheetName)}
-            MenuItem {text:"Duplicate sheet…";onTriggered:spreadsheetTools.enter("duplicate_sheet","Duplicate sheet",backend.sheetName+" copy")}
-            MenuItem {text:"Delete sheet…";onTriggered:spreadsheetTools.confirm({action:"delete_sheet"},"Delete sheet?","Delete “"+backend.sheetName+"” and all of its cells?")}
-            MenuSeparator {}
-            MenuItem {text:"Insert selected number of rows above";onTriggered:spreadsheetTools.run({action:"insert_rows",at:grid.selectionRow,count:grid.selectionRows})}
-            MenuItem {text:"Insert selected number of columns before";onTriggered:spreadsheetTools.run({action:"insert_columns",at:grid.selectionColumn,count:grid.selectionColumns})}
-            MenuItem {text:"Delete selected rows…";onTriggered:spreadsheetTools.confirm({action:"delete_rows",at:grid.selectionRow,count:grid.selectionRows},"Delete rows?","Delete "+grid.selectionRows+" entire rows starting at row "+(grid.selectionRow+1)+"?")}
-            MenuItem {text:"Delete selected columns…";onTriggered:spreadsheetTools.confirm({action:"delete_columns",at:grid.selectionColumn,count:grid.selectionColumns},"Delete columns?","Delete "+grid.selectionColumns+" entire columns starting at "+backend.columnLabel(grid.selectionColumn)+"?")}
-        }
-        Menu {
-            title: "View"
-            enabled:findAction.enabled
-            MenuItem {text:"Freeze top row";onTriggered:spreadsheetTools.run({action:"freeze",rows:1,columns:0})}
-            MenuItem {text:"Freeze first column";onTriggered:spreadsheetTools.run({action:"freeze",rows:0,columns:1})}
-            MenuItem {text:"Freeze above and before current cell";onTriggered:spreadsheetTools.run({action:"freeze",rows:grid.currentRow,columns:grid.currentColumn})}
-            MenuItem {text:"Unfreeze panes";onTriggered:spreadsheetTools.run({action:"freeze",rows:0,columns:0})}
-            MenuItem {text:spreadsheetTools.sheetView.show_grid_lines===false ? "Show gridlines" : "Hide gridlines";onTriggered:spreadsheetTools.run({action:"grid_lines",visible:spreadsheetTools.sheetView.show_grid_lines===false})}
-        }
-        Menu {
-            title: "Agent"
-            MenuItem { action: askAgentAction }
-            MenuItem { action: reviewAction }
-        }
-        Menu {
-            title: "Help"
-            MenuItem { action: fileActions.exampleAction }
-            MenuItem {
-                text: "Keyboard help (F1)"
-                enabled: !backend.busy
-                onTriggered: keyboardHelp.open()
-            }
-            MenuSeparator {}
-            MenuItem {
-                text: "Updates…"
-                enabled: fileActions.available
-                onTriggered: { if (backend.homeMode || grid.commitEdit()) updatePrompt.open(); }
-            }
-        }
+        onClosed: window.restoreAfterDialog()
     }
 
     Dialog {
@@ -202,6 +101,8 @@ ApplicationWindow {
         anchors.centerIn: parent
         title: "Update OmaSheets"
         modal: true
+        focus: true
+        onClosed: window.restoreAfterDialog()
         width: Math.min(480, window.width - 32)
         standardButtons: backend.packageManaged ? Dialog.Close : Dialog.Ok | Dialog.Cancel
         contentItem: Label {
@@ -224,18 +125,6 @@ ApplicationWindow {
         onSelectCell: (row, column) => grid.selectCell(row, column)
     }
 
-    Shortcut {
-        sequence: StandardKey.Save
-        enabled: fileActions.available && !backend.homeMode
-        onActivated: grid.commitEdit()
-    }
-
-    Shortcut {
-        sequence: "F1"
-        enabled: !keyboardHelp.visible && !backend.busy
-        onActivated: keyboardHelp.open()
-    }
-
     Dialog {
         id: keyboardHelp
         anchors.centerIn: parent
@@ -252,14 +141,7 @@ ApplicationWindow {
             onActivated: keyboardHelp.close()
         }
         onOpened: helpScroll.forceActiveFocus()
-        onClosed: {
-            if (backend.homeMode)
-                newWorkbookButton.forceActiveFocus();
-            else if (editor.visible)
-                editor.forceActiveFocus();
-            else
-                body.forceActiveFocus();
-        }
+        onClosed: window.restoreEditorFocus()
 
         contentItem: ScrollView {
             id: helpScroll
@@ -281,10 +163,27 @@ ApplicationWindow {
 
                 Repeater {
                     model: [
+                        { heading: "Commands", shortcuts: [
+                            ["Ctrl+Space / Ctrl+Shift+P", "Open the command menu"],
+                            ["Type to search", "Find a command across all categories"],
+                            ["↑ / ↓ / Tab / Shift+Tab", "Choose a menu item"],
+                            ["Enter / →", "Run a command or open a category"],
+                            ["← / Backspace", "Back to parent when search is empty"],
+                            ["Escape", "Clear search, then close and restore focus"]
+                        ] },
+                        { heading: "Format and organise", shortcuts: [
+                            ["Ctrl+B / Ctrl+I / Ctrl+U", "Bold / italic / underline"],
+                            ["Ctrl+1", "Format cells, including colours and number formats"],
+                            ["Ctrl+D / Ctrl+R", "Fill down / right"],
+                            ["Ctrl+F / Ctrl+G", "Find and replace / go to a cell or range"],
+                            ["Tab / Shift+Tab", "Move through dialog controls"],
+                            ["Space / Enter", "Toggle a control / activate a button"],
+                            ["Escape", "Cancel a dialog"]
+                        ] },
                         { heading: "Workbook", shortcuts: [
                             ["Ctrl+N", "Create a native workbook"],
                             ["Ctrl+O", "Open a native workbook"],
-                            ["File menu", "Import, open Excel / ODS, or export a copy"]
+                            ["Commands → Workbook", "Import, open Excel / ODS, or export a copy"]
                         ] },
                         { heading: "Move around", shortcuts: [
                             ["Arrow keys", "Move one cell"],
@@ -355,7 +254,7 @@ ApplicationWindow {
                 Label {
                     Layout.fillWidth: true
                     text: backend.homeMode
-                        ? "Create or open a workbook from the File menu to get started."
+                        ? "Press Ctrl+Space to create or open a workbook from the command menu."
                         : backend.documentMode
                         ? "Native document edits save when committed. Selection clipboard and undo shortcuts apply outside the cell editor."
                         : "Demo grid: edits are not saved. Selection clipboard and undo require a native document."
@@ -465,6 +364,7 @@ ApplicationWindow {
             Button { action: fileActions.openAction }
         }
         Button { action: fileActions.exampleAction }
+        Button {text:"Commands  Ctrl+Space";focusPolicy:Qt.NoFocus;onClicked:window.toggleCommands()}
         Label {
             text: "New here? Try a small budget, change a number, and watch the formulas update. A four-step guide shows you around. You choose where to save your practice workbook."
             color: window.mutedColor
@@ -554,7 +454,16 @@ ApplicationWindow {
 
                 Item { Layout.fillWidth: true }
 
+                Button {
+                    text: "Commands  Ctrl+Space"
+                    focusPolicy: Qt.NoFocus
+                    enabled: fileActions.available
+                    Accessible.name: "Spreadsheet commands (Control Space)"
+                    onClicked: window.toggleCommands()
+                }
+
                 Label {
+                    visible: window.width > 1000
                     text: (backend.documentMode ? "SAVED ON THIS COMPUTER" : "PRACTICE GRID")
                     textFormat: Text.PlainText
                     color: window.mutedColor
@@ -562,27 +471,6 @@ ApplicationWindow {
                     font.pixelSize: 10
                     font.letterSpacing: 1.2
                 }
-            }
-        }
-
-        ToolBar {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 36
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 8
-                anchors.rightMargin: 8
-                spacing: 4
-                ToolButton {text:"B";font.bold:true;checkable:true;checked:!!spreadsheetTools.style.bold;enabled:findAction.enabled;onClicked:spreadsheetTools.toggle("bold");ToolTip.text:"Bold";ToolTip.visible:hovered}
-                ToolButton {text:"I";font.italic:true;checkable:true;checked:!!spreadsheetTools.style.italic;enabled:findAction.enabled;onClicked:spreadsheetTools.toggle("italic");ToolTip.text:"Italic";ToolTip.visible:hovered}
-                ToolButton {text:"%";enabled:findAction.enabled;onClicked:spreadsheetTools.format({number_format:"0.0%"});ToolTip.text:"Percent format";ToolTip.visible:hovered}
-                ToolButton {text:"Format…";enabled:findAction.enabled;onClicked:spreadsheetTools.showFormat()}
-                ToolSeparator {}
-                ToolButton {text:"Find";action:findAction}
-                ToolButton {text:"Charts";enabled:findAction.enabled;onClicked:spreadsheetTools.showCharts()}
-                Item {Layout.fillWidth:true}
-                ToolButton {action:askAgentAction}
-                ToolButton {text:"Review";action:reviewAction}
             }
         }
 
@@ -629,6 +517,7 @@ ApplicationWindow {
 
                 TextField {
                     id: formulaBar
+                    objectName: "formulaBar"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     leftPadding: 6
@@ -959,6 +848,7 @@ ApplicationWindow {
 
             Flickable {
                 id: body
+                objectName: "gridBody"
 
                 x: window.rowHeaderWidth
                 y: window.columnHeaderHeight
@@ -1075,6 +965,7 @@ ApplicationWindow {
 
                     TextField {
                         id: editor
+                        objectName: "cellEditor"
 
                         property var merge: metrics.mergeAt(grid.currentRow,grid.currentColumn)
                         x: metrics.screenColumn(grid.currentColumn,body.contentX)+body.contentX
@@ -1331,7 +1222,7 @@ ApplicationWindow {
                 text: "F1 Help"
                 focusPolicy: Qt.NoFocus
                 Accessible.name: "Keyboard help (F1)"
-                onClicked: keyboardHelp.open()
+                onClicked: {if(fileActions.available)keyboardHelp.open();}
             }
         }
     }
@@ -1357,6 +1248,12 @@ ApplicationWindow {
             grid.selectCell(2,1);
             if (backend.capturePanel === "format") spreadsheetTools.showFormat();
             if (backend.capturePanel === "charts") spreadsheetTools.showCharts();
+            if (backend.capturePanel === "commands" || backend.capturePanel === "command-search") {
+                Qt.callLater(() => {
+                    commandMenu.show(body);
+                    if(backend.capturePanel === "command-search")commandMenu.query="format";
+                });
+            }
         }
         else if (backend.capturePath.length > 0 && backend.documentMode) window.tourVisible = true;
         if (backend.homeMode) newWorkbookButton.forceActiveFocus();

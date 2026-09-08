@@ -80,3 +80,13 @@ The supported limits and intentional refusals are documented in
 [NATIVE-SPREADSHEET-SUPPORT.md](NATIVE-SPREADSHEET-SUPPORT.md). The native window
 and dialogs are captured for owner taste review. Release, merge, larger-corpus
 scoring and target-hardware acceptance remain separate decisions/evidence.
+
+## Keyboard menu follow-up — 8 September 2026
+
+Tom accepted the compact controls, then requested Omarchy's Super+Space menu
+interaction for the spreadsheet tools. `codex/keyboard-command-menu` replaces
+the toolbar and menu bar with a searchable hierarchy, uses Ctrl+Space inside
+the application, and preserves Super+Space for the desktop. One command
+catalogue supplies both menu actions and direct shortcuts. Dialog focus,
+keyboard search results and exact colour entry complete the keyboard path;
+Qt key-event tests cover draft recovery and modal boundaries.

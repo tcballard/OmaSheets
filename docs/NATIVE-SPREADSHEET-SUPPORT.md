@@ -6,10 +6,26 @@ row/column editing, sorting, filters, duplicate removal, notes, conditional
 highlights and bar/line/pie charts. Presentation is saved in native events and
 replayed with stable row and column identities.
 
-The toolbar keeps frequent actions visible; the Edit, Format, Data, Sheet,
-View and Agent menus contain the full supported command set. The window uses
-the existing Omarchy palette. Control density and proposal presentation are
-ready for owner taste review after the captured Qt workflow passes.
+Press **Ctrl+Space** (or **Ctrl+Shift+P**) to open the command menu. It replaces
+the toolbar and menu bar, with Workbook, Edit, Format, Data, Sheet, View, Agent
+and Help categories. Type to search all commands from the root, or search
+within a category. A single Commands button also opens it with a pointer.
+
+The interaction follows [Omarchy's menu](https://github.com/omacom/omarchy/blob/148945000fa5bea240864fde9ab551df49f16da6/shell/plugins/menu/Menu.qml):
+arrows or Tab/Shift+Tab navigate, Enter chooses, and Right enters a category.
+Left or Backspace returns to the parent when the search is empty. Escape
+clears the search, then closes the menu; the opening shortcut also closes it.
+Unavailable commands are dimmed in categories and omitted from search.
+Super+Space remains the desktop's Omarchy menu shortcut.
+
+Direct shortcuts include Ctrl+B/I/U for bold/italic/underline, Ctrl+1 for
+formatting, Ctrl+D/R for fill down/right, Ctrl+F for find/replace and Ctrl+G
+for a cell or range. Existing workbook, clipboard, undo and agent shortcuts
+remain available. The menu displays shortcuts and F1 opens the complete guide.
+Dialogs use Tab/Shift+Tab, Space, Enter and Escape, including find results and
+exact colour entry. Opening and cancelling the menu preserves the active
+editor and draft; running a command retains the existing failed-save and
+confirmation checks. No shell commands are taken from search text.
 
 ## Interchange
 
@@ -80,6 +96,14 @@ bundles and Arch package workflows. Container and CI results are wiring and
 regression evidence; no Dell or Omarchy hardware acceptance is claimed. No
 larger corpus has been rescored here, so this change claims no aggregate corpus
 delta. The existing observed/loaded/compared denominator remains explicit.
+
+`spikes/qt-grid/tests/qml` exercises the production QML with Qt Quick Test and
+an in-memory service-boundary fixture. It sends real key events through search,
+category navigation, shortcuts, modal dialogs, cancellation and failed writes.
+Run it with `qmltestrunner -input spikes/qt-grid/tests/qml -import
+spikes/qt-grid/tests/qml/mocks` in a graphical session (or under `xvfb-run`).
+The installed application is also captured with the command menu and search
+results open. These checks complement the real service workflows above.
 
 ### Recorded calculation fixtures
 

@@ -18,7 +18,8 @@ what cannot be preserved; it does not promise full Excel fidelity.
 **Open OmaSheets:** after installing a matching current build, choose OmaSheets
 from the app launcher or run `omasheets`. Create a workbook with **Ctrl+N**,
 open one with **Ctrl+O**, and press **F1** for the keyboard guide. Native edits
-save when you finish each cell; the File menu offers import and export.
+save when you finish each cell. **Ctrl+Space** opens the searchable command
+menu for formatting, sheets, data tools, import and export.
 Use **Agent → Ask Agent** (Ctrl+Shift+A) to propose changes and **Review
 proposals** (Ctrl+Shift+R) to inspect cell edits, calculated results and checks
 before approving or rejecting.
@@ -135,7 +136,7 @@ The real Omarchy, Wayland and LibreOffice release pass remains in
 New, Open, Import Excel and compatibility-window actions. New workbooks start
 with one sheet, 1,000 rows and 26 columns, at the filename you choose. Enter,
 Tab or Ctrl+S commits a cell draft; Escape cancels it. Close and reopen the
-`.omasheets` file to continue working. File → Export writes a new XLSX workbook
+`.omasheets` file to continue working. Commands → Workbook → Export writes a new XLSX workbook
 or the current sheet as CSV or Parquet and displays the conversion report.
 Creation and export refuse to overwrite existing files.
 
