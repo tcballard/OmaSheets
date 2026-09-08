@@ -1548,6 +1548,10 @@ impl Document {
         self.tables.get(&table)
     }
 
+    pub fn proposals(&self) -> &BTreeMap<ProposalId, ProposalRecord> {
+        &self.proposals
+    }
+
     pub fn proposal(&self, proposal: ProposalId) -> Option<&ProposalRecord> {
         self.proposals.get(&proposal)
     }

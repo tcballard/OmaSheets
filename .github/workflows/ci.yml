@@ -377,6 +377,16 @@ jobs:
             xvfb-run -a timeout 20 spikes/qt-grid/target/release/omasheets-grid
           test -s "$evidence/welcome.png"
           test -s "$evidence/guide.png"
+          agent_document="$evidence/agent-review.omasheets"
+          PYTHONPATH=src XDG_RUNTIME_DIR="$runtime" python scripts/check_native_agent_install.py \
+            --service target/release/omasheets-service --document "$agent_document" \
+            > "$evidence/agent-workflow.json"
+          review_branch=$(python -c 'import json,sys; print(json.load(sys.stdin)["review_branch"])' < "$evidence/agent-workflow.json")
+          env XDG_CONFIG_HOME="$theme_config" XDG_RUNTIME_DIR="$runtime" \
+            OMASHEETS_DOCUMENT="$agent_document" OMASHEETS_UI_CAPTURE="$evidence/agent-review.png" \
+            OMASHEETS_UI_CAPTURE_REVIEW="$review_branch" \
+            xvfb-run -a timeout 30 spikes/qt-grid/target/release/omasheets-grid
+          test -s "$evidence/agent-review.png"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ always() }}
         with:

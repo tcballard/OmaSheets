@@ -23,9 +23,32 @@ ApplicationWindow {
         id: fileActions
         anchors.fill: parent
         gridModel: backend
-        blocked: keyboardHelp.visible || updatePrompt.visible
+        blocked: keyboardHelp.visible || updatePrompt.visible || proposalReview.visible
         finishEditing: () => grid.commitEdit()
         onExampleRequested: window.examplePending = true
+    }
+
+    ProposalReview {
+        id: proposalReview
+        anchors.centerIn: parent
+        gridModel: backend
+        width: Math.min(1000, window.width - 32)
+        height: Math.min(700, window.height - 32)
+    }
+
+    Action {
+        id: askAgentAction
+        text: "Ask Agent"
+        shortcut: "Ctrl+Shift+A"
+        enabled: backend.documentMode && !backend.homeMode && !backend.busy && fileActions.available
+        onTriggered: { if (grid.commitEdit()) backend.askAgent(grid.selectionRow, grid.selectionColumn, grid.selectionRows, grid.selectionColumns); }
+    }
+    Action {
+        id: reviewAction
+        text: "Review proposals…"
+        shortcut: "Ctrl+Shift+R"
+        enabled: askAgentAction.enabled
+        onTriggered: { if (grid.commitEdit()) proposalReview.open(); }
     }
 
     menuBar: MenuBar {
@@ -46,6 +69,11 @@ ApplicationWindow {
             MenuItem { action: fileActions.parquetAction }
             MenuSeparator {}
             MenuItem { text: "Close window"; onTriggered: window.close() }
+        }
+        Menu {
+            title: "Agent"
+            MenuItem { action: askAgentAction }
+            MenuItem { action: reviewAction }
         }
         Menu {
             title: "Help"
@@ -1085,13 +1113,15 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
-        if (backend.capturePath.length > 0 && backend.documentMode) window.tourVisible = true;
+        if (backend.captureReview.length > 0) proposalReview.open();
+        else if (backend.capturePath.length > 0 && backend.documentMode) window.tourVisible = true;
         if (backend.homeMode) newWorkbookButton.forceActiveFocus();
         else body.forceActiveFocus();
     }
     Timer {
         interval: 1200
-        running: backend.capturePath.length > 0
+        running: backend.capturePath.length > 0 && !backend.busy
+            && (backend.captureReview.length === 0 || backend.reviewJson.length > 0)
         onTriggered: {
             const target = backend.homeMode ? welcomePane : firstSteps;
             if (!target.grabToImage(result => {

@@ -9,7 +9,8 @@ a Rust formula engine and replayable edit history, with branches for proposed
 work and checks before a human-approved merge.
 
 **Development preview:** native `.omasheets` documents support keyboard editing,
-range copy/paste with relative formulas, undo/redo, bounded XLSX import, and
+range copy/paste with relative formulas, undo/redo, selection-aware Ask Agent,
+native proposal review, bounded XLSX import, and
 CSV, XLSX and Parquet export. Existing Excel and OpenDocument workbooks use the
 separate LibreOfficeKit compatibility window. Native import/export reports
 what cannot be preserved; it does not promise full Excel fidelity.
@@ -18,6 +19,9 @@ what cannot be preserved; it does not promise full Excel fidelity.
 from the app launcher or run `omasheets`. Create a workbook with **Ctrl+N**,
 open one with **Ctrl+O**, and press **F1** for the keyboard guide. Native edits
 save when you finish each cell; the File menu offers import and export.
+Use **Agent → Ask Agent** (Ctrl+Shift+A) to propose changes and **Review
+proposals** (Ctrl+Shift+R) to inspect cell edits, calculated results and checks
+before approving or rejecting.
 [Install the Arch package](INSTALL.md) and choose **Try an example** for a guided first workbook.
 Published development builds need no GitHub login or local compiler; the
 published v0.0.2 release remains the older compatibility baseline.

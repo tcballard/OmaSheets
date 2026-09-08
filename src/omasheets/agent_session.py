@@ -30,6 +30,8 @@ def launch_agent_session(
     omarchy = which("omarchy")
     if not omarchy:
         raise EngineError("Omarchy's default-agent launcher is unavailable")
+    from .native_agent import clear
+    clear()
     process = launcher(
         [omarchy, "agent", "prompt", AGENT_SESSION_PROMPT],
         close_fds=True,
