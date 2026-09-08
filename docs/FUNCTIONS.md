@@ -1,7 +1,7 @@
 # Supported formula functions
 
 The owned M0 engine (`crates/omasheets-calc`) accepts exactly the
-104 function names listed below, grouped for reading.
+110 function names listed below, grouped for reading.
 A test in the calc crate fails when this file and the registry disagree, so
 the count here is never edited by hand: add the function to the registry and
 regenerate this list.
@@ -44,6 +44,27 @@ Approximate lookups (`VLOOKUP`/`HLOOKUP` without `FALSE`, `MATCH` types 1 and
 unsorted keys are undefined in Excel and are not promised here.
 
 ## Registry
+
+### Matrices and databases
+
+- `TRANSPOSE`
+- `MMULT`
+- `DAVERAGE`
+- `DMAX`
+- `DMIN`
+- `DSTDEV`
+
+`TRANSPOSE` and `MMULT` produce bounded arrays consumed by aggregates and
+lookups; scalar uses take the first element. MMULT requires numeric, nonblank
+inputs with matching inner dimensions, at most 1,000,000 output values and
+50,000,000 multiply-add terms. Larger products return `#NUM!`.
+
+Database aggregates resolve fields by heading or one-based column number.
+Criteria columns on one row are ANDed; rows are ORed. Duplicate headings,
+blank criteria, text prefixes, wildcards and comparison operators are supported.
+At most 50,000,000 candidate/criterion comparisons are allowed per call.
+Formula criteria with nonmatching/blank headings are not implemented and return
+`#VALUE!`; they require relative formula evaluation for each database record.
 
 ### Aggregates and statistics
 

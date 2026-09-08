@@ -7,6 +7,8 @@
 //! Dates are Excel 1900-system serial numbers; see [`serial_date`] for the
 //! boundary rules and the deliberately unsupported cases.
 
+mod database;
+mod matrix;
 mod reference;
 pub mod serial_date;
 
@@ -301,6 +303,12 @@ enum BinaryOp {
 enum Function {
     /// Internal reference operator; deliberately absent from the function registry.
     ReferenceSpan,
+    Transpose,
+    MMult,
+    DAverage,
+    DMax,
+    DMin,
+    DStDev,
     Sum,
     Average,
     Min,
@@ -1456,6 +1464,20 @@ impl Workbook {
     }
 
     fn evaluate_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+        if matches!(function, Function::Transpose | Function::MMult) {
+            return match self.matrix_array(function, arguments) {
+                Ok(array) => array.values.into_iter().next().unwrap_or(Value::Blank),
+                Err(error) => Value::Error(error),
+            };
+        }
+        if matches!(
+            function,
+            Function::DAverage | Function::DMax | Function::DMin | Function::DStDev
+        ) {
+            return self
+                .database_aggregate(function, arguments)
+                .unwrap_or_else(Value::Error);
+        }
         if function == Function::ReferenceSpan {
             return match self.reference_span(arguments) {
                 Ok(reference) => reference.scalar(self),
@@ -1806,6 +1828,12 @@ impl Workbook {
             | Function::HLookup
             | Function::Row
             | Function::Column
+            | Function::Transpose
+            | Function::MMult
+            | Function::DAverage
+            | Function::DMax
+            | Function::DMin
+            | Function::DStDev
             | Function::ReferenceSpan => Value::Error(CalcError::InvalidArguments),
         }
     }
@@ -2414,6 +2442,9 @@ impl Workbook {
     fn evaluate_array(&self, expression: &Expr<usize>) -> Result<ArrayValue, CalcError> {
         match expression {
             Expr::Array(array) => Ok(array.clone()),
+            Expr::Function(function @ (Function::Transpose | Function::MMult), arguments) => {
+                self.matrix_array(*function, arguments)
+            }
             Expr::Function(Function::Index, arguments) => self.index_array(arguments),
             Expr::Function(Function::ReferenceSpan, arguments) => self
                 .reference_span(arguments)
@@ -2861,6 +2892,9 @@ impl<'a> ArrayInput<'a> {
                 columns: *columns,
             }),
             Expr::Array(array) => Ok(Self::Constant(array)),
+            Expr::Function(Function::Transpose | Function::MMult, _) => {
+                workbook.evaluate_array(expression).map(Self::Computed)
+            }
             Expr::Reference(_) | Expr::Function(Function::ReferenceSpan, _) => {
                 workbook.reference_view(expression).map(Self::Selection)
             }
@@ -2947,7 +2981,10 @@ fn contains_array_operand(expression: &Expr<usize>) -> bool {
     match expression {
         Expr::RangeNode { .. }
         | Expr::Array(_)
-        | Expr::Function(Function::Index | Function::ReferenceSpan, _) => true,
+        | Expr::Function(
+            Function::Index | Function::ReferenceSpan | Function::Transpose | Function::MMult,
+            _,
+        ) => true,
         Expr::UnaryMinus(inner) | Expr::Percent(inner) => contains_array_operand(inner),
         Expr::Binary(_, left, right) => {
             contains_array_operand(left) || contains_array_operand(right)
@@ -4717,6 +4754,12 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
 /// [`supported_function_names`] both read it, and a test keeps
 /// `docs/FUNCTIONS.md` in step with it so documented counts cannot drift.
 const FUNCTION_REGISTRY: &[(&str, Function)] = &[
+    ("TRANSPOSE", Function::Transpose),
+    ("MMULT", Function::MMult),
+    ("DAVERAGE", Function::DAverage),
+    ("DMAX", Function::DMax),
+    ("DMIN", Function::DMin),
+    ("DSTDEV", Function::DStDev),
     ("SUM", Function::Sum),
     ("AVERAGE", Function::Average),
     ("MIN", Function::Min),
