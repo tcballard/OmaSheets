@@ -111,6 +111,9 @@ pub struct ScoreReport {
     pub unsupported_functions: BTreeMap<String, usize>,
     /// Compile-failure kinds and how many formula cells hit each.
     pub unsupported_reasons: BTreeMap<String, usize>,
+    /// Syntax failures grouped by a fixed token class, never formula text.
+    #[serde(default)]
+    pub syntax_failure_tokens: BTreeMap<String, usize>,
     /// Sheet entries without a worksheet part that the importer skipped.
     #[serde(default)]
     pub skipped_sheets: Vec<String>,
@@ -214,6 +217,38 @@ impl ImportedWorkbook {
 
     pub fn report(&self) -> ScoreReport {
         let parity = self.parity();
+        let mut syntax_failure_tokens = BTreeMap::new();
+        for failure in &self.unsupported {
+            let FormulaError::UnexpectedToken(offset) = failure.error else {
+                continue;
+            };
+            let Ok(index) = self
+                .source_cells
+                .binary_search_by_key(&failure.cell, |cell| cell.cell)
+            else {
+                continue;
+            };
+            let Some(source) = self.source_cells[index].formula.as_deref() else {
+                continue;
+            };
+            let source = source.strip_prefix('=').unwrap_or(source);
+            let token = match source.as_bytes().get(offset) {
+                Some(b'{') | Some(b'}') => "array_brace",
+                Some(b':') => "range_colon",
+                Some(b',') => "comma",
+                Some(b';') => "semicolon",
+                Some(b'!') => "sheet_separator",
+                Some(b'[') | Some(b']') => "square_bracket",
+                Some(b'@') => "implicit_intersection",
+                Some(b'\\') => "backslash_identifier",
+                Some(b'(') | Some(b')') => "parenthesis",
+                Some(byte) if !byte.is_ascii() => "non_ascii_identifier",
+                Some(byte) if byte.is_ascii_alphabetic() => "identifier",
+                None => "end_of_formula",
+                _ => "other",
+            };
+            *syntax_failure_tokens.entry(token.to_string()).or_insert(0) += 1;
+        }
         ScoreReport {
             schema: 2,
             engine: ENGINE_NAME.into(),
@@ -228,6 +263,7 @@ impl ImportedWorkbook {
             unsupported_formulas: parity.unsupported_formulas,
             unsupported_functions: self.unsupported_functions(),
             unsupported_reasons: self.unsupported_reasons(),
+            syntax_failure_tokens,
             skipped_sheets: self.skipped_sheets.clone(),
         }
     }

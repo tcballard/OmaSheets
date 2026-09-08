@@ -124,6 +124,14 @@ access terms. See `corpus/sources/README.md` for what is registered.
 
 ## Corpus policy
 
+The **Frozen formula corpus** Actions workflow scores a baseline and candidate
+sequentially on the same hosted runner, using the registered archive and the
+unchanged 1,000-workbook manifest. Run it manually with a baseline revision;
+changes to the workflow itself also exercise it in a pull request. Only
+aggregate before/after summaries are uploaded. Syntax failures include a fixed
+token-class histogram to guide parser work without exposing formula contents.
+This is corpus compatibility evidence, not target-desktop performance evidence.
+
 - Record the upstream corpus name, retrieval date, license or access terms, and
   sampling method beside every frozen manifest.
 - Do not commit source workbooks, extracted cell contents, local paths, or model
