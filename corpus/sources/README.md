@@ -28,8 +28,44 @@ the frozen sample for the current engine (engine commit, wall time,
 process-tree peak memory, both lane summaries, the owned lane's
 unsupported-function distribution and the failure kinds), and
 `enron-figshare.score-delta.json` records the owned lane against the
-baseline engine that first scored the sample. Both are aggregate only. Scored
-on 2026-09-01 on a 4-vCPU Linux container:
+baseline engine named in that delta. Both are aggregate only; the JSON records
+the exact engine revisions and runners.
+
+The latest comparison was scored on 2026-09-08, sequentially on one GitHub
+`ubuntu-latest` runner with separate build directories. Both revisions used
+the same frozen 1,000-workbook manifest and exposed 924,235 formula cells.
+[Workflow evidence](https://github.com/tcballard/OmaSheets/actions/runs/34254502652).
+
+| Owned engine lane | Baseline (`ecf0036`) | Formula coverage (`12d1c8c`) |
+|---|---:|---:|
+| Workbooks opened | 996 / 1,000 | 996 / 1,000 |
+| Formula cells observed | 924,235 | 924,235 |
+| Loaded and compared | 825,016 (89.26%) | 829,529 (89.75%) |
+| Stored values matched | 823,932 | 828,437 |
+| Match rate of compared | 99.87% | 99.87% |
+| Stored values mismatched | 1,084 | 1,092 |
+| Not compiled | 99,219 | 94,706 |
+
+This adds 4,513 compiled formulas and 4,505 stored-value matches without
+changing the sample, comparison tolerance or denominator. The eight additional
+mismatches remain visible. The aggregate cannot attribute them to individual
+formulas or establish that every previously matched cell is unchanged.
+
+Parser work also reveals later failures: the 10,791 syntax classifications
+are gone, while invalid references rise from 4,260 to 10,551 and unsupported
+function classifications rise from 26,617 to 28,967. `OFFSET` now accounts for
+3,619 first failures; previously some of these stopped at a syntax or name
+error. A lower count in an early failure class does not mean every affected
+formula now compiles.
+
+The remaining first-failure groups are 47,007 external workbook references,
+28,967 unsupported functions, 10,551 invalid references, 5,767 unsupported
+name definitions, 2,292 cycles and 122 unknown names. Within unsupported
+functions, 21,737 cells call proprietary add-ins. Ordinary gaps include
+`OFFSET`, locale-sensitive `DATEVALUE`, volatile functions and `INDIRECT`.
+External/add-in execution and hidden clock or random state remain refused.
+These are compatibility measurements, not target-desktop performance claims.
+
 
 Generate both files from a measured schema-2 scorer report with
 `scripts/update_corpus_summary.py`. The command validates the manifest digest,
@@ -48,6 +84,12 @@ python scripts/update_corpus_summary.py \
   --delta corpus/sources/enron-figshare.score-delta.json \
   --runner "linux x86_64, eight-core baseline, cold run"
 ```
+
+### Historical comparison
+
+The following 2026-09-01 run predates importer fixes that exposed additional
+formula cells. Its smaller denominator makes the raw rate unsuitable for a
+direct comparison with the current table.
 
 | Owned M0 engine lane | Baseline (`08f38d1`) | After formula gaps (`0eccaff`) |
 |---|---|---|

@@ -1,53 +1,64 @@
 {
-  "schema": 1,
-  "source": "enron-figshare",
+  "candidate_engine": "formualizer-calamine-0.8.4",
+  "candidate_failure_kinds": {
+    "chartsheet_instead_of_worksheet": 39,
+    "memory_allocation_failed": 2,
+    "other": 2,
+    "relationship_not_found": 24,
+    "undefined_name_or_formula_parse": 99
+  },
+  "candidate_summary": {
+    "failed": 166,
+    "files": 1000,
+    "formula_cells_loaded": 419854,
+    "formula_cells_observed": 419854,
+    "formula_parse_rate": 1,
+    "peak_rss_bytes_max": 154779648,
+    "succeeded": 834,
+    "timed_out": 0,
+    "value_cells_observed": 3843371
+  },
+  "command": "omasheets-corpus score enron-figshare.jsonl <root> <out> --timeout-seconds 30",
+  "engine_commit": "12d1c8c69522ee7ee81ce3d7090a1bba60cd2ac5",
   "manifest": "enron-figshare.jsonl",
   "manifest_sha256": "2f5ea94c02ae3779206d6ca1b1da9e77002450bc070fa968ca566cfd526ff80d",
-  "scored": "2026-09-02",
-  "command": "omasheets-corpus score corpus/sources/enron-figshare.jsonl <root> <out> --timeout-seconds 30",
-  "engine_commit": "71f21c5e285c7ec98543b498088c17ee648ef858",
-  "runner": "linux x86_64 container, 4 vCPU",
-  "wall_seconds": 208.0,
-  "process_tree_peak_rss_bytes": 1544372224,
-  "candidate_engine": "formualizer-calamine-0.8.4",
-  "candidate_summary": {
-    "files": 1000,
-    "succeeded": 834,
-    "failed": 166,
-    "timed_out": 0,
-    "value_cells_observed": 3843371,
-    "formula_cells_observed": 419854,
-    "formula_cells_loaded": 419854,
-    "formula_parse_rate": 1.0,
-    "peak_rss_bytes_max": 160321536
-  },
+  "notes": [
+    "Aggregate only: no workbook paths, cell contents or per-file results are recorded here.",
+    "Baseline and candidate scored sequentially in isolated build directories on the same GitHub runner; unchanged frozen 1,000-workbook manifest.",
+    "Workflow evidence: https://github.com/tcballard/OmaSheets/actions/runs/34254502652",
+    "Raw coverage retains external references, proprietary add-ins, cycles and unsupported formulas in the denominator."
+  ],
   "owned_engine": "omasheets-owned-m0",
+  "owned_failure_kinds": {
+    "cell_limit_2000000_exceeded": 2,
+    "date_system_1904_rejected": 2
+  },
   "owned_summary": {
-    "files": 1000,
-    "opened": 996,
+    "comparison_coverage": 0.8975303899982148,
     "failed": 4,
-    "timed_out": 0,
+    "files": 1000,
+    "formula_cells_compared": 829529,
+    "formula_cells_loaded": 829529,
     "formula_cells_observed": 924235,
-    "formula_cells_loaded": 825016,
-    "formula_cells_compared": 825016,
-    "stored_values_matched": 823932,
-    "stored_values_mismatched": 1084,
-    "unsupported_formulas": 99219,
-    "formula_parse_rate": 0.8926474327416728,
-    "comparison_coverage": 0.8926474327416728,
-    "stored_value_match_rate": 0.9986860860880273,
-    "unsupported_reasons": {
-      "cycle": 2286,
-      "external_reference": 47007,
-      "invalid_reference": 4260,
-      "syntax": 10791,
-      "unknown_name": 122,
-      "unsupported_function": 26617,
-      "unsupported_name": 8136
-    },
-    "workbooks_with_skipped_sheets": 23,
+    "formula_parse_rate": 0.8975303899982148,
+    "opened": 996,
+    "peak_rss_bytes_max": 142831616,
     "skipped_sheets": 48,
-    "peak_rss_bytes_max": 116408320
+    "stored_value_match_rate": 0.9986835903265588,
+    "stored_values_matched": 828437,
+    "stored_values_mismatched": 1092,
+    "syntax_failure_tokens": {},
+    "timed_out": 0,
+    "unsupported_formulas": 94706,
+    "unsupported_reasons": {
+      "cycle": 2292,
+      "external_reference": 47007,
+      "invalid_reference": 10551,
+      "unknown_name": 122,
+      "unsupported_function": 28967,
+      "unsupported_name": 5767
+    },
+    "workbooks_with_skipped_sheets": 23
   },
   "owned_unsupported_functions": {
     "_XLL.HPVAL": {
@@ -62,6 +73,10 @@
       "formula_cells": 3642,
       "workbooks": 1
     },
+    "OFFSET": {
+      "formula_cells": 3619,
+      "workbooks": 10
+    },
     "_XLL.EURO": {
       "formula_cells": 2992,
       "workbooks": 2
@@ -73,10 +88,6 @@
     "DATEVALUE": {
       "formula_cells": 1412,
       "workbooks": 2
-    },
-    "OFFSET": {
-      "formula_cells": 1250,
-      "workbooks": 10
     },
     "CALCSKEW": {
       "formula_cells": 1177,
@@ -162,24 +173,8 @@
       "formula_cells": 10,
       "workbooks": 1
     },
-    "IRR": {
-      "formula_cells": 6,
-      "workbooks": 1
-    },
-    "PV": {
-      "formula_cells": 6,
-      "workbooks": 3
-    },
     "MMULT": {
       "formula_cells": 4,
-      "workbooks": 1
-    },
-    "NORMSDIST": {
-      "formula_cells": 4,
-      "workbooks": 1
-    },
-    "COVAR": {
-      "formula_cells": 3,
       "workbooks": 1
     },
     "_XLL.XASTRIP": {
@@ -195,28 +190,10 @@
       "workbooks": 1
     }
   },
-  "candidate_failure_kinds": {
-    "undefined_name_or_formula_parse": 99,
-    "chartsheet_instead_of_worksheet": 40,
-    "relationship_not_found": 24,
-    "memory_allocation_failed": 2,
-    "other": 1
-  },
-  "owned_failure_kinds": {
-    "date_system_1904_rejected": 2,
-    "cell_limit_2000000_exceeded": 2
-  },
-  "notes": [
-    "Aggregate only: no workbook paths, cell contents or per-file results are recorded here.",
-    "The owned importer opens 23 workbooks whose xl/workbook.xml lists veryHidden sheet entries with no worksheet part (converted legacy macro modules) by skipping those entries in an in-memory copy; the 48 skipped names are reported per workbook, never silently.",
-    "The four remaining owned-lane failures are two 1904-date-system workbooks, refused by decision (ADR-0004), and two workbooks over the 2,000,000-cell import bound.",
-    "external_reference counts formulas that reach into another workbook; the engine never evaluates them.",
-    "Ranges are shared graph nodes with membership decided by position, and imports load in bulk with one recalculation; the worst-workbook peak resident set fell from about 1 GB to about 110 MB and the two former 30 s timeouts import in well under 10 s.",
-    "Twelve functions the corpus used most without support (YEARFRAC, DAYS360, NETWORKDAYS, WORKDAY, LOOKUP, PMT, NPV, XNPV, XIRR, NORMDIST, AVERAGEA, CORREL) now evaluate; two workbooks whose defined names are literally #REF! now report #REF! where Excel had kept a stale cached value.",
-    "Mismatch round 1: tokens past the grid resolve as names, sheet-scoped names keep their scope, criteria follow Excel for spacing, wildcards, blanks, errors and mixed types, blank lookups never match blank cells, negative zero folds to zero, INDEX passes a failed MATCH through, lookups skip error cells, math domain errors are #NUM!, and shared formulas expand from their anchor cell; the eight worst-mismatch workbooks of the previous score now match Excel cell for cell apart from three macro-backed cells.",
-    "Mismatch round 2: numbers compare at 15 significant digits as in Excel, and range expressions inside aggregate arguments (SUM(IF(...)), SUM(A:A*B:B), SUMPRODUCT((...)*...)) evaluate elementwise with Excel's broadcasting.",
-    "Sheet-qualified #REF! tokens compile to the #REF! error value, which is what Excel stores for a deleted cell on another sheet.",
-    "Timing evidence in this entry comes from a restarted container that is about 35% slower than the one the previous entries ran on: the candidate lane, which this engine change does not touch, went from 44 s to 60 s of summed import time. Per-cell results are identical across two runs on the new container; compare cell counts across entries, not wall seconds.",
-    "See enron-figshare.score-delta.json for the change against the previous engine."
-  ]
+  "process_tree_peak_rss_bytes": 1493118976,
+  "runner": "GitHub ubuntu-latest x86_64; sequential baseline then candidate; hosted runner, not Omarchy hardware",
+  "schema": 1,
+  "scored": "2026-09-08",
+  "source": "enron-figshare",
+  "wall_seconds": 117.606367
 }
