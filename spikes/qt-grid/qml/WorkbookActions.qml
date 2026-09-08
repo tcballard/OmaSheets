@@ -15,6 +15,7 @@ Item {
     property alias compatibilityAction: compatibilityAction
     property alias exampleAction: exampleAction
     signal exampleRequested()
+    signal finished()
     property alias xlsxAction: xlsxAction
     property alias csvAction: csvAction
     property alias parquetAction: parquetAction
@@ -40,6 +41,7 @@ Item {
     }
     FileDialog {
         id: exampleFile
+        onVisibleChanged: {if(!visible)controls.finished();}
         title: "Save your practice workbook — choose a new filename"
         fileMode: FileDialog.SaveFile
         defaultSuffix: "omasheets"
@@ -50,14 +52,12 @@ Item {
     Action {
         id: newAction
         text: "New workbook…"
-        shortcut: StandardKey.New
         enabled: controls.available
         onTriggered: { if (controls.prepare()) newFile.open(); }
     }
     Action {
         id: openAction
         text: "Open workbook…"
-        shortcut: StandardKey.Open
         enabled: controls.available
         onTriggered: { if (controls.prepare()) openFile.open(); }
     }
@@ -94,6 +94,7 @@ Item {
 
     FileDialog {
         id: newFile
+        onVisibleChanged: {if(!visible)controls.finished();}
         title: "Create workbook — choose a new filename"
         fileMode: FileDialog.SaveFile
         defaultSuffix: "omasheets"
@@ -103,6 +104,7 @@ Item {
     }
     FileDialog {
         id: openFile
+        onVisibleChanged: {if(!visible)controls.finished();}
         title: "Open workbook"
         nameFilters: ["OmaSheets workbooks (*.omasheets)"]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
@@ -110,6 +112,7 @@ Item {
     }
     FileDialog {
         id: compatibilityFile
+        onVisibleChanged: {if(!visible)controls.finished();}
         title: "Open in the compatibility window"
         nameFilters: ["Excel and OpenDocument (*.xlsx *.xls *.xlsm *.ods)"]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
@@ -117,6 +120,8 @@ Item {
     }
     Dialog {
         id: importNotice
+        focus: true
+        onClosed: controls.finished()
         anchors.centerIn: parent
         title: "Import a native copy"
         modal: true
@@ -131,6 +136,7 @@ Item {
     }
     FileDialog {
         id: importFile
+        onVisibleChanged: {if(!visible)controls.finished();}
         title: "Choose Excel workbook to import"
         nameFilters: ["Excel workbooks (*.xlsx)"]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
@@ -138,6 +144,7 @@ Item {
     }
     FileDialog {
         id: importDestination
+        onVisibleChanged: {if(!visible)controls.finished();}
         title: "Save imported workbook — choose a new filename"
         fileMode: FileDialog.SaveFile
         defaultSuffix: "omasheets"
@@ -147,6 +154,7 @@ Item {
     }
     FileDialog {
         id: exportFile
+        onVisibleChanged: {if(!visible)controls.finished();}
         title: "Export a copy — choose a new filename"
         fileMode: FileDialog.SaveFile
         defaultSuffix: controls.exportFormat
@@ -156,6 +164,8 @@ Item {
     }
     Dialog {
         id: report
+        focus: true
+        onClosed: controls.finished()
         anchors.centerIn: parent
         title: "File operation"
         modal: true

@@ -13,7 +13,7 @@ Dialog {
     focus: true
     standardButtons: Dialog.Close
     closePolicy: gridModel.busy ? Popup.NoAutoClose : Popup.CloseOnEscape
-    onOpened: gridModel.listProposals()
+    onOpened: {gridModel.listProposals();proposals.forceActiveFocus();}
 
     function valueText(cell) {
         if (!cell || !cell.value || cell.value.type === "blank") return "(blank)";
@@ -69,6 +69,29 @@ Dialog {
         }
         ScrollView {
             id: scroll
+            objectName: "proposalDetails"
+            focusPolicy: Qt.StrongFocus
+            padding: 4
+            background: Rectangle {
+                color: "transparent"
+                border.width: scroll.activeFocus ? 1 : 0
+                border.color: dialog.palette.highlight
+            }
+            Keys.onPressed: event => {
+                const viewport=scroll.contentItem;
+                const maximum=Math.max(0,viewport.contentHeight-viewport.height);
+                const page=Math.max(1,viewport.height-24);
+                let next=viewport.contentY;
+                if(event.key===Qt.Key_Down)next+=40;
+                else if(event.key===Qt.Key_Up)next-=40;
+                else if(event.key===Qt.Key_PageDown)next+=page;
+                else if(event.key===Qt.Key_PageUp)next-=page;
+                else if(event.key===Qt.Key_Home)next=0;
+                else if(event.key===Qt.Key_End)next=maximum;
+                else return;
+                viewport.contentY=Math.max(0,Math.min(maximum,next));
+                event.accepted=true;
+            }
             Layout.fillWidth: true
             Layout.fillHeight: true
             contentWidth: availableWidth
