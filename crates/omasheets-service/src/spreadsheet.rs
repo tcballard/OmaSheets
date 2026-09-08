@@ -170,6 +170,7 @@ pub enum Action {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EditResult {
+    pub selected_sheet: String,
     pub revision: String,
     pub undo: Vec<Command>,
     pub redo: Vec<Command>,
@@ -260,6 +261,7 @@ pub fn edit(
     let mut commands = Vec::new();
     let mut undo = Vec::new();
     let mut structural = false;
+    let mut selected_sheet = sheet.to_string();
     let mut message = "Saved locally — Ctrl+Z to undo".to_string();
     let duplicate = matches!(&action, Action::DuplicateSheet { .. });
     match action {
@@ -385,6 +387,9 @@ pub fn edit(
             }
         }
         Action::Freeze { rows, columns } => {
+            if rows > 32 || columns > 8 {
+                return Err(invalid("Freeze up to 32 rows and 8 columns"));
+            }
             presentation.frozen_rows = rows;
             presentation.frozen_columns = columns;
         }
@@ -538,6 +543,7 @@ pub fn edit(
             else {
                 unreachable!()
             };
+            selected_sheet = destination.to_string();
             commands.push(add);
             let (rows, columns) = if duplicate {
                 (
@@ -650,6 +656,12 @@ pub fn edit(
             if document.sheets().len() <= 1 {
                 return Err(invalid("Keep at least one sheet in the workbook"));
             }
+            selected_sheet = document
+                .sheets()
+                .iter()
+                .find(|id| **id != sheet)
+                .expect("another sheet")
+                .to_string();
             commands.push(Command::DeleteSheet { sheet });
             structural = true;
         }
@@ -754,6 +766,7 @@ pub fn edit(
         message = "Saved locally. Structural changes start a new undo history.".into();
     }
     Ok(EditResult {
+        selected_sheet,
         revision: revision(store.document(main)?),
         undo,
         redo: commands,
@@ -1002,6 +1015,18 @@ pub fn find(document: &Document, sheet: SheetId, query: &str) -> Result<Value, S
 
 pub fn view(document: &Document, sheet: SheetId) -> Result<Value, ServiceError> {
     let presentation = document.presentation(sheet)?;
+    if presentation.row_heights.is_empty()
+        && presentation.column_widths.is_empty()
+        && presentation.merges.is_empty()
+        && presentation.filter.is_none()
+        && presentation.charts.is_empty()
+    {
+        return Ok(
+            json!({"row_heights":[],"column_widths":[],"merges":[],"frozen_rows":presentation.frozen_rows,
+            "frozen_columns":presentation.frozen_columns,"show_grid_lines":presentation.show_grid_lines,
+            "hidden_rows":[],"filter_active":false,"charts":[]}),
+        );
+    }
     let rows = document.rows(sheet).expect("sheet");
     let columns = document.columns(sheet).expect("sheet");
     let row_positions: BTreeMap<_, _> = rows

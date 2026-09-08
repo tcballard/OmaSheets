@@ -377,3 +377,38 @@ fn undisplayed_structural_changes_block_approval() {
             .contains(&"rename_sheet".into())
     );
 }
+
+#[test]
+fn distinct_proposals_at_the_same_main_head_have_distinct_identities() {
+    let mut f = Fixture::new();
+    let before = f.summary();
+    let first = f.propose();
+    let review = f.review(&first);
+    f.service
+        .handle(Request::RejectNative {
+            path: f.path.clone(),
+            source: first.clone(),
+            source_revision: review.source_revision,
+            reason: "Try a revised assumption".into(),
+        })
+        .unwrap();
+    f.reopen();
+    let mut proposal = f.proposal();
+    proposal.commands = vec![f.value("A1", 16.0)];
+    let Response::NativeProposed { branch: second } = f
+        .service
+        .handle(Request::ProposeNative {
+            path: f.path.clone(),
+            expected_revision: before.revision,
+            proposal,
+        })
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_ne!(first, second);
+    assert_eq!(f.summary().branches.len(), 3);
+    assert_eq!(f.summary().digest, before.digest);
+    assert!(f.review(&second).can_approve);
+    assert_eq!(f.review(&first).status, "rejected");
+}

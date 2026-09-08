@@ -20,6 +20,7 @@ pub mod qobject {
         #[qproperty(bool, document_mode, cxx_name = "documentMode")]
         #[qproperty(bool, home_mode, cxx_name = "homeMode")]
         #[qproperty(bool, busy, cxx_name = "busy")]
+        #[qproperty(QString, sheet_view_json, cxx_name = "sheetViewJson")]
         #[qproperty(QString, review_json, cxx_name = "reviewJson")]
         #[qproperty(QString, proposals_json, cxx_name = "proposalsJson")]
         #[qproperty(QString, capture_review, cxx_name = "captureReview")]
@@ -45,6 +46,33 @@ pub mod qobject {
         #[qproperty(QString, theme_blue, cxx_name = "themeBlue")]
         #[qproperty(QString, theme_magenta, cxx_name = "themeMagenta")]
         type GridModel = super::GridModelRust;
+
+        #[qinvokable]
+        #[cxx_name = "sheetAction"]
+        fn sheet_action(self: Pin<&mut Self>, action: &QString) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "inspectRange"]
+        fn inspect_range(self: Pin<&mut Self>, range: &QString) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "findSheet"]
+        fn find_sheet(self: Pin<&mut Self>, query: &QString) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "fillRange"]
+        fn fill_range(
+            self: Pin<&mut Self>,
+            row: i32,
+            column: i32,
+            rows: i32,
+            columns: i32,
+            right: bool,
+        ) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "cellPresentation"]
+        fn cell_presentation(&self, row: i32, column: i32) -> QString;
 
         #[qinvokable]
         #[cxx_name = "askAgent"]
@@ -128,7 +156,8 @@ pub mod qobject {
 
         #[qinvokable]
         #[cxx_name = "copyRange"]
-        fn copy_range(self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) -> bool;
+        fn copy_range(self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32)
+        -> bool;
 
         #[qinvokable]
         #[cxx_name = "pasteCells"]
@@ -140,7 +169,13 @@ pub mod qobject {
 
         #[qinvokable]
         #[cxx_name = "clearCells"]
-        fn clear_cells(self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) -> bool;
+        fn clear_cells(
+            self: Pin<&mut Self>,
+            row: i32,
+            column: i32,
+            rows: i32,
+            columns: i32,
+        ) -> bool;
 
         #[qinvokable]
         #[cxx_name = "refreshTheme"]
@@ -175,7 +210,8 @@ const ROWS: i32 = 1_000_000;
 const COLUMNS: i32 = 64;
 
 fn tour_marker() -> Option<PathBuf> {
-    let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from)
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
         .filter(|path| path.is_absolute())
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
     Some(config.join("omasheets/tour-seen"))
@@ -189,6 +225,7 @@ pub struct GridModelRust {
     document_mode: bool,
     home_mode: bool,
     busy: bool,
+    sheet_view_json: QString,
     review_json: QString,
     proposals_json: QString,
     capture_review: QString,
@@ -232,9 +269,10 @@ impl Default for GridModelRust {
             sheet_name,
             sheet_count,
             source_status,
-        ) = match requested.as_deref().map(|path| {
-            GridDocument::open(path, std::env::var("OMASHEETS_BRANCH").ok())
-        }) {
+        ) = match requested
+            .as_deref()
+            .map(|path| GridDocument::open(path, std::env::var("OMASHEETS_BRANCH").ok()))
+        {
             Some(Ok(document)) => {
                 let sheet = document
                     .current_sheet()
@@ -283,12 +321,37 @@ impl Default for GridModelRust {
                 && !std::env::args_os().any(|arg| arg == "--demo"),
             busy: false,
             tour_seen: tour_marker().is_some_and(|path| path.is_file()),
-            package_managed: std::env::current_exe().ok().and_then(|exe| exe.parent()?.parent().map(|app| app.join("package-manager"))).is_some_and(|marker| marker.is_file()),
+            package_managed: std::env::current_exe()
+                .ok()
+                .and_then(|exe| {
+                    exe.parent()?
+                        .parent()
+                        .map(|app| app.join("package-manager"))
+                })
+                .is_some_and(|marker| marker.is_file()),
+            sheet_view_json: document
+                .as_ref()
+                .and_then(|doc| doc.sheet_view().ok())
+                .unwrap_or(serde_json::json!({}))
+                .to_string()
+                .as_str()
+                .into(),
             review_json: QString::default(),
             proposals_json: "[]".into(),
-            capture_review: std::env::var("OMASHEETS_UI_CAPTURE_REVIEW").unwrap_or_default().as_str().into(),
-            capture_path: std::env::var("OMASHEETS_UI_CAPTURE").unwrap_or_default().as_str().into(),
-            document_path: requested.as_ref().map(|path| path.to_string_lossy().to_string()).unwrap_or_default().as_str().into(),
+            capture_review: std::env::var("OMASHEETS_UI_CAPTURE_REVIEW")
+                .unwrap_or_default()
+                .as_str()
+                .into(),
+            capture_path: std::env::var("OMASHEETS_UI_CAPTURE")
+                .unwrap_or_default()
+                .as_str()
+                .into(),
+            document_path: requested
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string())
+                .unwrap_or_default()
+                .as_str()
+                .into(),
             operation_message: QString::default(),
             document_generation: 0,
             document_name: document_name.as_str().into(),
@@ -320,78 +383,275 @@ impl qobject::GridModel {
         self.as_mut().set_tour_seen(true);
         if let Some(path) = tour_marker() {
             let result = (|| -> std::io::Result<()> {
-                if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
-                match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                match std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(path)
+                {
                     Ok(_) => Ok(()),
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
                     Err(error) => Err(error),
                 }
             })();
-            if let Err(error) = result { eprintln!("Could not remember tour preference: {error}"); }
+            if let Err(error) = result {
+                eprintln!("Could not remember tour preference: {error}");
+            }
         }
     }
 
     fn begin_file_action(mut self: Pin<&mut Self>) -> bool {
-        if self.busy { return false; }
+        if self.busy {
+            return false;
+        }
         self.as_mut().set_operation_message(QString::default());
         self.as_mut().set_busy(true);
         true
     }
 
-    fn load_workbook(mut self: Pin<&mut Self>, path: PathBuf,
-        prepare: impl FnOnce() -> Result<Option<String>, String> + Send + 'static) {
-        if !self.as_mut().begin_file_action() { return; }
+    fn load_workbook(
+        self: Pin<&mut Self>,
+        path: PathBuf,
+        prepare: impl FnOnce() -> Result<Option<String>, String> + Send + 'static,
+    ) {
+        self.load_workbook_in_sheet(path, None, prepare);
+    }
+
+    fn load_workbook_in_sheet(
+        mut self: Pin<&mut Self>,
+        path: PathBuf,
+        selected: Option<String>,
+        prepare: impl FnOnce() -> Result<Option<String>, String> + Send + 'static,
+    ) {
+        if !self.as_mut().begin_file_action() {
+            return;
+        }
         let thread = self.qt_thread();
         std::thread::spawn(move || {
-            let result = prepare().and_then(|report| GridDocument::open(&path, None).map(|document| (document, report)));
-            thread.queue(move |mut model| {
-                model.as_mut().set_busy(false);
-                match result {
-                    Ok((document, report)) => {
-                        let sheet = document.current_sheet().expect("opened document has a sheet");
-                        let count = document.sheets.len() as i32;
-                        let name = document.name.clone();
-                        model.as_mut().set_row_count(sheet.rows.min(i32::MAX as usize) as i32);
-                        model.as_mut().set_column_count(sheet.columns.min(i32::MAX as usize) as i32);
-                        model.as_mut().set_sheet_name(sheet.name.as_str().into());
-                        model.as_mut().set_sheet_count(count);
-                        model.as_mut().set_current_sheet(0);
-                        model.as_mut().set_document_name(name.as_str().into());
-                        model.as_mut().set_document_path(path.to_string_lossy().as_ref().into());
-                        model.as_mut().set_review_json(QString::default());
-                        model.as_mut().set_proposals_json("[]".into());
-                        model.as_mut().rust_mut().document = Some(document);
-                        model.as_mut().rust_mut().edits.clear();
-                        model.as_mut().set_document_mode(true);
-                        model.as_mut().set_home_mode(false);
-                        model.as_mut().set_source_status("Saved locally · Enter or Ctrl+S commits your cell draft".into());
-                        let generation = *model.document_generation();
-                        model.as_mut().set_document_generation(generation.wrapping_add(1));
-                        let revision = *model.revision();
-                        model.as_mut().set_revision(revision.wrapping_add(1));
-                        if let Some(report) = report { model.as_mut().set_operation_message(report.as_str().into()); }
-                    }
-                    Err(error) => model.as_mut().set_operation_message(error.as_str().into()),
+            let result = prepare().and_then(|report| {
+                let document = GridDocument::open(&path, None)?;
+                if let Some(selected) = selected
+                    && let Some(index) = document
+                        .sheets
+                        .iter()
+                        .position(|sheet| sheet.id == selected)
+                {
+                    document.select_sheet(index)?;
                 }
-            }).ok();
+                Ok((document, report))
+            });
+            thread
+                .queue(move |mut model| {
+                    model.as_mut().set_busy(false);
+                    match result {
+                        Ok((document, report)) => {
+                            let sheet = document
+                                .current_sheet()
+                                .expect("opened document has a sheet");
+                            let count = document.sheets.len() as i32;
+                            let name = document.name.clone();
+                            model
+                                .as_mut()
+                                .set_row_count(sheet.rows.min(i32::MAX as usize) as i32);
+                            model
+                                .as_mut()
+                                .set_column_count(sheet.columns.min(i32::MAX as usize) as i32);
+                            model.as_mut().set_sheet_name(sheet.name.as_str().into());
+                            model.as_mut().set_sheet_count(count);
+                            model
+                                .as_mut()
+                                .set_current_sheet(document.current_sheet_index() as i32);
+                            model.as_mut().set_document_name(name.as_str().into());
+                            model
+                                .as_mut()
+                                .set_document_path(path.to_string_lossy().as_ref().into());
+                            model.as_mut().set_review_json(QString::default());
+                            model.as_mut().set_proposals_json("[]".into());
+                            model.as_mut().rust_mut().document = Some(document);
+                            model.as_mut().refresh_sheet_view();
+                            model.as_mut().rust_mut().edits.clear();
+                            model.as_mut().set_document_mode(true);
+                            model.as_mut().set_home_mode(false);
+                            model.as_mut().set_source_status(
+                                "Saved locally · Enter or Ctrl+S commits your cell draft".into(),
+                            );
+                            let generation = *model.document_generation();
+                            model
+                                .as_mut()
+                                .set_document_generation(generation.wrapping_add(1));
+                            let revision = *model.revision();
+                            model.as_mut().set_revision(revision.wrapping_add(1));
+                            if let Some(report) = report {
+                                model.as_mut().set_operation_message(report.as_str().into());
+                            }
+                        }
+                        Err(error) => model.as_mut().set_operation_message(error.as_str().into()),
+                    }
+                })
+                .ok();
         });
+    }
+
+    fn refresh_sheet_view(mut self: Pin<&mut Self>) {
+        let view = self.document.as_ref().map(GridDocument::sheet_view);
+        match view {
+            Some(Ok(view)) => self
+                .as_mut()
+                .set_sheet_view_json(view.to_string().as_str().into()),
+            Some(Err(error)) => self.as_mut().set_source_status(error.as_str().into()),
+            None => self.as_mut().set_sheet_view_json("{}".into()),
+        }
+    }
+
+    pub fn sheet_action(mut self: Pin<&mut Self>, action: &QString) -> bool {
+        if self.busy {
+            return false;
+        }
+        let result = (|| -> Result<serde_json::Value, String> {
+            let action = serde_json::from_str(&action.to_string())
+                .map_err(|_| "Invalid spreadsheet action")?;
+            self.document
+                .as_ref()
+                .ok_or("Open a native workbook first")?
+                .sheet_action(action)
+        })();
+        match result {
+            Ok(result) => {
+                let message = result["message"]
+                    .as_str()
+                    .unwrap_or("Saved locally")
+                    .to_string();
+                if result["structural"] == true {
+                    let path = PathBuf::from(self.document_path.to_string());
+                    let selected = result["selected_sheet"].as_str().map(str::to_owned);
+                    self.load_workbook_in_sheet(path, selected, move || Ok(Some(message)));
+                    true
+                } else {
+                    self.as_mut().finish_change(Ok(()), &message)
+                }
+            }
+            Err(error) => {
+                self.as_mut().set_operation_message(error.as_str().into());
+                false
+            }
+        }
+    }
+
+    pub fn inspect_range(mut self: Pin<&mut Self>, range: &QString) -> QString {
+        let result = (|| -> Result<serde_json::Value, String> {
+            let range =
+                serde_json::from_str(&range.to_string()).map_err(|_| "Invalid selection")?;
+            self.document
+                .as_ref()
+                .ok_or("Open a native workbook first")?
+                .inspect_range(range)
+        })();
+        match result {
+            Ok(value) => value.to_string().as_str().into(),
+            Err(error) => {
+                self.as_mut().set_source_status(error.as_str().into());
+                "{}".into()
+            }
+        }
+    }
+
+    pub fn find_sheet(mut self: Pin<&mut Self>, query: &QString) -> QString {
+        let result = self
+            .document
+            .as_ref()
+            .ok_or_else(|| "Open a native workbook first".to_string())
+            .and_then(|document| document.find_sheet(&query.to_string()));
+        match result {
+            Ok(value) => value.to_string().as_str().into(),
+            Err(error) => {
+                self.as_mut().set_operation_message(error.as_str().into());
+                "{}".into()
+            }
+        }
+    }
+
+    pub fn fill_range(
+        mut self: Pin<&mut Self>,
+        row: i32,
+        column: i32,
+        rows: i32,
+        columns: i32,
+        right: bool,
+    ) -> bool {
+        let result = (|| -> Result<(), String> {
+            if row < 0 || column < 0 || rows <= 0 || columns <= 0 {
+                return Err("Select a valid fill range".into());
+            }
+            self.document
+                .as_ref()
+                .ok_or("Open a native workbook first")?
+                .fill_range(
+                    row as usize,
+                    column as usize,
+                    rows as usize,
+                    columns as usize,
+                    right,
+                )
+        })();
+        self.as_mut().finish_change(
+            result,
+            "Filled values and relative formulas — Ctrl+Z to undo",
+        )
+    }
+
+    pub fn cell_presentation(&self, row: i32, column: i32) -> QString {
+        if row < 0 || column < 0 {
+            return "{}".into();
+        }
+        self.document
+            .as_ref()
+            .and_then(|document| self.display_cell(document, row, column).ok())
+            .map(|cell| {
+                if cell.presentation.is_empty() {
+                    "{}".into()
+                } else {
+                    cell.presentation.as_str().into()
+                }
+            })
+            .unwrap_or_else(|| "{}".into())
     }
 
     pub fn ask_agent(mut self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) {
         let result: Result<String, String> = (|| {
-            let document = self.document.as_ref().ok_or("Open a native workbook first")?;
+            let document = self
+                .document
+                .as_ref()
+                .ok_or("Open a native workbook first")?;
             document.verify_revision()?;
             let sheet = document.current_sheet()?;
-            if row < 0 || column < 0 || rows <= 0 || columns <= 0
-                || row.checked_add(rows).is_none_or(|end| end as usize > sheet.rows)
-                || column.checked_add(columns).is_none_or(|end| end as usize > sheet.columns) {
+            if row < 0
+                || column < 0
+                || rows <= 0
+                || columns <= 0
+                || row
+                    .checked_add(rows)
+                    .is_none_or(|end| end as usize > sheet.rows)
+                || column
+                    .checked_add(columns)
+                    .is_none_or(|end| end as usize > sheet.columns)
+            {
                 return Err("Selection is outside the sheet".into());
             }
             Ok(sheet.id)
         })();
-        let sheet = match result { Ok(sheet) => sheet, Err(error) => { self.as_mut().set_operation_message(error.as_str().into()); return; } };
+        let sheet = match result {
+            Ok(sheet) => sheet,
+            Err(error) => {
+                self.as_mut().set_operation_message(error.as_str().into());
+                return;
+            }
+        };
         let path = PathBuf::from(self.document_path.to_string());
-        if !self.as_mut().begin_file_action() { return; }
+        if !self.as_mut().begin_file_action() {
+            return;
+        }
         let thread = self.qt_thread();
         std::thread::spawn(move || {
             let result = crate::service_client::publish_agent_session(&path, &sheet, row, column, rows, columns)
@@ -401,55 +661,83 @@ impl qobject::GridModel {
                         .spawn().map(|_| "Agent opened. Use Review to inspect its proposal.".to_string())
                         .map_err(|e| format!("Could not open Omarchy's default agent: {e}"))
                 });
-            thread.queue(move |mut model| {
-                model.as_mut().set_busy(false);
-                model.as_mut().set_operation_message(result.unwrap_or_else(|error| error).as_str().into());
-            }).ok();
+            thread
+                .queue(move |mut model| {
+                    model.as_mut().set_busy(false);
+                    model.as_mut().set_operation_message(
+                        result.unwrap_or_else(|error| error).as_str().into(),
+                    );
+                })
+                .ok();
         });
     }
 
     pub fn list_proposals(mut self: Pin<&mut Self>) {
-        if !self.document_mode || !self.as_mut().begin_file_action() { return; }
+        if !self.document_mode || !self.as_mut().begin_file_action() {
+            return;
+        }
         self.as_mut().set_review_json(QString::default());
         let path = self.document_path.to_string();
         let thread = self.qt_thread();
         std::thread::spawn(move || {
-            let result = crate::service_client::desktop_call(&serde_json::json!({"kind": "document", "path": path}));
-            thread.queue(move |mut model| {
-                model.as_mut().set_busy(false);
-                match result {
-                    Ok(response) => {
-                        let branches = response["branches"].as_array().into_iter().flatten()
-                            .filter_map(|branch| branch.as_str()).filter(|branch| branch.starts_with("proposal-"))
-                            .collect::<Vec<_>>();
-                        model.as_mut().set_proposals_json(serde_json::json!(branches).to_string().as_str().into());
+            let result = crate::service_client::desktop_call(
+                &serde_json::json!({"kind": "document", "path": path}),
+            );
+            thread
+                .queue(move |mut model| {
+                    model.as_mut().set_busy(false);
+                    match result {
+                        Ok(response) => {
+                            let branches = response["branches"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .filter_map(|branch| branch.as_str())
+                                .filter(|branch| branch.starts_with("proposal-"))
+                                .collect::<Vec<_>>();
+                            model.as_mut().set_proposals_json(
+                                serde_json::json!(branches).to_string().as_str().into(),
+                            );
+                        }
+                        Err(error) => model.as_mut().set_operation_message(error.as_str().into()),
                     }
-                    Err(error) => model.as_mut().set_operation_message(error.as_str().into()),
-                }
-            }).ok();
+                })
+                .ok();
         });
     }
 
     pub fn review_proposal(mut self: Pin<&mut Self>, branch: &QString) {
-        if !self.document_mode || !self.as_mut().begin_file_action() { return; }
+        if !self.document_mode || !self.as_mut().begin_file_action() {
+            return;
+        }
         self.as_mut().set_review_json(QString::default());
         let request = serde_json::json!({"kind": "review_native", "path": self.document_path.to_string(), "source": branch.to_string()});
         let thread = self.qt_thread();
         std::thread::spawn(move || {
             let result = crate::service_client::desktop_call(&request);
-            thread.queue(move |mut model| {
-                model.as_mut().set_busy(false);
-                match result {
-                    Ok(review) => model.as_mut().set_review_json(review.to_string().as_str().into()),
-                    Err(error) => model.as_mut().set_operation_message(error.as_str().into()),
-                }
-            }).ok();
+            thread
+                .queue(move |mut model| {
+                    model.as_mut().set_busy(false);
+                    match result {
+                        Ok(review) => model
+                            .as_mut()
+                            .set_review_json(review.to_string().as_str().into()),
+                        Err(error) => model.as_mut().set_operation_message(error.as_str().into()),
+                    }
+                })
+                .ok();
         });
     }
 
     pub fn resolve_proposal(self: Pin<&mut Self>, approve: bool) {
-        let Ok(review) = serde_json::from_str::<serde_json::Value>(&self.review_json.to_string()) else { return; };
-        if self.busy || (approve && review["can_approve"] != true) || review["status"] != "pending" { return; }
+        let Ok(review) = serde_json::from_str::<serde_json::Value>(&self.review_json.to_string())
+        else {
+            return;
+        };
+        if self.busy || (approve && review["can_approve"] != true) || review["status"] != "pending"
+        {
+            return;
+        }
         let path = PathBuf::from(self.document_path.to_string());
         let request = if approve {
             serde_json::json!({"kind": "approve_native", "path": path, "source": review["branch"],
@@ -460,27 +748,45 @@ impl qobject::GridModel {
         };
         self.load_workbook(path, move || {
             crate::service_client::desktop_call(&request)?;
-            Ok(Some(if approve { "Proposal applied and saved." } else { "Proposal rejected. Your workbook is unchanged." }.into()))
+            Ok(Some(
+                if approve {
+                    "Proposal applied and saved."
+                } else {
+                    "Proposal rejected. Your workbook is unchanged."
+                }
+                .into(),
+            ))
         });
     }
 
     pub fn open_document(mut self: Pin<&mut Self>, url: &QUrl, create: bool) {
         let path = PathBuf::from(url.to_local_file().unwrap_or_default().to_string());
-        if !path.is_absolute() || !path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("omasheets")) {
-            self.as_mut().set_operation_message("Choose a local .omasheets file.".into());
+        if !path.is_absolute()
+            || !path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("omasheets"))
+        {
+            self.as_mut()
+                .set_operation_message("Choose a local .omasheets file.".into());
             return;
         }
         let destination = path.clone();
         self.load_workbook(path, move || {
-            if create { crate::service_client::create_workbook(&destination)?; }
+            if create {
+                crate::service_client::create_workbook(&destination)?;
+            }
             Ok(None)
         });
     }
 
     pub fn create_example(mut self: Pin<&mut Self>, url: &QUrl) {
         let path = PathBuf::from(url.to_local_file().unwrap_or_default().to_string());
-        if !path.is_absolute() || path.extension().and_then(|ext| ext.to_str()) != Some("omasheets") {
-            self.as_mut().set_operation_message("Choose a new .omasheets filename for your practice workbook.".into());
+        if !path.is_absolute() || path.extension().and_then(|ext| ext.to_str()) != Some("omasheets")
+        {
+            self.as_mut().set_operation_message(
+                "Choose a new .omasheets filename for your practice workbook.".into(),
+            );
             return;
         }
         let destination = path.clone();
@@ -491,26 +797,53 @@ impl qobject::GridModel {
     }
 
     pub fn open_updater(mut self: Pin<&mut Self>) -> bool {
-        if self.package_managed { return false; }
-        if self.busy { return false; }
-        let result = std::env::current_exe().map_err(|e| e.to_string()).and_then(|exe| {
-            let setup = exe.parent().ok_or("The installed application could not be located")?.join("omasheets-setup");
-            std::process::Command::new(setup).env_remove("OMASHEETS_DOCUMENT")
-                .spawn().map(|_| ()).map_err(|e| e.to_string())
-        });
+        if self.package_managed {
+            return false;
+        }
+        if self.busy {
+            return false;
+        }
+        let result = std::env::current_exe()
+            .map_err(|e| e.to_string())
+            .and_then(|exe| {
+                let setup = exe
+                    .parent()
+                    .ok_or("The installed application could not be located")?
+                    .join("omasheets-setup");
+                std::process::Command::new(setup)
+                    .env_remove("OMASHEETS_DOCUMENT")
+                    .spawn()
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            });
         match result {
             Ok(()) => true,
-            Err(error) => { self.as_mut().set_operation_message(format!("Could not open Setup: {error}").as_str().into()); false }
+            Err(error) => {
+                self.as_mut().set_operation_message(
+                    format!("Could not open Setup: {error}").as_str().into(),
+                );
+                false
+            }
         }
     }
 
     pub fn import_document(mut self: Pin<&mut Self>, source: &QUrl, output: &QUrl) {
         let source = PathBuf::from(source.to_local_file().unwrap_or_default().to_string());
         let output = PathBuf::from(output.to_local_file().unwrap_or_default().to_string());
-        if !source.is_absolute() || !output.is_absolute()
-            || !source.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx"))
-            || !output.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("omasheets")) {
-            self.as_mut().set_operation_message("Choose a local .xlsx source and a new .omasheets destination.".into());
+        if !source.is_absolute()
+            || !output.is_absolute()
+            || !source
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("xlsx"))
+            || !output
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("omasheets"))
+        {
+            self.as_mut().set_operation_message(
+                "Choose a local .xlsx source and a new .omasheets destination.".into(),
+            );
             return;
         }
         let destination = output.clone();
@@ -524,9 +857,12 @@ impl qobject::GridModel {
     pub fn export_document(mut self: Pin<&mut Self>, output: &QUrl, format: &QString) {
         let output = PathBuf::from(output.to_local_file().unwrap_or_default().to_string());
         let format = format.to_string();
-        let Some(document) = self.document.as_ref() else { return; };
+        let Some(document) = self.document.as_ref() else {
+            return;
+        };
         if !output.is_absolute() || !["xlsx", "csv", "parquet"].contains(&format.as_str()) {
-            self.as_mut().set_operation_message("Choose a local export destination.".into());
+            self.as_mut()
+                .set_operation_message("Choose a local export destination.".into());
             return;
         }
         let request = match document.export_request(&output, &format) {
@@ -536,79 +872,135 @@ impl qobject::GridModel {
                 return;
             }
         };
-        if !self.as_mut().begin_file_action() { return; }
+        if !self.as_mut().begin_file_action() {
+            return;
+        }
         let thread = self.qt_thread();
         std::thread::spawn(move || {
-            let result = crate::service_client::desktop_call(&request).map(|report| crate::service_client::transfer_summary(&report));
-            thread.queue(move |mut model| {
-                model.as_mut().set_busy(false);
-                let message = result.unwrap_or_else(|error| error);
-                model.as_mut().set_operation_message(message.as_str().into());
-            }).ok();
+            let result = crate::service_client::desktop_call(&request)
+                .map(|report| crate::service_client::transfer_summary(&report));
+            thread
+                .queue(move |mut model| {
+                    model.as_mut().set_busy(false);
+                    let message = result.unwrap_or_else(|error| error);
+                    model
+                        .as_mut()
+                        .set_operation_message(message.as_str().into());
+                })
+                .ok();
         });
     }
 
     pub fn open_compatibility(mut self: Pin<&mut Self>, url: &QUrl) {
         let path = PathBuf::from(url.to_local_file().unwrap_or_default().to_string());
-        if !path.is_absolute() { return; }
-        if !self.as_mut().begin_file_action() { return; }
+        if !path.is_absolute() {
+            return;
+        }
+        if !self.as_mut().begin_file_action() {
+            return;
+        }
         let thread = self.qt_thread();
         std::thread::spawn(move || {
-            let result = std::process::Command::new(std::env::var_os("OMASHEETS_PYTHON").unwrap_or_else(|| "python3".into()))
-                .args(["-m", "omasheets.cli", "launch"]).arg(path)
-                .env_remove("OMASHEETS_DOCUMENT").output();
-            thread.queue(move |mut model| {
-                model.as_mut().set_busy(false);
-                let message = match result {
-                    Ok(output) if output.status.success() => String::new(),
-                    Ok(output) => String::from_utf8_lossy(&output.stderr).chars().take(2000).collect(),
-                    Err(error) => error.to_string(),
-                };
-                model.as_mut().set_operation_message(message.as_str().into());
-            }).ok();
+            let result = std::process::Command::new(
+                std::env::var_os("OMASHEETS_PYTHON").unwrap_or_else(|| "python3".into()),
+            )
+            .args(["-m", "omasheets.cli", "launch"])
+            .arg(path)
+            .env_remove("OMASHEETS_DOCUMENT")
+            .output();
+            thread
+                .queue(move |mut model| {
+                    model.as_mut().set_busy(false);
+                    let message = match result {
+                        Ok(output) if output.status.success() => String::new(),
+                        Ok(output) => String::from_utf8_lossy(&output.stderr)
+                            .chars()
+                            .take(2000)
+                            .collect(),
+                        Err(error) => error.to_string(),
+                    };
+                    model
+                        .as_mut()
+                        .set_operation_message(message.as_str().into());
+                })
+                .ok();
         });
     }
 
-    fn display_cell(&self, document: &GridDocument, row: i32, column: i32) -> Result<crate::service_client::GridCell, String> {
+    fn display_cell(
+        &self,
+        document: &GridDocument,
+        row: i32,
+        column: i32,
+    ) -> Result<crate::service_client::GridCell, String> {
         let thread = self.qt_thread();
         document.display_cell(row as usize, column as usize, move || {
-            thread.queue(|mut model| {
-                let result = model.document.as_ref().map(GridDocument::accept_pages);
-                match result {
-                    Some(Ok(true)) => {
-                        let revision = *model.revision();
-                        model.as_mut().set_revision(revision.wrapping_add(1));
+            thread
+                .queue(|mut model| {
+                    let result = model.document.as_ref().map(GridDocument::accept_pages);
+                    match result {
+                        Some(Ok(true)) => {
+                            let revision = *model.revision();
+                            model.as_mut().set_revision(revision.wrapping_add(1));
+                        }
+                        Some(Err(error)) => {
+                            model.as_mut().set_source_status(error.as_str().into());
+                            let revision = *model.revision();
+                            model.as_mut().set_revision(revision.wrapping_add(1));
+                        }
+                        _ => {}
                     }
-                    Some(Err(error)) => {
-                        model.as_mut().set_source_status(error.as_str().into());
-                        let revision = *model.revision();
-                        model.as_mut().set_revision(revision.wrapping_add(1));
-                    }
-                    _ => {},
-                }
-            }).ok();
+                })
+                .ok();
         })
     }
 
     pub fn cell_preview(&self, row: i32, column: i32) -> QString {
-        if row < 0 || column < 0 { return QString::default(); }
+        if row < 0 || column < 0 {
+            return QString::default();
+        }
         if let Some(document) = &self.document {
-            return self.display_cell(document, row, column)
-                .map(|cell| if cell.kind == "loading" { cell.display } else { cell.input }.into())
+            return self
+                .display_cell(document, row, column)
+                .map(|cell| {
+                    if cell.kind == "loading" {
+                        cell.display
+                    } else {
+                        cell.input
+                    }
+                    .into()
+                })
                 .unwrap_or_else(|_| "#SERVICE!".into());
         }
         self.cell_text(row, column)
     }
 
-    pub fn copy_range(mut self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) -> bool {
+    pub fn copy_range(
+        mut self: Pin<&mut Self>,
+        row: i32,
+        column: i32,
+        rows: i32,
+        columns: i32,
+    ) -> bool {
         let result = (|| -> Result<String, String> {
-            if row < 0 || column < 0 || rows <= 0 || columns <= 0
+            if row < 0
+                || column < 0
+                || rows <= 0
+                || columns <= 0
                 || rows.checked_mul(columns).is_none_or(|count| count > 1000)
                 || row.checked_add(rows).is_none_or(|end| end > self.row_count)
-                || column.checked_add(columns).is_none_or(|end| end > self.column_count) {
-                return Err("copy must fit inside the sheet and contain at most 1,000 cells".into());
+                || column
+                    .checked_add(columns)
+                    .is_none_or(|end| end > self.column_count)
+            {
+                return Err(
+                    "copy must fit inside the sheet and contain at most 1,000 cells".into(),
+                );
             }
-            let document = self.document.as_ref().ok_or("copy requires a native document")?;
+            let document = self
+                .document
+                .as_ref()
+                .ok_or("copy requires a native document")?;
             let mut values = Vec::new();
             let mut bytes = 0;
             for r in row..row + rows {
@@ -617,9 +1009,13 @@ impl qobject::GridModel {
                     let cell = document.cell(r as usize, c as usize)?;
                     let value = if cell.kind == "formula" && !cell.input.starts_with('=') {
                         format!("={}", cell.input)
-                    } else { cell.input };
+                    } else {
+                        cell.input
+                    };
                     bytes += value.len();
-                    if bytes > crate::clipboard::MAX_BYTES { return Err("copy exceeds 1 MiB".into()); }
+                    if bytes > crate::clipboard::MAX_BYTES {
+                        return Err("copy exceeds 1 MiB".into());
+                    }
                     line.push(value);
                 }
                 values.push(line);
@@ -633,13 +1029,18 @@ impl qobject::GridModel {
                 qobject::write_grid_clipboard(&text.as_str().into(), &origin.as_str().into());
                 true
             }
-            Err(error) => { self.as_mut().set_source_status(error.as_str().into()); false }
+            Err(error) => {
+                self.as_mut().set_source_status(error.as_str().into());
+                false
+            }
         }
     }
 
     pub fn paste_cells(mut self: Pin<&mut Self>, row: i32, column: i32, text: &QString) -> bool {
         let result = (|| {
-            if row < 0 || column < 0 { return Err("invalid paste position".into()); }
+            if row < 0 || column < 0 {
+                return Err("invalid paste position".into());
+            }
             let mut values = crate::clipboard::parse(&text.to_string())?;
             let origin = qobject::grid_clipboard_origin(text).to_string();
             if !origin.is_empty() {
@@ -650,29 +1051,55 @@ impl qobject::GridModel {
                 }
                 crate::clipboard::translate(&mut values, row - source_row, column - source_column);
             }
-            self.document.as_ref().ok_or("paste requires a native document")?
+            self.document
+                .as_ref()
+                .ok_or("paste requires a native document")?
                 .set_matrix(row as usize, column as usize, &values)
         })();
-        self.as_mut().finish_change(result, "Pasted atomically — Ctrl+Z to undo")
+        self.as_mut()
+            .finish_change(result, "Pasted atomically — Ctrl+Z to undo")
     }
 
     pub fn undo_edit(mut self: Pin<&mut Self>, redo: bool) -> bool {
-        let result = self.document.as_ref().ok_or_else(|| "undo requires a native document".to_string())
+        let result = self
+            .document
+            .as_ref()
+            .ok_or_else(|| "undo requires a native document".to_string())
             .and_then(|document| document.undo(redo));
-        self.as_mut().finish_change(result, if redo { "Redone" } else { "Undone — Ctrl+Shift+Z to redo" })
+        self.as_mut().finish_change(
+            result,
+            if redo {
+                "Redone"
+            } else {
+                "Undone — Ctrl+Shift+Z to redo"
+            },
+        )
     }
 
-    pub fn clear_cells(mut self: Pin<&mut Self>, row: i32, column: i32, rows: i32, columns: i32) -> bool {
+    pub fn clear_cells(
+        mut self: Pin<&mut Self>,
+        row: i32,
+        column: i32,
+        rows: i32,
+        columns: i32,
+    ) -> bool {
         let result = (|| {
-            if row < 0 || column < 0 || rows <= 0 || columns <= 0
-                || rows.checked_mul(columns).is_none_or(|count| count > 1000) {
+            if row < 0
+                || column < 0
+                || rows <= 0
+                || columns <= 0
+                || rows.checked_mul(columns).is_none_or(|count| count > 1000)
+            {
                 return Err("clear is limited to 1,000 cells".into());
             }
             let values = vec![vec![String::new(); columns as usize]; rows as usize];
-            self.document.as_ref().ok_or("range clear requires a native document")?
+            self.document
+                .as_ref()
+                .ok_or("range clear requires a native document")?
                 .set_matrix(row as usize, column as usize, &values)
         })();
-        self.as_mut().finish_change(result, "Cleared atomically — Ctrl+Z to undo")
+        self.as_mut()
+            .finish_change(result, "Cleared atomically — Ctrl+Z to undo")
     }
 
     fn finish_change(mut self: Pin<&mut Self>, result: Result<(), String>, message: &str) -> bool {
@@ -680,10 +1107,14 @@ impl qobject::GridModel {
             Ok(()) => {
                 let revision = *self.revision();
                 self.as_mut().set_revision(revision.wrapping_add(1));
+                self.as_mut().refresh_sheet_view();
                 self.as_mut().set_source_status(message.into());
                 true
             }
-            Err(error) => { self.as_mut().set_source_status(error.as_str().into()); false }
+            Err(error) => {
+                self.as_mut().set_source_status(error.as_str().into());
+                false
+            }
         }
     }
 
@@ -707,7 +1138,8 @@ impl qobject::GridModel {
             return QString::default();
         }
         if let Some(document) = &self.document {
-            return self.display_cell(document, row, column)
+            return self
+                .display_cell(document, row, column)
                 .map(|cell| cell.display.into())
                 .unwrap_or_else(|_| "#SERVICE!".into());
         }
@@ -738,7 +1170,8 @@ impl qobject::GridModel {
             return "blank".into();
         }
         if let Some(document) = &self.document {
-            return self.display_cell(document, row, column)
+            return self
+                .display_cell(document, row, column)
                 .map(|cell| cell.kind.into())
                 .unwrap_or_else(|_| "error".into());
         }
@@ -791,6 +1224,7 @@ impl qobject::GridModel {
                     .set_column_count(sheet.columns.min(i32::MAX as usize).max(1) as i32);
                 self.as_mut().set_sheet_name(sheet.name.as_str().into());
                 self.as_mut().set_current_sheet(index);
+                self.as_mut().refresh_sheet_view();
                 let revision = *self.revision();
                 self.as_mut().set_revision(revision.wrapping_add(1));
                 self.as_mut()
@@ -800,12 +1234,7 @@ impl qobject::GridModel {
         }
     }
 
-    pub fn set_cell_text(
-        mut self: Pin<&mut Self>,
-        row: i32,
-        column: i32,
-        value: &QString,
-    ) -> bool {
+    pub fn set_cell_text(mut self: Pin<&mut Self>, row: i32, column: i32, value: &QString) -> bool {
         if row < 0 || row >= self.row_count || column < 0 || column >= self.column_count {
             return false;
         }
@@ -817,6 +1246,7 @@ impl qobject::GridModel {
                     self.as_mut().set_revision(revision.wrapping_add(1));
                     self.as_mut()
                         .set_source_status("Saved through the local service".into());
+                    self.as_mut().refresh_sheet_view();
                     return true;
                 }
                 Err(error) => self.as_mut().set_source_status(error.as_str().into()),
@@ -926,13 +1356,10 @@ fn requested_document_path() -> Option<PathBuf> {
     std::env::var_os("OMASHEETS_DOCUMENT")
         .map(PathBuf::from)
         .or_else(|| {
-            std::env::args_os()
-                .skip(1)
-                .map(PathBuf::from)
-                .find(|path| {
-                    path.extension()
-                        .is_some_and(|extension| extension == std::ffi::OsStr::new("omasheets"))
-                })
+            std::env::args_os().skip(1).map(PathBuf::from).find(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == std::ffi::OsStr::new("omasheets"))
+            })
         })
 }
 

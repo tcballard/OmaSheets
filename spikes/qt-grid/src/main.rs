@@ -1,5 +1,5 @@
-mod grid_model;
 mod clipboard;
+mod grid_model;
 mod service_client;
 mod theme;
 
@@ -26,9 +26,9 @@ fn main() {
     let mut engine = QQmlApplicationEngine::new();
 
     if let Some(mut engine) = engine.as_mut() {
-        engine.as_mut().load(&QUrl::from(
-            "qrc:/qt/qml/io/omasheets/grid/qml/Main.qml",
-        ));
+        engine
+            .as_mut()
+            .load(&QUrl::from("qrc:/qt/qml/io/omasheets/grid/qml/Main.qml"));
         let engine: Pin<&mut QQmlEngine> = engine.upcast_pin();
         engine
             .on_quit(|_| {
