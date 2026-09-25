@@ -95,9 +95,11 @@ Dialog {
             Layout.fillWidth: true
             Layout.fillHeight: true
             contentWidth: availableWidth
+            contentHeight: details.implicitHeight
             clip: true
             visible: dialog.review !== null
             ColumnLayout {
+                id: details
                 width: scroll.availableWidth
                 spacing: 12
                 Label {

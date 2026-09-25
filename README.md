@@ -77,17 +77,17 @@ installation.
 
 ## Install on Omarchy
 
-1. [Open downloads](https://github.com/tcballard/OmaSheets/releases) and choose **OmaSheets-Setup-linux-x86_64.tar.gz** from the newest development build.
-2. Extract it and open **omasheets-setup**. Choose **Install / update OmaSheets**; authorise system package setup if asked.
-3. Choose **Open OmaSheets**, then **New workbook**, **Open workbook**, or **Try an example**.
+1. [Open downloads](https://github.com/tcballard/OmaSheets/releases) and download **omasheets-bin-…-x86_64.pkg.tar.zst** from the newest development build.
+2. Update Omarchy, then install the downloaded package with `sudo pacman -U ~/Downloads/omasheets-bin-*.pkg.tar.zst`. If you have several downloads matching that pattern, use the exact filename instead.
+3. Open **OmaSheets** from the app launcher, then choose **New workbook**, **Open workbook**, or **Try an example**.
 
 The example is a real, editable budget with a four-step guide. You choose where
 to save it. **F1** opens the keyboard reference. Future updates are under
 **Help → Updates**. Your workbooks are preserved.
 
-For Omarchy on Linux x86_64. Setup uses the GTK runtime shipped with Omarchy;
-it downloads the app and installs missing runtime dependencies through the
-system package manager. No compiler or GitHub login is needed.
+For Omarchy on Linux x86_64. Pacman installs dependencies and registers the app.
+No compiler or GitHub login is needed. Download a newer package and repeat
+`pacman -U` to update; see [installation and migration details](INSTALL.md).
 
 The optional bar widget is installed separately:
 
