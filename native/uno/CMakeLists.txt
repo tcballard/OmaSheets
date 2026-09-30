@@ -1,0 +1,30 @@
+cmake_minimum_required(VERSION 3.20)
+project(omasheets_uno LANGUAGES CXX)
+set(OMASHEETS_SOURCE_SHA256 "unknown" CACHE STRING "Source digest")
+set(OMASHEETS_SOURCE_COMMIT "unknown" CACHE STRING "Source commit")
+set(LIBREOFFICE_ROOT "/usr/lib/libreoffice" CACHE PATH "LibreOffice runtime and SDK root")
+find_package(nlohmann_json 3.11 REQUIRED)
+find_path(UNO_INCLUDE_DIR cppuhelper/bootstrap.hxx PATHS /usr/include/libreoffice REQUIRED)
+find_program(CPPUMAKER NAMES cppumaker cppumaker.bin PATHS "${LIBREOFFICE_ROOT}/sdk/bin" REQUIRED)
+set(GENERATED "${CMAKE_CURRENT_BINARY_DIR}/uno-generated")
+add_custom_command(OUTPUT "${GENERATED}/.stamp"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${GENERATED}"
+  COMMAND "${CPPUMAKER}" -Gc "-O${GENERATED}" "${LIBREOFFICE_ROOT}/program/types.rdb" "${LIBREOFFICE_ROOT}/program/types/offapi.rdb"
+  COMMAND "${CMAKE_COMMAND}" -E touch "${GENERATED}/.stamp"
+  DEPENDS "${LIBREOFFICE_ROOT}/program/types.rdb" "${LIBREOFFICE_ROOT}/program/types/offapi.rdb")
+add_custom_target(uno_headers DEPENDS "${GENERATED}/.stamp")
+add_executable(omasheets-uno-bridge bridge.cpp)
+add_dependencies(omasheets-uno-bridge uno_headers)
+target_compile_features(omasheets-uno-bridge PRIVATE cxx_std_20)
+target_compile_options(omasheets-uno-bridge PRIVATE -Wall -Wextra -Wpedantic -Werror)
+target_compile_definitions(omasheets-uno-bridge PRIVATE UNX GCC LINUX CPPU_ENV=gcc3
+  OMASHEETS_SOURCE_SHA256="${OMASHEETS_SOURCE_SHA256}" OMASHEETS_SOURCE_COMMIT="${OMASHEETS_SOURCE_COMMIT}")
+target_include_directories(omasheets-uno-bridge PRIVATE "${UNO_INCLUDE_DIR}" "${GENERATED}")
+foreach(name uno_cppuhelpergcc3 uno_cppu uno_sal)
+  find_library(UNO_${name} NAMES "${name}" "lib${name}.so.3" PATHS "${LIBREOFFICE_ROOT}/sdk/lib" "${LIBREOFFICE_ROOT}/program" REQUIRED)
+  target_link_libraries(omasheets-uno-bridge PRIVATE "${UNO_${name}}")
+endforeach()
+target_link_libraries(omasheets-uno-bridge PRIVATE nlohmann_json::nlohmann_json)
+target_link_options(omasheets-uno-bridge PRIVATE "-Wl,-rpath-link,${LIBREOFFICE_ROOT}/program")
+set_target_properties(omasheets-uno-bridge PROPERTIES INSTALL_RPATH "${LIBREOFFICE_ROOT}/program")
+install(TARGETS omasheets-uno-bridge RUNTIME DESTINATION bin)

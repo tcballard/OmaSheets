@@ -33,6 +33,9 @@ fn run() -> Result<i32> {
         ["mcp", "serve"] => {
             mcp::serve(&mut std::io::stdin().lock(), &mut std::io::stdout().lock())?
         }
+        ["--calc-worker", request, result] => {
+            return omasheets_app::calc_worker::main(Path::new(request), Path::new(result));
+        }
         ["--help"] | ["-h"] => println!(
             "OmaSheets Rust native runtime (migration in progress)\n  launch [DOCUMENT.omasheets]\n  agent-session resource|tools|call TOOL --arguments JSON\n  mcp serve\n  --version\n  --provenance\nCompatibility and installation commands are not migrated yet."
         ),

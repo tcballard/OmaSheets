@@ -70,3 +70,26 @@ On 30 September 2026, using Rust 1.88.0 in the execution workspace:
 
 The release workflow explicitly blocks on tracked `.py` files or `pyproject.toml`
 until the remaining implementation and tooling have been replaced.
+
+## Compatibility implementation checkpoint
+
+The Rust application crate now implements all 19 typed proposal operations,
+format/authority policy, stable input copies, private state and locks, sealed
+receipt chaining, copy/replacement publication and exact-token undo. Nine Rust
+regression tests cover malformed proposals, workflow coverage, forbidden agent
+publication, symlinks/devices, changed artifacts and receipt tampering.
+
+`native/uno` is a narrow SDK adapter for UNO type conversion and method dispatch.
+It contains no workbook policy and loads no Python bridge. The Rust Calc worker
+implements bounded inspection, style reads, search, literal tracing, read batches,
+deterministic audit, charts/pivots, conversion, PDF rendering and save/reopen
+verification. The production Bubblewrap boundary is retained, including a private
+profile, disabled macros/external update, network isolation and process/resource
+limits. Its real workbook acceptance job is mandatory in CI.
+
+Locally, Rust compilation and clippy pass, as do the nine safety tests. The UNO
+adapter builds with strict C++ warnings and its struct/sequence/enum self-test
+passes against LibreOffice 24.2. Real workbook process acceptance still needs CI
+because this workspace refuses Unix sockets. These components are not yet wired
+into production packaging; session/review/UI, installation and tooling migration
+remain required before removing the legacy source.

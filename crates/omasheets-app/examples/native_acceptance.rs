@@ -90,6 +90,16 @@ fn main() {
     );
     let summary = raw(json!({"kind":"document","path":document}));
     let sheet = &summary["sheets"][0]["id"];
+    // A newly added core sheet has no row/column identities. Allocate the
+    // fixture's view before proposing A1, as the real grid does on creation.
+    for command in [
+        json!({"command":"add_columns","sheet":sheet,"at":0,"count":1}),
+        json!({"command":"add_rows","sheet":sheet,"at":0,"count":1,"table":null}),
+    ] {
+        raw(
+            json!({"kind":"append","path":document,"actor":{"kind":"human","id":"acceptance"},"command":command}),
+        );
+    }
     let session = json!({"schema":1,"session_id":"a".repeat(32),"pid":std::process::id(),"path":document,"selection":{"sheet":sheet,"row":0,"column":0,"rows":1,"columns":1}});
     OpenOptions::new()
         .create_new(true)
