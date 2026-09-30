@@ -82,7 +82,10 @@ jobs:
           cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build and test the isolated corpus scorer
         run: |
+          cargo build --locked --release -p omasheets-app -p omasheets-service
           cargo test --workspace --locked --release
+          cargo build --locked --release -p omasheets-app --examples
+          target/release/examples/native_acceptance
           python -m pip install --disable-pip-version-check openpyxl==3.1.5
           cargo test -p omasheets-service --locked --release --test native_controls independent_reader -- --ignored
           cargo build --locked --release -p omasheets-corpus

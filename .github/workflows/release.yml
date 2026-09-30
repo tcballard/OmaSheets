@@ -31,6 +31,12 @@ jobs:
           printf 'Server = https://archive.archlinux.org/repos/%s/$repo/os/$arch\n' "$ARCH_SNAPSHOT" > /etc/pacman.d/mirrorlist
           pacman -Syyuu --noconfirm --needed git cmake rust gtk3 libreoffice-fresh libreoffice-fresh-sdk qt6-base qt6-declarative qt6-wayland
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Require completion of the Rust migration
+        run: |
+          if git ls-files '*.py' 'pyproject.toml' | grep -q .; then
+            echo 'Release blocked: remove the remaining Python implementation and tooling before v0.1.0.' >&2
+            exit 1
+          fi
       - name: Require the tag to match the product version and the pinned release key
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"

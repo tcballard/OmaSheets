@@ -982,6 +982,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "omasheets-app"
+version = "0.0.2"
+dependencies = [
+ "libc",
+ "regex",
+ "serde_json",
+]
+
+[[package]]
 name = "omasheets-calc"
 version = "0.0.0"
 
