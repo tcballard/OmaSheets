@@ -33,11 +33,22 @@ retain their bounded envelope; potential cycles within it are still refused. A m
 whose current A1 spelling cannot preserve those identities reports a projection
 refusal instead of exporting different references.
 
+An external workbook reference (`[1]Sheet!A1`, `[Book.xlsx]Sheet!A1`, or
+`'[Book.xlsx]Sheet 1'!A1`) compiles. Import opens a linked file when it is a
+relative path under the source workbook's directory, or when an absolute or
+`file://` target names a file sitting next to the source. Network targets,
+`..`, and a symlink that escapes that directory are not opened. A workbook
+already being imported keeps the stored link cache, and that cache is also
+used when the file is not opened. Cached external strings keep their decoded
+whitespace, including empty values. Occupied cells, cached link records and
+opened targets share the importer's cell budget. A single cell with no value
+in the opened file or the cache is `#REF!`. A missing cell inside an external
+range is blank.
 Deliberately unsupported: clock/random evaluation without an explicit tick,
-external workbook references, 3D references, spilling array formulas,
-dynamic `INDIRECT`/`OFFSET` arguments, `CELL`, add-in (`_xll.`) calls,
-locale-sensitive parsing such as `DATEVALUE`, and the 1904 date system.
-`TEXT` accepts only the locale-free codes listed with the text functions below.
+3D references, spilling array formulas, dynamic `INDIRECT`/`OFFSET` arguments,
+`CELL`, add-in (`_xll.`) calls, locale-sensitive parsing such as `DATEVALUE`,
+and the 1904 date system. `TEXT` accepts only the locale-free codes listed
+with the text functions below.
 
 Approximate lookups (`VLOOKUP`/`HLOOKUP` without `FALSE`, `MATCH` types 1 and
 -1) binary-search sorted keys per Excel's documented contract; results over
@@ -64,7 +75,7 @@ cell identity and call order. It is not cryptographic randomness.
 sizes. `INDIRECT` accepts literal A1 text within this workbook. They compile to
 normal tracked references and retain native stable-ID behavior after edits.
 Dynamic text/offset expressions and R1C1 mode are explicitly refused pending a
-bounded dynamic-dependency design. External workbooks are never opened.
+bounded dynamic-dependency design.
 
 ### Matrices and databases
 

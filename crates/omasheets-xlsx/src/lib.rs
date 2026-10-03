@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::fs::File;
 use std::io::{BufReader, Cursor, Read, Seek, Write};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ImportLimits {
@@ -348,7 +348,43 @@ impl fmt::Display for ImportError {
 
 impl std::error::Error for ImportError {}
 
+/// How many workbooks may be open along one external-link chain. One hop is
+/// required; the cap stops a cycle or a long chain from recursing without
+/// bound. A workbook already on the chain is not opened again.
+const MAX_EXTERNAL_WORKBOOKS: usize = 8;
+
 pub fn import_xlsx(path: &Path, limits: ImportLimits) -> Result<ImportedWorkbook, ImportError> {
+    let mut opening = HashSet::new();
+    let mut used_cells = 0_usize;
+    import_xlsx_inner(path, limits, &mut opening, &mut used_cells)
+}
+
+fn import_xlsx_inner(
+    path: &Path,
+    limits: ImportLimits,
+    opening: &mut HashSet<PathBuf>,
+    used_cells: &mut usize,
+) -> Result<ImportedWorkbook, ImportError> {
+    if opening.len() >= MAX_EXTERNAL_WORKBOOKS {
+        return Err(ImportError::Open(
+            "external workbook chain is too deep".into(),
+        ));
+    }
+    let key = canonical_key(path);
+    if !opening.insert(key.clone()) {
+        return Err(ImportError::Open("external workbook cycle".into()));
+    }
+    let imported = import_xlsx_body(path, limits, opening, used_cells);
+    opening.remove(&key);
+    imported
+}
+
+fn import_xlsx_body(
+    path: &Path,
+    limits: ImportLimits,
+    opening: &mut HashSet<PathBuf>,
+    used_cells: &mut usize,
+) -> Result<ImportedWorkbook, ImportError> {
     let source_sha256 = hash_file(path)?;
     let (mut source, skipped_sheets) = open_repaired(path)?;
     check_date_system(source.has_1904_epoch())?;
@@ -363,19 +399,23 @@ pub fn import_xlsx(path: &Path, limits: ImportLimits) -> Result<ImportedWorkbook
     // Read the names from the package part rather than through Calamine,
     // which drops each name's `localSheetId` scope.
     let defined_names = read_defined_names(path)?;
+    // External targets are loaded before this workbook's formulas compile, so
+    // a reference sees the calculated cell. The stored link cache is used
+    // only when that file is absent or already on the chain.
+    let external_cells = external_cells_for_import(path, limits, opening, used_cells)?;
     let mut sheets = Vec::with_capacity(sheet_names.len());
-    let mut observed_cells = 0_usize;
     let mut observed_formulas = 0_usize;
     for name in &sheet_names {
         sheets.push(read_occupied_sheet(
             &mut source,
             name,
             limits,
-            &mut observed_cells,
+            used_cells,
             &mut observed_formulas,
         )?);
     }
-    let mut imported = import_ranges_with_names(sheets, defined_names, source_sha256, limits)?;
+    let mut imported =
+        import_ranges_with_names(sheets, defined_names, external_cells, source_sha256, limits)?;
     imported.skipped_sheets = skipped_sheets;
     Ok(imported)
 }
@@ -399,7 +439,7 @@ fn read_occupied_sheet<RS: Read + Seek>(
     source: &mut Xlsx<RS>,
     name: &str,
     limits: ImportLimits,
-    observed_cells: &mut usize,
+    used_cells: &mut usize,
     observed_formulas: &mut usize,
 ) -> Result<OccupiedSheet, ImportError> {
     let read_error = |error: calamine::XlsxError| ImportError::Read(error.to_string());
@@ -431,13 +471,7 @@ fn read_occupied_sheet<RS: Read + Seek>(
                     "duplicate occupied worksheet cell".into(),
                 ));
             }
-            *observed_cells = observed_cells.saturating_add(1);
-            if *observed_cells > limits.max_cells {
-                return Err(ImportError::TooManyCells {
-                    observed: *observed_cells,
-                    maximum: limits.max_cells,
-                });
-            }
+            charge_cells(used_cells, 1, limits.max_cells)?;
         }
         if has_formula {
             *observed_formulas = observed_formulas.saturating_add(1);
@@ -722,6 +756,555 @@ fn attribute_values(xml: &str, name: &str) -> Vec<String> {
     values
 }
 
+/// One cell registered on the workbook's external cache before formulas compile.
+struct CachedExternalCell {
+    link_index: u32,
+    book_file: Option<String>,
+    sheet: String,
+    row: u32,
+    column: u32,
+    value: Value,
+}
+
+struct ExternalLinkRecord {
+    index: u32,
+    book_file: Option<String>,
+    /// Local file this link may open. Never a network URL or an absolute path
+    /// outside the source workbook's directory.
+    path: Option<PathBuf>,
+    xml: String,
+}
+
+fn canonical_key(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn charge_cells(used: &mut usize, add: usize, maximum: usize) -> Result<(), ImportError> {
+    let observed = used.checked_add(add).ok_or(ImportError::TooManyCells {
+        observed: usize::MAX,
+        maximum,
+    })?;
+    if observed > maximum {
+        return Err(ImportError::TooManyCells { observed, maximum });
+    }
+    *used = observed;
+    Ok(())
+}
+
+fn is_limit_error(error: &ImportError) -> bool {
+    matches!(
+        error,
+        ImportError::TooManyCells { .. }
+            | ImportError::TooManyFormulas { .. }
+            | ImportError::TooManySheets { .. }
+    )
+}
+
+/// Cells for every external link of `path`. A target that exists next to the
+/// source is calculated and wins over the link part. A missing file, a
+/// network target, or a workbook already being imported keeps the part's
+/// cache. Cached records, opened targets and this workbook's occupied cells
+/// share `used_cells`.
+fn external_cells_for_import(
+    path: &Path,
+    limits: ImportLimits,
+    opening: &mut HashSet<PathBuf>,
+    used_cells: &mut usize,
+) -> Result<Vec<CachedExternalCell>, ImportError> {
+    let Ok(links) = read_external_links(path) else {
+        return Ok(Vec::new());
+    };
+    let mut cells = Vec::new();
+    for link in links {
+        let calculated = link.path.as_deref().and_then(|target| {
+            let key = canonical_key(target);
+            if opening.contains(&key) {
+                return None;
+            }
+            Some(target)
+        });
+        if let Some(target) = calculated {
+            let snapshot = *used_cells;
+            match import_xlsx_inner(target, limits, opening, used_cells) {
+                Ok(imported) => {
+                    *used_cells = snapshot;
+                    let values = cells_from_imported(&imported, link.index, link.book_file.clone());
+                    charge_cells(used_cells, values.len(), limits.max_cells)?;
+                    cells.extend(values);
+                    continue;
+                }
+                Err(error) if is_limit_error(&error) => return Err(error),
+                Err(_) => {
+                    *used_cells = snapshot;
+                }
+            }
+        }
+        append_external_cache(
+            &link.xml,
+            link.index,
+            link.book_file,
+            used_cells,
+            limits.max_cells,
+            &mut cells,
+        )?;
+    }
+    Ok(cells)
+}
+
+fn cells_from_imported(
+    imported: &ImportedWorkbook,
+    link_index: u32,
+    book_file: Option<String>,
+) -> Vec<CachedExternalCell> {
+    imported
+        .source_cells()
+        .iter()
+        .filter_map(|source| {
+            let sheet = imported.sheets.get(source.cell.sheet as usize)?;
+            Some(CachedExternalCell {
+                link_index,
+                book_file: book_file.clone(),
+                sheet: sheet.name.clone(),
+                row: source.cell.row,
+                column: source.cell.column,
+                value: imported.workbook.value(source.cell),
+            })
+        })
+        .collect()
+}
+
+fn read_external_links(path: &Path) -> Result<Vec<ExternalLinkRecord>, ImportError> {
+    let file = File::open(path).map_err(|error| ImportError::Open(error.to_string()))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|error| ImportError::Open(error.to_string()))?;
+    let workbook = read_part(&mut archive, "xl/workbook.xml")?;
+    let relationships = parse_relationships(
+        &read_optional_part(&mut archive, "xl/_rels/workbook.xml.rels").unwrap_or_default(),
+    );
+    let source_dir = path.parent().unwrap_or(Path::new(""));
+    let mut links = Vec::new();
+    for (offset, rel_id) in external_reference_ids(&workbook).into_iter().enumerate() {
+        let index = (offset + 1) as u32;
+        let part_target = relationships
+            .iter()
+            .find(|relationship| relationship.id == rel_id)
+            .map(|relationship| relationship.target.as_str());
+        let Some(part_target) = part_target else {
+            links.push(ExternalLinkRecord {
+                index,
+                book_file: None,
+                path: None,
+                xml: String::new(),
+            });
+            continue;
+        };
+        let part = resolve_package_part("xl/workbook.xml", part_target);
+        let xml = read_optional_part(&mut archive, &part).unwrap_or_default();
+        let link_relationships = parse_relationships(
+            &read_optional_part(&mut archive, &package_rels_path(&part)).unwrap_or_default(),
+        );
+        let book_rel = external_book_relationship_id(&xml);
+        let raw_target = book_rel
+            .as_ref()
+            .and_then(|id| {
+                link_relationships
+                    .iter()
+                    .find(|relationship| relationship.id == *id)
+            })
+            .or_else(|| {
+                link_relationships
+                    .iter()
+                    .find(|relationship| relationship.kind.ends_with("/externalLinkPath"))
+            })
+            .map(|relationship| relationship.target.clone());
+        let book_file = raw_target.as_deref().and_then(external_book_label);
+        let resolved = raw_target
+            .as_deref()
+            .and_then(|target| resolve_external_path(source_dir, target));
+        links.push(ExternalLinkRecord {
+            index,
+            book_file,
+            path: resolved,
+            xml,
+        });
+    }
+    Ok(links)
+}
+
+fn read_optional_part(archive: &mut zip::ZipArchive<File>, name: &str) -> Option<String> {
+    read_part(archive, name).ok()
+}
+
+struct PackageRelationship {
+    id: String,
+    kind: String,
+    target: String,
+}
+
+fn parse_relationships(xml: &str) -> Vec<PackageRelationship> {
+    let mut relationships = Vec::new();
+    scan_elements(xml, "Relationship", |tag, _| {
+        let Some(id) = attribute(tag, "Id") else {
+            return;
+        };
+        let Some(target) = attribute(tag, "Target") else {
+            return;
+        };
+        relationships.push(PackageRelationship {
+            id,
+            kind: attribute(tag, "Type").unwrap_or_default(),
+            target,
+        });
+    });
+    relationships
+}
+
+fn external_reference_ids(workbook_xml: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    scan_elements(workbook_xml, "externalReference", |tag, _| {
+        if let Some(id) = attribute(tag, "r:id") {
+            ids.push(id);
+        }
+    });
+    ids
+}
+
+fn external_book_relationship_id(external_link_xml: &str) -> Option<String> {
+    let mut found = None;
+    scan_elements(external_link_xml, "externalBook", |tag, _| {
+        if found.is_none() {
+            found = attribute(tag, "r:id");
+        }
+    });
+    found
+}
+
+fn resolve_package_part(source_part: &str, target: &str) -> String {
+    let target = target.replace('\\', "/");
+    if let Some(absolute) = target.strip_prefix('/') {
+        return absolute.trim_start_matches('/').to_string();
+    }
+    let mut parts: Vec<&str> = source_part
+        .rsplit_once('/')
+        .map(|(dir, _)| dir)
+        .unwrap_or("")
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    for segment in target.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    parts.join("/")
+}
+
+fn package_rels_path(part: &str) -> String {
+    match part.rsplit_once('/') {
+        Some((dir, name)) => format!("{dir}/_rels/{name}.rels"),
+        None => format!("_rels/{part}.rels"),
+    }
+}
+
+/// Path of a link target that may be opened: a relative path under the source
+/// directory, or, for an absolute path or `file://` URL, the file name next
+/// to the source. Network targets, `..`, and a symlink that leaves that
+/// directory are not opened.
+fn resolve_external_path(source_dir: &Path, raw_target: &str) -> Option<PathBuf> {
+    let relative = local_relative_target(raw_target)?;
+    let candidate = source_dir.join(relative);
+    if !candidate.is_file() {
+        return None;
+    }
+    let canonical_source = std::fs::canonicalize(source_dir).ok()?;
+    let canonical_candidate = std::fs::canonicalize(&candidate).ok()?;
+    canonical_candidate
+        .starts_with(&canonical_source)
+        .then_some(candidate)
+}
+
+fn local_relative_target(raw_target: &str) -> Option<PathBuf> {
+    let decoded = percent_decode(raw_target.trim());
+    if decoded.is_empty() {
+        return None;
+    }
+    let lower = decoded.to_ascii_lowercase();
+    if lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("ftp://")
+        || lower.starts_with("mailto:")
+        || (lower.contains("://") && !lower.starts_with("file:"))
+    {
+        return None;
+    }
+    let path_text = if lower.starts_with("file:") {
+        file_url_path(&decoded)?
+    } else {
+        decoded.replace('\\', "/")
+    };
+    let path = Path::new(path_text.trim());
+    if lower.starts_with("file:") || path.is_absolute() {
+        return path
+            .file_name()
+            .filter(|name| !name.is_empty())
+            .map(PathBuf::from);
+    }
+    if path
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_) | Component::CurDir))
+    {
+        return None;
+    }
+    let relative: PathBuf = path
+        .components()
+        .filter(|component| matches!(component, Component::Normal(_)))
+        .collect();
+    if relative.as_os_str().is_empty() {
+        None
+    } else {
+        Some(relative)
+    }
+}
+
+fn file_url_path(url: &str) -> Option<String> {
+    let rest = strip_ascii_prefix(url, "file:")?;
+    let rest = rest.strip_prefix("//")?;
+    let rest = strip_ascii_prefix(rest, "localhost").unwrap_or(rest);
+    let rest = rest.replace('\\', "/");
+    if rest.is_empty() || rest == "/" {
+        None
+    } else {
+        Some(rest)
+    }
+}
+
+fn strip_ascii_prefix<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    (text.len() >= prefix.len() && text[..prefix.len()].eq_ignore_ascii_case(prefix))
+        .then_some(&text[prefix.len()..])
+}
+
+fn external_book_label(raw_target: &str) -> Option<String> {
+    let decoded = percent_decode(raw_target.trim());
+    let trimmed = decoded.split(['?', '#']).next().unwrap_or(decoded.as_str());
+    let segment = trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed).trim();
+    if segment.is_empty() || segment == "." || segment == ".." || segment.contains(':') {
+        None
+    } else {
+        Some(segment.to_string())
+    }
+}
+
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(hex) = std::str::from_utf8(&bytes[index + 1..index + 3]) {
+                if let Ok(value) = u8::from_str_radix(hex, 16) {
+                    decoded.push(value);
+                    index += 3;
+                    continue;
+                }
+            }
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+fn append_external_cache(
+    xml: &str,
+    link_index: u32,
+    book_file: Option<String>,
+    used_cells: &mut usize,
+    maximum: usize,
+    cells: &mut Vec<CachedExternalCell>,
+) -> Result<(), ImportError> {
+    let mut sheet_names = Vec::new();
+    scan_elements(xml, "sheetNames", |_tag, body| {
+        scan_elements(body, "sheetName", |tag, _| {
+            if let Some(name) = attribute(tag, "val") {
+                sheet_names.push(name);
+            }
+        });
+    });
+    let mut error = None;
+    scan_elements(xml, "sheetDataSet", |_tag, body| {
+        if error.is_some() {
+            return;
+        }
+        scan_elements(body, "sheetData", |tag, data| {
+            if error.is_some() {
+                return;
+            }
+            let Some(sheet_id) =
+                attribute(tag, "sheetId").and_then(|value| value.parse::<usize>().ok())
+            else {
+                return;
+            };
+            let Some(sheet) = sheet_names.get(sheet_id).cloned() else {
+                return;
+            };
+            scan_elements(data, "row", |_row_tag, row_body| {
+                if error.is_some() {
+                    return;
+                }
+                scan_elements(row_body, "cell", |cell_tag, cell_body| {
+                    if error.is_some() {
+                        return;
+                    }
+                    let Some(reference) = attribute(cell_tag, "r") else {
+                        return;
+                    };
+                    let Some((row, column)) = parse_cell_reference(&reference) else {
+                        return;
+                    };
+                    let Some(value) = cached_cell_value(cell_tag, cell_body) else {
+                        return;
+                    };
+                    if let Err(failed) = charge_cells(used_cells, 1, maximum) {
+                        error = Some(failed);
+                        return;
+                    }
+                    cells.push(CachedExternalCell {
+                        link_index,
+                        book_file: book_file.clone(),
+                        sheet: sheet.clone(),
+                        row,
+                        column,
+                        value,
+                    });
+                });
+            });
+        });
+    });
+    match error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+fn cached_cell_value(tag: &str, body: &str) -> Option<Value> {
+    let kind = attribute(tag, "t").unwrap_or_default();
+    if kind == "s" {
+        return None;
+    }
+    let raw = xml_text_element(body, "v").or_else(|| xml_text_element(body, "t"))?;
+    match kind.as_str() {
+        "b" => {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                return None;
+            }
+            Some(Value::Boolean(
+                raw == "1" || raw.eq_ignore_ascii_case("true"),
+            ))
+        }
+        "e" => {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                return None;
+            }
+            Some(Value::Error(excel_error(raw)))
+        }
+        "str" | "inlineStr" => Some(Value::Text(raw)),
+        _ => {
+            let raw = raw.trim();
+            if raw.is_empty() {
+                return None;
+            }
+            raw.parse::<f64>().ok().map(Value::Number)
+        }
+    }
+}
+
+fn excel_error(raw: &str) -> CalcError {
+    match raw {
+        "#DIV/0!" => CalcError::DivisionByZero,
+        "#N/A" => CalcError::NotAvailable,
+        "#NAME?" => CalcError::InvalidName,
+        "#NULL!" => CalcError::NullIntersection,
+        "#NUM!" => CalcError::InvalidNumber,
+        "#VALUE!" => CalcError::InvalidValue,
+        _ => CalcError::InvalidReference,
+    }
+}
+
+fn xml_text_element(xml: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}");
+    let start = xml.find(&open)?;
+    let after = &xml[start + open.len()..];
+    if !after.starts_with([' ', '>', '/', '\n', '\r', '\t']) {
+        return None;
+    }
+    let tag_end = after.find('>')?;
+    if after[..tag_end].trim_end().ends_with('/') {
+        return Some(String::new());
+    }
+    let content = &after[tag_end + 1..];
+    let close = format!("</{tag}>");
+    let end = content.find(&close)?;
+    Some(unescape_xml(&content[..end]))
+}
+
+fn parse_cell_reference(reference: &str) -> Option<(u32, u32)> {
+    let normalized = reference.replace('$', "").to_ascii_uppercase();
+    let split = normalized.find(|character: char| character.is_ascii_digit())?;
+    let (column_text, row_text) = normalized.split_at(split);
+    if column_text.is_empty()
+        || row_text.is_empty()
+        || !column_text.bytes().all(|byte| byte.is_ascii_uppercase())
+        || !row_text.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let mut column = 0_u32;
+    for byte in column_text.bytes() {
+        column = column
+            .checked_mul(26)?
+            .checked_add(u32::from(byte - b'A') + 1)?;
+    }
+    let row = row_text.parse::<u32>().ok().filter(|value| *value > 0)?;
+    if column > 16_384 || row > 1_048_576 {
+        return None;
+    }
+    Some((row - 1, column - 1))
+}
+
+fn scan_elements(xml: &str, tag: &str, mut visit: impl FnMut(&str, &str)) {
+    let open = format!("<{tag}");
+    let close = format!("</{tag}>");
+    let mut rest = xml;
+    while let Some(start) = rest.find(&open) {
+        let after = &rest[start + open.len()..];
+        if !after.starts_with([' ', '>', '/', '\n', '\r', '\t']) {
+            rest = after;
+            continue;
+        }
+        let Some(tag_end) = after.find('>') else {
+            break;
+        };
+        let start_tag = &after[..tag_end];
+        if start_tag.trim_end().ends_with('/') {
+            visit(start_tag, "");
+            rest = &after[tag_end + 1..];
+            continue;
+        }
+        let content = &after[tag_end + 1..];
+        let Some(end) = content.find(&close) else {
+            break;
+        };
+        visit(start_tag, &content[..end]);
+        rest = &content[end + close.len()..];
+    }
+}
+
 /// Removes `<sheet …/>` elements whose `r:id` is empty or unknown and returns
 /// the rewritten XML with the names of the removed sheets.
 fn drop_dangling_sheets(
@@ -791,6 +1374,7 @@ fn import_ranges(
     import_ranges_with_names(
         ranges.into_iter().map(occupied_from_ranges).collect(),
         Vec::new(),
+        Vec::new(),
         source_sha256,
         limits,
     )
@@ -799,6 +1383,7 @@ fn import_ranges(
 fn import_ranges_with_names(
     ranges: Vec<OccupiedSheet>,
     defined_names: Vec<DefinedName>,
+    external_cells: Vec<CachedExternalCell>,
     source_sha256: String,
     limits: ImportLimits,
 ) -> Result<ImportedWorkbook, ImportError> {
@@ -871,6 +1456,16 @@ fn import_ranges_with_names(
                 }
             }
         }
+    }
+    for external in external_cells {
+        workbook.cache_external_cell(
+            external.link_index,
+            external.book_file.as_deref(),
+            &external.sheet,
+            external.row,
+            external.column,
+            external.value,
+        );
     }
     let mut source_cells = BTreeMap::new();
 
@@ -1910,6 +2505,7 @@ mod tests {
                 workbook_name("Rates", "Data!$A$1:$A$2"),
                 workbook_name("Broken", "[2]External!A1"),
             ],
+            Vec::new(),
             "j".repeat(64),
             ImportLimits::default(),
         )
@@ -1926,16 +2522,22 @@ mod tests {
             imported.workbook.value(CellId::new(0, 2, 2)),
             Value::Error(CalcError::InvalidReference)
         );
+        // No link target and no cache: the reference and the defined name
+        // compile, and the missing cell is `#REF!`.
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 4, 2)),
+            Value::Error(CalcError::InvalidReference)
+        );
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 5, 2)),
+            Value::Error(CalcError::InvalidReference)
+        );
         let parity = imported.parity();
-        assert_eq!(parity.formula_cells_loaded, 3);
+        assert_eq!(parity.formula_cells_loaded, 5);
         assert_eq!(parity.stored_values_matched, 3);
         assert_eq!(
             imported.report().unsupported_reasons,
-            BTreeMap::from([
-                ("unknown_name".to_string(), 1),
-                ("external_reference".to_string(), 1),
-                ("unsupported_name".to_string(), 1),
-            ])
+            BTreeMap::from([("unknown_name".to_string(), 1)])
         );
     }
 
@@ -2023,5 +2625,578 @@ mod tests {
                 ("xl/worksheets/sheet1.xml", sheet_xml.to_string()),
             ],
         );
+    }
+
+    fn worksheet_xml(cells: &str) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1">{cells}</row></sheetData></worksheet>"#
+        )
+    }
+
+    fn xml_attr(text: &str) -> String {
+        text.replace('&', "&amp;")
+            .replace('"', "&quot;")
+            .replace('<', "&lt;")
+    }
+
+    fn write_plain_workbook(path: &Path, sheet: &str, cells: &str) {
+        let workbook = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="{sheet}" sheetId="1" r:id="rId1"/></sheets></workbook>"#
+        );
+        write_owned(
+            path,
+            &[
+                ("[Content_Types].xml", content_types("")),
+                (
+                    "_rels/.rels",
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#.to_string(),
+                ),
+                ("xl/workbook.xml", workbook),
+                (
+                    "xl/_rels/workbook.xml.rels",
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#.to_string(),
+                ),
+                ("xl/worksheets/sheet1.xml", worksheet_xml(cells)),
+            ],
+        );
+    }
+
+    /// `link_target` is the relationship target. `cache_value` is the
+    /// external-link value for `Inputs!A1`, used only when the file is absent.
+    fn write_linked_workbook(
+        path: &Path,
+        sheet: &str,
+        cells: &str,
+        defined_names: &str,
+        link_target: &str,
+        cache_value: &str,
+    ) {
+        write_linked_workbook_cache(
+            path,
+            sheet,
+            cells,
+            defined_names,
+            link_target,
+            &format!(r#"<row r="1"><cell r="A1"><v>{cache_value}</v></cell></row>"#),
+        );
+    }
+
+    #[test]
+    fn external_reference_uses_calculated_target_cell() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("omasheets-external-{}-{nonce}", std::process::id()));
+        let _cleanup = TempCleanup(root.clone());
+        let linked = root.join("linked");
+        let book = linked.join("Book.xlsx");
+        let source = linked.join("Source.xlsx");
+        write_plain_workbook(&book, "Inputs", r#"<c r="A1"><f>3+7</f><v>99</v></c>"#);
+        write_linked_workbook(
+            &source,
+            "Report",
+            r#"<c r="A1"><f>[Book.xlsx]Inputs!A1+2</f><v>0</v></c><c r="B1"><f>Linked+2</f><v>0</v></c><c r="C1"><f>[1]Inputs!A1+2</f><v>0</v></c>"#,
+            r#"<definedName name="Linked">[Book.xlsx]Inputs!A1</definedName>"#,
+            "Book.xlsx",
+            "1",
+        );
+        assert_eq!(
+            resolve_external_path(linked.as_path(), "Book.xlsx").as_deref(),
+            Some(book.as_path())
+        );
+        assert!(resolve_external_path(linked.as_path(), "https://example.com/Book.xlsx").is_none());
+        assert!(resolve_external_path(linked.as_path(), "../Book.xlsx").is_none());
+
+        let imported = import_xlsx(&source, ImportLimits::default()).unwrap();
+        assert!(imported.unsupported.is_empty());
+        // The link cache says 1. The file's formula calculates to 10, so the
+        // source formula is 12, not 3.
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 0, 0)),
+            Value::Number(12.0)
+        );
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 0, 1)),
+            Value::Number(12.0)
+        );
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 0, 2)),
+            Value::Number(12.0)
+        );
+
+        let absent_dir = root.join("absent");
+        let absent = absent_dir.join("Absent.xlsx");
+        write_linked_workbook(
+            &absent,
+            "Report",
+            r#"<c r="A1"><f>[Missing.xlsx]Inputs!A1+2</f><v>0</v></c><c r="B1"><f>Linked+2</f><v>0</v></c>"#,
+            r#"<definedName name="Linked">[Missing.xlsx]Inputs!A1</definedName>"#,
+            "Missing.xlsx",
+            "10",
+        );
+        let absent_imported = import_xlsx(&absent, ImportLimits::default()).unwrap();
+        assert!(absent_imported.unsupported.is_empty());
+        assert_eq!(
+            absent_imported.workbook.value(CellId::new(0, 0, 0)),
+            Value::Number(12.0)
+        );
+        assert_eq!(
+            absent_imported.workbook.value(CellId::new(0, 0, 1)),
+            Value::Number(12.0)
+        );
+
+        let outside = root.join("outside");
+        let secret = outside.join("Secret.xlsx");
+        write_plain_workbook(&secret, "Inputs", r#"<c r="A1"><f>3+7</f><v>99</v></c>"#);
+        let absolute = secret.canonicalize().unwrap();
+        let absolute_dir = root.join("absolute");
+        let absolute_source = absolute_dir.join("Source.xlsx");
+        write_linked_workbook(
+            &absolute_source,
+            "Report",
+            r#"<c r="A1"><f>[Secret.xlsx]Inputs!A1+2</f><v>0</v></c>"#,
+            "",
+            absolute.to_str().unwrap(),
+            "4",
+        );
+        assert!(
+            resolve_external_path(absolute_dir.as_path(), absolute.to_str().unwrap()).is_none()
+        );
+        assert!(
+            resolve_external_path(
+                absolute_dir.as_path(),
+                &format!("file://{}", absolute.display())
+            )
+            .is_none()
+        );
+        let absolute_imported = import_xlsx(&absolute_source, ImportLimits::default()).unwrap();
+        assert_eq!(
+            absolute_imported.workbook.value(CellId::new(0, 0, 0)),
+            Value::Number(6.0)
+        );
+
+        let cycle_dir = root.join("cycle");
+        let cycle = cycle_dir.join("Self.xlsx");
+        write_linked_workbook(
+            &cycle,
+            "Report",
+            r#"<c r="A1"><f>[Self.xlsx]Inputs!A1+2</f><v>0</v></c>"#,
+            "",
+            "Self.xlsx",
+            "10",
+        );
+        let cycle_imported = import_xlsx(&cycle, ImportLimits::default()).unwrap();
+        assert_eq!(
+            cycle_imported.workbook.value(CellId::new(0, 0, 0)),
+            Value::Number(12.0)
+        );
+    }
+
+    fn write_linked_workbook_cache(
+        path: &Path,
+        sheet: &str,
+        cells: &str,
+        defined_names: &str,
+        link_target: &str,
+        cache_rows: &str,
+    ) {
+        let workbook = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="{sheet}" sheetId="1" r:id="rId1"/></sheets><externalReferences><externalReference r:id="rId2"/></externalReferences><definedNames>{defined_names}</definedNames></workbook>"#
+        );
+        let link = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><externalBook r:id="rId1"><sheetNames><sheetName val="Inputs"/></sheetNames><sheetDataSet><sheetData sheetId="0">{cache_rows}</sheetData></sheetDataSet></externalBook></externalLink>"#
+        );
+        let link_rels = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath" Target="{}" TargetMode="External"/></Relationships>"#,
+            xml_attr(link_target)
+        );
+        write_owned(
+            path,
+            &[
+                (
+                    "[Content_Types].xml",
+                    content_types(
+                        r#"<Override PartName="/xl/externalLinks/externalLink1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml"/>"#,
+                    ),
+                ),
+                (
+                    "_rels/.rels",
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#.to_string(),
+                ),
+                ("xl/workbook.xml", workbook),
+                (
+                    "xl/_rels/workbook.xml.rels",
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="externalLinks/externalLink1.xml"/></Relationships>"#.to_string(),
+                ),
+                ("xl/externalLinks/externalLink1.xml", link),
+                ("xl/externalLinks/_rels/externalLink1.xml.rels", link_rels),
+                ("xl/worksheets/sheet1.xml", worksheet_xml(cells)),
+            ],
+        );
+    }
+
+    fn cache_numeric_rows(count: usize) -> String {
+        (1..=count)
+            .map(|row| format!(r#"<row r="{row}"><cell r="A{row}"><v>{row}</v></cell></row>"#))
+            .collect()
+    }
+
+    fn numbered_sheet_cells(count: usize) -> String {
+        (1..=count)
+            .map(|row| format!(r#"<c r="A{row}"><v>{row}</v></c>"#))
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
+    fn numbered_sheet_xml(count: usize) -> String {
+        let rows: String = (1..=count)
+            .map(|row| format!(r#"<row r="{row}"><c r="A{row}"><v>{row}</v></c></row>"#))
+            .collect();
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{rows}</sheetData></worksheet>"#
+        )
+    }
+
+    fn write_plain_numbered(path: &Path, count: usize) {
+        write_plain_workbook_xml(path, &numbered_sheet_xml(count));
+    }
+
+    fn write_two_link_workbook(
+        path: &Path,
+        first_target: &str,
+        second_target: &str,
+        first_cache: &str,
+        second_cache: &str,
+        cells: &str,
+    ) {
+        let workbook = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Report" sheetId="1" r:id="rId1"/></sheets><externalReferences><externalReference r:id="rId2"/><externalReference r:id="rId3"/></externalReferences></workbook>"#.to_string();
+        let link = |cache: &str| {
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><externalLink xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><externalBook r:id="rId1"><sheetNames><sheetName val="Inputs"/></sheetNames><sheetDataSet><sheetData sheetId="0">{cache}</sheetData></sheetDataSet></externalBook></externalLink>"#
+            )
+        };
+        let rels = |target: &str| {
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLinkPath" Target="{}" TargetMode="External"/></Relationships>"#,
+                xml_attr(target)
+            )
+        };
+        write_owned(
+            path,
+            &[
+                (
+                    "[Content_Types].xml",
+                    content_types(
+                        r#"<Override PartName="/xl/externalLinks/externalLink1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml"/><Override PartName="/xl/externalLinks/externalLink2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml"/>"#,
+                    ),
+                ),
+                (
+                    "_rels/.rels",
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#.to_string(),
+                ),
+                ("xl/workbook.xml", workbook),
+                (
+                    "xl/_rels/workbook.xml.rels",
+                    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="externalLinks/externalLink1.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/externalLink" Target="externalLinks/externalLink2.xml"/></Relationships>"#.to_string(),
+                ),
+                ("xl/externalLinks/externalLink1.xml", link(first_cache)),
+                (
+                    "xl/externalLinks/_rels/externalLink1.xml.rels",
+                    rels(first_target),
+                ),
+                ("xl/externalLinks/externalLink2.xml", link(second_cache)),
+                (
+                    "xl/externalLinks/_rels/externalLink2.xml.rels",
+                    rels(second_target),
+                ),
+                ("xl/worksheets/sheet1.xml", worksheet_xml(cells)),
+            ],
+        );
+    }
+
+    fn temp_root(label: &str) -> (std::path::PathBuf, TempCleanup) {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("omasheets-{label}-{}-{nonce}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        (root.clone(), TempCleanup(root))
+    }
+
+    #[test]
+    fn external_path_rejects_symlinks_that_escape_the_source_directory() {
+        let (root, _cleanup) = temp_root("symlink");
+        let source_dir = root.join("source");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let secret = outside.join("Secret.xlsx");
+        write_plain_numbered(&secret, 1);
+        let file_link = source_dir.join("Book.xlsx");
+        std::os::unix::fs::symlink(&secret, &file_link).unwrap();
+        assert!(resolve_external_path(&source_dir, "Book.xlsx").is_none());
+        assert!(resolve_external_path(&source_dir, "Book%2exlsx").is_none());
+
+        let nested = source_dir.join("links");
+        std::os::unix::fs::symlink(&outside, &nested).unwrap();
+        let via_dir = nested.join("Secret.xlsx");
+        assert!(via_dir.is_file());
+        assert!(resolve_external_path(&source_dir, "links/Secret.xlsx").is_none());
+        assert!(resolve_external_path(&source_dir, "links%2fSecret.xlsx").is_none());
+
+        let local = source_dir.join("Local.xlsx");
+        write_plain_numbered(&local, 1);
+        assert_eq!(
+            resolve_external_path(&source_dir, "Local.xlsx").as_deref(),
+            Some(local.as_path())
+        );
+        assert!(
+            resolve_external_path(
+                &source_dir,
+                secret.canonicalize().unwrap().to_str().unwrap()
+            )
+            .is_none()
+        );
+        let escaped_absolute_name = source_dir.join("Secret.xlsx");
+        std::os::unix::fs::symlink(&secret, &escaped_absolute_name).unwrap();
+        assert!(
+            resolve_external_path(
+                &source_dir,
+                secret.canonicalize().unwrap().to_str().unwrap()
+            )
+            .is_none()
+        );
+        assert!(
+            resolve_external_path(
+                &source_dir,
+                &format!("file://{}", secret.canonicalize().unwrap().display())
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn cached_external_strings_keep_decoded_whitespace() {
+        let (root, _cleanup) = temp_root("cache-ws");
+        let source = root.join("Source.xlsx");
+        write_linked_workbook_cache(
+            &source,
+            "Report",
+            r#"<c r="A1"><f>[Missing.xlsx]Inputs!A1</f><v>0</v></c><c r="B1"><f>[Missing.xlsx]Inputs!A2</f><v>0</v></c><c r="C1"><f>[Missing.xlsx]Inputs!A3</f><v>0</v></c>"#,
+            "",
+            "Missing.xlsx",
+            r#"<row r="1"><cell r="A1" t="str"><v>  padded  </v></cell></row><row r="2"><cell r="A2" t="str"><v>   </v></cell></row><row r="3"><cell r="A3" t="str"><v></v></cell></row>"#,
+        );
+        let imported = import_xlsx(&source, ImportLimits::default()).unwrap();
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 0, 0)),
+            Value::Text("  padded  ".into())
+        );
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 0, 1)),
+            Value::Text("   ".into())
+        );
+        assert_eq!(
+            imported.workbook.value(CellId::new(0, 0, 2)),
+            Value::Text(String::new())
+        );
+    }
+
+    #[test]
+    fn shared_import_budget_covers_cached_links_opened_targets_and_root_cells() {
+        let (root, _cleanup) = temp_root("budget");
+        let tight = ImportLimits {
+            max_cells: 2,
+            ..ImportLimits::default()
+        };
+        let exact_four = ImportLimits {
+            max_cells: 4,
+            ..ImportLimits::default()
+        };
+
+        let oversized = root.join("oversized.xlsx");
+        write_linked_workbook_cache(
+            &oversized,
+            "Report",
+            r#"<c r="A1"><f>[Missing.xlsx]Inputs!A1</f><v>0</v></c>"#,
+            "",
+            "Missing.xlsx",
+            &cache_numeric_rows(3),
+        );
+        assert_eq!(
+            import_xlsx(&oversized, tight).err(),
+            Some(ImportError::TooManyCells {
+                observed: 3,
+                maximum: 2,
+            })
+        );
+
+        let multi = root.join("multi.xlsx");
+        write_two_link_workbook(
+            &multi,
+            "MissingA.xlsx",
+            "MissingB.xlsx",
+            &cache_numeric_rows(2),
+            &cache_numeric_rows(2),
+            r#"<c r="A1"><f>[MissingA.xlsx]Inputs!A1</f><v>0</v></c>"#,
+        );
+        assert_eq!(
+            import_xlsx(&multi, tight).err(),
+            Some(ImportError::TooManyCells {
+                observed: 3,
+                maximum: 2,
+            })
+        );
+        let multi_ok = import_xlsx(
+            &multi,
+            ImportLimits {
+                max_cells: 5,
+                ..ImportLimits::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            multi_ok.workbook.value(CellId::new(0, 0, 0)),
+            Value::Number(1.0)
+        );
+
+        let opened = root.join("opened");
+        std::fs::create_dir_all(&opened).unwrap();
+        write_plain_numbered(&opened.join("One.xlsx"), 2);
+        write_plain_numbered(&opened.join("Two.xlsx"), 2);
+        let opened_source = opened.join("Source.xlsx");
+        write_two_link_workbook(
+            &opened_source,
+            "One.xlsx",
+            "Two.xlsx",
+            &cache_numeric_rows(1),
+            &cache_numeric_rows(1),
+            r#"<c r="A1"><f>[One.xlsx]Sheet1!A1+[Two.xlsx]Sheet1!A1</f><v>0</v></c>"#,
+        );
+        assert_eq!(
+            import_xlsx(&opened_source, exact_four).err(),
+            Some(ImportError::TooManyCells {
+                observed: 5,
+                maximum: 4,
+            })
+        );
+        let opened_ok = import_xlsx(
+            &opened_source,
+            ImportLimits {
+                max_cells: 5,
+                ..ImportLimits::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            opened_ok.workbook.value(CellId::new(0, 0, 0)),
+            Value::Number(2.0)
+        );
+
+        let nested = root.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        write_plain_numbered(&nested.join("Leaf.xlsx"), 2);
+        write_linked_workbook(
+            &nested.join("Mid.xlsx"),
+            "Inputs",
+            r#"<c r="A1"><f>[Leaf.xlsx]Sheet1!A1+[Leaf.xlsx]Sheet1!A2</f><v>99</v></c>"#,
+            "",
+            "Leaf.xlsx",
+            "1",
+        );
+        write_linked_workbook(
+            &nested.join("Top.xlsx"),
+            "Report",
+            r#"<c r="A1"><f>[Mid.xlsx]Inputs!A1+1</f><v>0</v></c>"#,
+            "",
+            "Mid.xlsx",
+            "0",
+        );
+        assert_eq!(
+            import_xlsx(&nested.join("Top.xlsx"), tight).err(),
+            Some(ImportError::TooManyCells {
+                observed: 3,
+                maximum: 2,
+            })
+        );
+        let nested_ok = import_xlsx(
+            &nested.join("Top.xlsx"),
+            ImportLimits {
+                max_cells: 4,
+                ..ImportLimits::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            nested_ok.workbook.value(CellId::new(0, 0, 0)),
+            Value::Number(4.0)
+        );
+
+        let mix = root.join("mix");
+        std::fs::create_dir_all(&mix).unwrap();
+        write_plain_numbered(&mix.join("Book.xlsx"), 2);
+        let mix_source = mix.join("Source.xlsx");
+        write_linked_workbook(
+            &mix_source,
+            "Report",
+            &numbered_sheet_cells(2),
+            "",
+            "Book.xlsx",
+            "1",
+        );
+        assert_eq!(
+            import_xlsx(&mix_source, exact_four)
+                .unwrap()
+                .workbook
+                .value(CellId::new(0, 0, 0)),
+            Value::Number(1.0)
+        );
+        write_linked_workbook(
+            &mix_source,
+            "Report",
+            &numbered_sheet_cells(3),
+            "",
+            "Book.xlsx",
+            "1",
+        );
+        assert_eq!(
+            import_xlsx(&mix_source, exact_four).err(),
+            Some(ImportError::TooManyCells {
+                observed: 5,
+                maximum: 4,
+            })
+        );
+
+        let swallow = root.join("swallow");
+        std::fs::create_dir_all(&swallow).unwrap();
+        write_plain_numbered(&swallow.join("Huge.xlsx"), 3);
+        let swallow_source = swallow.join("Source.xlsx");
+        write_linked_workbook(
+            &swallow_source,
+            "Report",
+            r#"<c r="A1"><f>[Huge.xlsx]Sheet1!A1</f><v>0</v></c>"#,
+            "",
+            "Huge.xlsx",
+            "9",
+        );
+        assert_eq!(
+            import_xlsx(&swallow_source, tight).err(),
+            Some(ImportError::TooManyCells {
+                observed: 3,
+                maximum: 2,
+            })
+        );
+    }
+
+    struct TempCleanup(std::path::PathBuf);
+
+    impl Drop for TempCleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 }
