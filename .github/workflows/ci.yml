@@ -82,7 +82,10 @@ jobs:
           cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build and test the isolated corpus scorer
         run: |
+          cargo build --locked --release -p omasheets-app -p omasheets-service
           cargo test --workspace --locked --release
+          cargo build --locked --release -p omasheets-app --examples
+          target/release/examples/native_acceptance
           python -m pip install --disable-pip-version-check openpyxl==3.1.5
           cargo test -p omasheets-service --locked --release --test native_controls independent_reader -- --ignored
           cargo build --locked --release -p omasheets-corpus
@@ -973,3 +976,27 @@ jobs:
           test ! -e "$HOME/.codex/plugins/omasheets"
           test -f "$HOME/.codex/plugins/keep-me/user.txt"
           test ! -e "$XDG_DATA_HOME/applications/io.github.tcballard.OmaSheets.desktop"
+
+  rust-compatibility:
+    name: Rust compatibility sandbox acceptance
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base
+      # Kernel namespaces are needed by the production Bubblewrap worker.
+      options: --privileged
+    steps:
+      - run: pacman -Syu --noconfirm --needed git rust cmake gcc make nlohmann-json libreoffice-fresh libreoffice-fresh-sdk bubblewrap ttf-dejavu
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the Rust worker and native UNO type adapter
+        run: |
+          cargo build --locked -p omasheets-app --examples --bin omasheets
+          cmake -S native/uno -B .ci-uno -DCMAKE_BUILD_TYPE=Release
+          cmake --build .ci-uno --parallel 2
+          .ci-uno/omasheets-uno-bridge --self-test
+      - name: Exercise real compatibility workbooks without Python
+        env:
+          SAL_USE_VCLPLUGIN: svp
+        run: |
+          export OMASHEETS_APP="$GITHUB_WORKSPACE/target/debug/omasheets"
+          export OMASHEETS_UNO_BRIDGE="$GITHUB_WORKSPACE/.ci-uno/omasheets-uno-bridge"
+          target/debug/examples/compatibility_acceptance
