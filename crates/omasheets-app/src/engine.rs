@@ -147,11 +147,13 @@ impl Engine {
             .stdout(Stdio::null())
             // Opt-in developer diagnostics go to the local terminal only. Keep
             // normal CLI/MCP failures path-redacted and worker output private.
-            .stderr(if std::env::var_os("OMASHEETS_WORKER_DIAGNOSTICS").is_some() {
-                Stdio::inherit()
-            } else {
-                Stdio::null()
-            });
+            .stderr(
+                if std::env::var_os("OMASHEETS_WORKER_DIAGNOSTICS").is_some() {
+                    Stdio::inherit()
+                } else {
+                    Stdio::null()
+                },
+            );
         unsafe {
             command.pre_exec(|| {
                 libc::umask(0o077);
