@@ -145,7 +145,13 @@ impl Engine {
             .env_clear()
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            // Opt-in developer diagnostics go to the local terminal only. Keep
+            // normal CLI/MCP failures path-redacted and worker output private.
+            .stderr(if std::env::var_os("OMASHEETS_WORKER_DIAGNOSTICS").is_some() {
+                Stdio::inherit()
+            } else {
+                Stdio::null()
+            });
         unsafe {
             command.pre_exec(|| {
                 libc::umask(0o077);
@@ -185,7 +191,7 @@ impl Engine {
         // A worker crash must not leave its office/adapter children behind.
         unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
         let result = files::read_json(&job.0.join("result.json"), 4 * 1024 * 1024)
-            .map_err(|_| "Calc worker returned no bounded result")?;
+            .map_err(|_| format!("Calc worker returned no bounded result ({status})"))?;
         if !status.success() || result["ok"] != true {
             return Err(redact(
                 result["error"]

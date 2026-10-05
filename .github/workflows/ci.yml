@@ -1009,6 +1009,8 @@ jobs:
       - name: Package and exercise the compiler-free Rust preview
         env:
           SAL_USE_VCLPLUGIN: svp
+          # Only generated test workbooks enter this diagnostic run.
+          OMASHEETS_WORKER_DIAGNOSTICS: "1"
         run: |
           preview=omasheets-rust-preview-linux-x86_64
           mkdir -p "$preview/examples"
