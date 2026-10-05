@@ -989,7 +989,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build the Rust worker and native UNO type adapter
         run: |
-          export OMASHEETS_SOURCE_COMMIT="$(git rev-parse HEAD)"
+          OMASHEETS_SOURCE_COMMIT=$(git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD)
+          export OMASHEETS_SOURCE_COMMIT
           cargo build --release --locked -p omasheets-app -p omasheets-service
           cargo build --release --locked -p omasheets-app --examples
           cmake -S native/uno -B .ci-uno -DCMAKE_BUILD_TYPE=Release
@@ -1013,7 +1014,7 @@ jobs:
           cp .ci-uno/omasheets-uno-bridge "$preview/"
           cp scripts/test_rust_preview.sh "$preview/test.sh"
           cp docs/RUST-PREVIEW.md "$preview/README.md"
-          git rev-parse HEAD > "$preview/SOURCE_COMMIT"
+          git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD > "$preview/SOURCE_COMMIT"
           pacman -Q libreoffice-fresh glibc bubblewrap > "$preview/BUILD_PACKAGES"
           (cd "$preview" && sha256sum omasheets omasheets-service omasheets-uno-bridge examples/* test.sh README.md SOURCE_COMMIT BUILD_PACKAGES > SHA256SUMS)
           useradd --create-home rust-preview
