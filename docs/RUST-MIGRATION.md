@@ -93,3 +93,16 @@ passes against LibreOffice 24.2. Real workbook process acceptance still needs CI
 because this workspace refuses Unix sockets. These components are not yet wired
 into production packaging; session/review/UI, installation and tooling migration
 remain required before removing the legacy source.
+
+## XPS test checkpoint — 5 October 2026
+
+The Arch real-LibreOffice acceptance job passed at `abde3ffab8a6` after correcting
+the adapter's build-time library search path, UNO type registries and invocation
+factory construction. The self-test now exercises struct property dispatch.
+The strengthened CI job packages the app, service, UNO adapter and acceptance
+executables, then runs those exact packaged files before uploading them.
+See [RUST-PREVIEW.md](RUST-PREVIEW.md) for compiler-free device checks.
+
+This closes the observed UNO runtime failures. It does not close the completion
+gate above: production package wiring and remaining migration responsibilities
+are still unfinished. No tracked Python files or safety gates were removed.

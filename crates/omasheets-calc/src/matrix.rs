@@ -18,11 +18,7 @@ impl Workbook {
                     values.push(input.values[row * input.columns + column].clone());
                 }
             }
-            return Ok(ArrayValue {
-                rows: input.columns,
-                columns: input.rows,
-                values,
-            });
+            return Ok(ArrayValue::from_parts(input.columns, input.rows, values));
         }
         let [left, right] = arguments else {
             return Err(CalcError::InvalidArguments);
@@ -46,7 +42,8 @@ impl Workbook {
         let numbers = |array: ArrayValue| {
             array
                 .values
-                .into_iter()
+                .iter()
+                .cloned()
                 .map(|value| match value {
                     Value::Number(value) if value.is_finite() => Ok(value),
                     Value::Error(error) => Err(error),
@@ -71,11 +68,7 @@ impl Workbook {
                 });
             }
         }
-        Ok(ArrayValue {
-            rows,
-            columns,
-            values,
-        })
+        Ok(ArrayValue::from_parts(rows, columns, values))
     }
 }
 

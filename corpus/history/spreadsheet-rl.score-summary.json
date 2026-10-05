@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "source": "spreadsheet-rl",
+  "manifest": "spreadsheet-rl-manifest.jsonl",
+  "manifest_sha256": "5d16d1e75b865ab3a7b004b435b3bedb53edaffc7766f3ccb77757d72d0893c3",
+  "scored": "2026-09-24",
+  "command": "omasheets-corpus score spreadsheet-rl-manifest.jsonl <root> <out> --timeout-seconds 30",
+  "engine_commit": "371fc304e108a3eb2808a121f01ec471f05458b8",
+  "runner": "Darwin arm64, local cargo release; probe RLIMIT_AS returns EINVAL on this host and was allowed to succeed; not a GitHub ubuntu-latest runner",
+  "wall_seconds": 1.67479,
+  "candidate_engine": "formualizer-calamine-0.8.4",
+  "candidate_summary": {
+    "files": 16,
+    "succeeded": 11,
+    "failed": 5,
+    "timed_out": 0,
+    "value_cells_observed": 18204,
+    "formula_cells_observed": 5264,
+    "formula_cells_loaded": 5264,
+    "formula_parse_rate": 1.0,
+    "peak_rss_bytes_max": 66453504
+  },
+  "owned_engine": "omasheets-owned-m0",
+  "owned_summary": {
+    "files": 16,
+    "opened": 16,
+    "failed": 0,
+    "timed_out": 0,
+    "formula_cells_observed": 14391,
+    "formula_cells_loaded": 13703,
+    "formula_cells_compared": 13703,
+    "stored_values_matched": 11151,
+    "stored_values_mismatched": 2552,
+    "unsupported_formulas": 688,
+    "formula_parse_rate": 0.9521923424362448,
+    "comparison_coverage": 0.9521923424362448,
+    "stored_value_match_rate": 0.8137634094723784,
+    "unsupported_reasons": {
+      "cycle": 53,
+      "invalid_reference": 3,
+      "structured_reference": 628,
+      "unsupported_function": 4
+    },
+    "syntax_failure_tokens": {},
+    "reference_failure_kinds": {
+      "column_without_row": 3
+    },
+    "mismatch_value_kinds": {
+      "#N/A -> #VALUE!": 7,
+      "blank -> #DIV/0!": 15,
+      "blank -> #VALUE!": 4,
+      "blank -> number": 1690,
+      "blank -> text": 119,
+      "number -> #REF!": 88,
+      "number -> #VALUE!": 628,
+      "text -> number": 1
+    },
+    "workbooks_with_skipped_sheets": 0,
+    "skipped_sheets": 0,
+    "peak_rss_bytes_max": 30752768
+  },
+  "owned_unsupported_functions": {
+    "GETPIVOTDATA": {
+      "formula_cells": 4,
+      "workbooks": 1
+    }
+  },
+  "candidate_failure_kinds": {
+    "other": 2,
+    "undefined_name_or_formula_parse": 3
+  },
+  "owned_failure_kinds": {},
+  "notes": [
+    "Aggregate only: no workbook paths, cell contents or per-file results are recorded here.",
+    "Schema 1 aggregate summary derived from one omasheets-corpus schema 2 score. The per-workbook list is not stored.",
+    "Source is Hugging Face Spreadsheet-RL (2026-05-17, CC-BY-SA-4.0), a 16-workbook sample. This is not the Enron corpus and not the full 33,015-file zip. The full zip was not scored.",
+    "Engine commit 371fc30 is 371fc304e108a3eb2808a121f01ec471f05458b8. No engine source was changed for this score.",
+    "The scored manifest is local and not vendored. Four identifiers longer than 64 characters were shortened; the 16 digests are unchanged.",
+    "Candidate formula-cell totals include only workbooks that lane opened. Workbooks that failed to open stay in the file count."
+  ]
+}

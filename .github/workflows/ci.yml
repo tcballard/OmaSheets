@@ -91,6 +91,14 @@ jobs:
           cargo build --locked --release -p omasheets-corpus
           cargo build --locked --release -p omasheets-calc --bin omasheets-calc-bench
           cargo build --locked --release -p omasheets-xlsx --bin omasheets-xlsx-score
+      - name: Check the reproducible sparse import corpus
+        run: |
+          pip install --disable-pip-version-check uv==0.12.20
+          mkdir -p "$RUNNER_TEMP/omasheets-m0"
+          uv run --no-project --with openpyxl==3.1.5 python -m scripts.check_import_corpus \
+            "$RUNNER_TEMP/omasheets-m0/import-corpus" \
+            --corpus-bin target/release/omasheets-corpus --independent-reader \
+            > "$RUNNER_TEMP/omasheets-m0/import-corpus-summary.json"
       - name: Record an owned calculation smoke benchmark
         run: |
           mkdir -p "$RUNNER_TEMP/omasheets-m0"
@@ -237,6 +245,9 @@ jobs:
         with:
           name: omasheets-m0-corpus-smoke-linux-x86_64
           path: |
+            ${{ runner.temp }}/omasheets-m0/import-corpus-summary.json
+            ${{ runner.temp }}/omasheets-m0/import-corpus/manifest.jsonl
+            ${{ runner.temp }}/omasheets-m0/import-corpus/score.json
             ${{ runner.temp }}/omasheets-m0/fixture.json
             ${{ runner.temp }}/omasheets-m0/calc-benchmark.json
             ${{ runner.temp }}/omasheets-m0/manifest.jsonl
@@ -978,7 +989,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build the Rust worker and native UNO type adapter
         run: |
-          cargo build --locked -p omasheets-app --examples --bin omasheets
+          export OMASHEETS_SOURCE_COMMIT="$(git rev-parse HEAD)"
+          cargo build --release --locked -p omasheets-app -p omasheets-service
+          cargo build --release --locked -p omasheets-app --examples
           cmake -S native/uno -B .ci-uno -DCMAKE_BUILD_TYPE=Release
           cmake --build .ci-uno --parallel 2
           .ci-uno/omasheets-uno-bridge --self-test
@@ -986,6 +999,31 @@ jobs:
         env:
           SAL_USE_VCLPLUGIN: svp
         run: |
-          export OMASHEETS_APP="$GITHUB_WORKSPACE/target/debug/omasheets"
+          export OMASHEETS_APP="$GITHUB_WORKSPACE/target/release/omasheets"
           export OMASHEETS_UNO_BRIDGE="$GITHUB_WORKSPACE/.ci-uno/omasheets-uno-bridge"
-          target/debug/examples/compatibility_acceptance
+          target/release/examples/compatibility_acceptance
+      - name: Package and exercise the compiler-free Rust preview
+        env:
+          SAL_USE_VCLPLUGIN: svp
+        run: |
+          preview=omasheets-rust-preview-linux-x86_64
+          mkdir -p "$preview/examples"
+          cp target/release/omasheets target/release/omasheets-service "$preview/"
+          cp target/release/examples/{native_acceptance,compatibility_acceptance,grid_fixture} "$preview/examples/"
+          cp .ci-uno/omasheets-uno-bridge "$preview/"
+          cp scripts/test_rust_preview.sh "$preview/test.sh"
+          cp docs/RUST-PREVIEW.md "$preview/README.md"
+          git rev-parse HEAD > "$preview/SOURCE_COMMIT"
+          pacman -Q libreoffice-fresh glibc bubblewrap > "$preview/BUILD_PACKAGES"
+          (cd "$preview" && sha256sum omasheets omasheets-service omasheets-uno-bridge examples/* test.sh README.md SOURCE_COMMIT BUILD_PACKAGES > SHA256SUMS)
+          bash "$preview/test.sh"
+          tar -czf "$preview.tar.gz" "$preview"
+          sha256sum "$preview.tar.gz" > "$preview.tar.gz.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: omasheets-rust-preview-linux-x86_64
+          path: |
+            omasheets-rust-preview-linux-x86_64.tar.gz
+            omasheets-rust-preview-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30

@@ -12,8 +12,10 @@ mod matrix;
 mod reference;
 pub mod serial_date;
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt;
+use std::sync::Arc;
 
 /// Defined names may refer to other names; deeper chains are rejected.
 const MAX_NAME_DEPTH: usize = 8;
@@ -135,7 +137,8 @@ pub enum FormulaError {
     UnsupportedFunction(String),
     InvalidReference(String),
     UnknownSheet(String),
-    /// A reference into another workbook (`[1]Sheet!A1`); never evaluated.
+    /// A malformed external-workbook token. A well-formed `[n]Sheet!A1` or
+    /// `'[Book.xlsx]Sheet'!A1` compiles and reads the external cache.
     ExternalReference(String),
     /// A bare identifier that is neither a cell reference nor a defined name.
     UnknownName(String),
@@ -194,6 +197,14 @@ enum Expr<R = CellId> {
     Error(CalcError),
     /// An omitted argument, as in `IF(x,,y)`; evaluates to blank.
     Empty,
+    /// External cell. The parser lowers it to a literal before returning.
+    External(ExternalAddress),
+    /// External rectangle, top-left anchor. Lowered to an array of cached values.
+    ExternalRange {
+        anchor: ExternalAddress,
+        rows: usize,
+        columns: usize,
+    },
     /// A bounded rectangular array of literal values, with no dependencies.
     Array(ArrayValue),
     Reference(R),
@@ -443,7 +454,11 @@ impl ParsedFormula {
         // a name reference fails with `UnknownName`, as it would in a
         // workbook without definitions.
         let defined_names = DefinedNames::default();
-        Parser::new(source, sheet, &lowered, &defined_names)
+        let external = ExternalCache {
+            reject_references: true,
+            ..ExternalCache::default()
+        };
+        Parser::new(source, sheet, &lowered, &defined_names, &external)
             .parse()
             .map(|expression| Self {
                 expression,
@@ -465,7 +480,11 @@ impl ParsedFormula {
             .map(|(name, index)| (name.to_lowercase(), *index))
             .collect();
         let defined_names = DefinedNames::default();
-        Parser::new_structured(source, sheet, &lowered, &defined_names, context)
+        let external = ExternalCache {
+            reject_references: true,
+            ..ExternalCache::default()
+        };
+        Parser::new_structured(source, sheet, &lowered, &defined_names, &external, context)
             .parse_with_metadata()
             .map(|(expression, structured_tables)| Self {
                 expression,
@@ -577,7 +596,9 @@ fn visit_references(expression: &Expr<CellId>, visit: &mut impl FnMut(CellId)) {
         | Expr::Text(_)
         | Expr::Error(_)
         | Expr::Array(_)
-        | Expr::Empty => {}
+        | Expr::Empty
+        | Expr::External(_)
+        | Expr::ExternalRange { .. } => {}
     }
 }
 
@@ -624,7 +645,9 @@ fn rebind_references(expression: &mut Expr<CellId>, map: &mut impl FnMut(CellId)
         | Expr::Text(_)
         | Expr::Error(_)
         | Expr::Array(_)
-        | Expr::Empty => {}
+        | Expr::Empty
+        | Expr::External(_)
+        | Expr::ExternalRange { .. } => {}
     }
 }
 
@@ -706,6 +729,8 @@ pub struct Workbook {
     pending: Vec<usize>,
     sheet_names: HashMap<String, u32>,
     defined_names: DefinedNames,
+    /// Cached cells from external link parts. Read when a formula is compiled.
+    external: ExternalCache,
     /// Shared range nodes by identity, so every formula over the same cells
     /// shares one node and one set of member edges.
     ranges: HashMap<RangeKey, usize>,
@@ -734,6 +759,7 @@ impl Default for Workbook {
             pending: Vec::new(),
             sheet_names: HashMap::new(),
             defined_names: DefinedNames::default(),
+            external: ExternalCache::default(),
             ranges: HashMap::new(),
             free_ranges: Vec::new(),
             generation: 1,
@@ -805,6 +831,33 @@ impl Workbook {
             .or_insert_with(|| definition.into());
     }
 
+    /// Importers must retain source caches when linked inputs cannot be resolved.
+    pub fn require_external_inputs(&mut self) {
+        self.external.require_inputs = true;
+    }
+
+    /// Records one external cell. `link_index` is the 1-based order of
+    /// `externalReferences`. `book_file` is that link's target file name, so
+    /// `[Book.xlsx]Sheet!A1` finds the same cell as `[1]Sheet!A1`. A scalar
+    /// is copied into a formula when the formula is compiled; a range shares
+    /// one interned array among every formula and defined name that names it.
+    /// The xlsx importer fills this from the target workbook when that file
+    /// is next to the source, and from the external-link part only when the
+    /// file is absent. A later write does not recalculate formulas already
+    /// compiled.
+    pub fn cache_external_cell(
+        &mut self,
+        link_index: u32,
+        book_file: Option<&str>,
+        sheet: &str,
+        row: u32,
+        column: u32,
+        value: Value,
+    ) {
+        self.external
+            .insert(link_index, book_file, sheet, row, column, value);
+    }
+
     pub fn set_error(&mut self, cell: CellId, error: CalcError) -> RecalcReport {
         self.commit(cell, Input::Literal(Value::Error(error)), Vec::new())
     }
@@ -837,8 +890,14 @@ impl Workbook {
         cell: CellId,
         formula: &str,
     ) -> Result<RecalcReport, FormulaError> {
-        let expression =
-            Parser::new(formula, cell.sheet, &self.sheet_names, &self.defined_names).parse()?;
+        let expression = Parser::new(
+            formula,
+            cell.sheet,
+            &self.sheet_names,
+            &self.defined_names,
+            &self.external,
+        )
+        .parse()?;
         self.set_parsed_formula(
             cell,
             ParsedFormula {
@@ -1462,6 +1521,10 @@ impl Workbook {
                 columns,
             } => self.implicit_intersection(*node, *rows, *columns),
             Expr::Range { .. } => unreachable!("parsed ranges are compiled to range nodes"),
+            // External references are lowered to literals while parsing.
+            Expr::External(_) | Expr::ExternalRange { .. } => {
+                Value::Error(CalcError::InvalidReference)
+            }
             Expr::Function(function, arguments) => self.evaluate_function(*function, arguments),
         }
     }
@@ -1540,7 +1603,7 @@ impl Workbook {
         }
         if matches!(function, Function::Transpose | Function::MMult) {
             return match self.matrix_array(function, arguments) {
-                Ok(array) => array.values.into_iter().next().unwrap_or(Value::Blank),
+                Ok(array) => array.values.first().cloned().unwrap_or(Value::Blank),
                 Err(error) => Value::Error(error),
             };
         }
@@ -2184,7 +2247,7 @@ impl Workbook {
         }
         let mut products = vec![1.0; expected.0 * expected.1];
         for array in &arrays {
-            for (product, value) in products.iter_mut().zip(&array.values) {
+            for (product, value) in products.iter_mut().zip(array.values.iter()) {
                 *product *= match value {
                     Value::Number(number) => *number,
                     Value::Error(error) => return Value::Error(error.clone()),
@@ -2625,7 +2688,7 @@ impl Workbook {
             Expr::RangeNode { node, .. } => output.extend(self.range_values(*node)),
             Expr::Empty => {}
             other if contains_array_operand(other) => match self.evaluate_array(other) {
-                Ok(array) => output.extend(array.values),
+                Ok(array) => output.extend(array.values.iter().cloned()),
                 Err(error) => output.push(Value::Error(error)),
             },
             other => output.push(self.evaluate(other)),
@@ -2657,11 +2720,7 @@ impl Workbook {
                 } else {
                     (values.len(), 1)
                 };
-                Ok(ArrayValue {
-                    rows,
-                    columns,
-                    values,
-                })
+                Ok(ArrayValue::from_parts(rows, columns, values))
             }
             Expr::UnaryMinus(inner) | Expr::Percent(inner) if contains_array_operand(inner) => {
                 let inner = self.evaluate_array(inner)?;
@@ -2671,14 +2730,11 @@ impl Workbook {
                 };
                 let values = inner
                     .values
-                    .into_iter()
+                    .iter()
+                    .cloned()
                     .map(|value| self.evaluate(&rebuild(value)))
                     .collect();
-                Ok(ArrayValue {
-                    rows: inner.rows,
-                    columns: inner.columns,
-                    values,
-                })
+                Ok(ArrayValue::from_parts(inner.rows, inner.columns, values))
             }
             Expr::Binary(operator, left, right)
                 if contains_array_operand(left) || contains_array_operand(right) =>
@@ -2696,11 +2752,7 @@ impl Workbook {
                         ));
                     }
                 }
-                Ok(ArrayValue {
-                    rows,
-                    columns,
-                    values,
-                })
+                Ok(ArrayValue::from_parts(rows, columns, values))
             }
             Expr::Function(function, arguments)
                 if (*function == Function::If || is_elementwise(*function))
@@ -2721,11 +2773,7 @@ impl Workbook {
                         values.push(self.evaluate_function(*function, &literals));
                     }
                 }
-                Ok(ArrayValue {
-                    rows,
-                    columns,
-                    values,
-                })
+                Ok(ArrayValue::from_parts(rows, columns, values))
             }
             other => Ok(ArrayValue::scalar(self.evaluate(other))),
         }
@@ -3057,11 +3105,12 @@ fn typed_compare(left: &Value, right: &Value) -> Result<std::cmp::Ordering, Calc
 }
 
 /// An intermediate array inside an aggregate argument, row-major.
+/// `values` is shared so cloning an array expression does not copy cells.
 #[derive(Clone, Debug, PartialEq)]
 struct ArrayValue {
     rows: usize,
     columns: usize,
-    values: Vec<Value>,
+    values: Arc<[Value]>,
 }
 
 /// Lookup inputs borrow constants and retain the existing range fast path.
@@ -3128,20 +3177,24 @@ impl<'a> ArrayInput<'a> {
     fn values(&self, workbook: &Workbook) -> Vec<Value> {
         match self {
             Self::Range { node, .. } => workbook.range_values(*node),
-            Self::Constant(array) => array.values.clone(),
-            Self::Selection(reference) => reference.array(workbook).values,
-            Self::Computed(array) => array.values.clone(),
+            Self::Constant(array) => array.values.to_vec(),
+            Self::Selection(reference) => reference.array(workbook).values.to_vec(),
+            Self::Computed(array) => array.values.to_vec(),
         }
     }
 }
 
 impl ArrayValue {
-    fn scalar(value: Value) -> Self {
+    fn from_parts(rows: usize, columns: usize, values: Vec<Value>) -> Self {
         Self {
-            rows: 1,
-            columns: 1,
-            values: vec![value],
+            rows,
+            columns,
+            values: Arc::from(values),
         }
+    }
+
+    fn scalar(value: Value) -> Self {
+        Self::from_parts(1, 1, vec![value])
     }
 
     fn shape(&self) -> (usize, usize) {
@@ -4531,6 +4584,7 @@ fn compile_expression(
             columns,
         },
         Expr::RangeNode { .. } => unreachable!("parsed formulas never hold range nodes"),
+        Expr::External(_) | Expr::ExternalRange { .. } => Expr::Error(CalcError::InvalidReference),
         Expr::Function(function, arguments) => Expr::Function(
             function,
             arguments
@@ -4585,8 +4639,312 @@ fn collect_dependencies(
         | Expr::Text(_)
         | Expr::Error(_)
         | Expr::Array(_)
-        | Expr::Empty => {}
+        | Expr::Empty
+        | Expr::External(_)
+        | Expr::ExternalRange { .. } => {}
     }
+}
+
+/// One external cell addressed by link index or workbook file name.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+enum ExternalBook {
+    Index(u32),
+    File(String),
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct ExternalAddress {
+    book: ExternalBook,
+    sheet: String,
+    row: u32,
+    column: u32,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct ExternalRangeKey {
+    book: ExternalBook,
+    sheet: String,
+    row: u32,
+    column: u32,
+    rows: usize,
+    columns: usize,
+}
+
+/// External cells keyed by the 1-based link index and the target file name,
+/// both with a lower-cased sheet name. Callers fill this from the target
+/// workbook when that file is next to the source, and from the external-link
+/// part only when the file is absent. This crate does not open the file.
+#[derive(Clone, Debug, Default)]
+struct ExternalCache {
+    // Native event documents cannot persist external cache inputs yet.
+    reject_references: bool,
+    require_inputs: bool,
+    sheets: HashSet<(ExternalBook, String)>,
+    by_index: HashMap<(u32, String, u32, u32), Value>,
+    by_file: HashMap<(String, String, u32, u32), Value>,
+    /// Distinct external rectangles, each stored once for every formula and
+    /// defined name that names the same cells.
+    interned: RefCell<HashMap<ExternalRangeKey, ArrayValue>>,
+    interned_cells: std::cell::Cell<usize>,
+}
+
+impl ExternalCache {
+    fn insert(
+        &mut self,
+        link_index: u32,
+        book_file: Option<&str>,
+        sheet: &str,
+        row: u32,
+        column: u32,
+        value: Value,
+    ) {
+        let sheet = sheet.trim().to_lowercase();
+        self.sheets
+            .insert((ExternalBook::Index(link_index), sheet.clone()));
+        self.by_index
+            .insert((link_index, sheet.clone(), row, column), value.clone());
+        if let Some(file) = book_file {
+            let file = external_file_key(file);
+            if !file.is_empty() {
+                self.sheets
+                    .insert((ExternalBook::File(file.clone()), sheet.clone()));
+                self.by_file.insert((file, sheet, row, column), value);
+            }
+        }
+    }
+
+    fn get(&self, book: &ExternalBook, sheet: &str, row: u32, column: u32) -> Option<&Value> {
+        let sheet = sheet.trim().to_lowercase();
+        match book {
+            ExternalBook::Index(index) => self.by_index.get(&(*index, sheet, row, column)),
+            ExternalBook::File(file) => self.by_file.get(&(file.clone(), sheet, row, column)),
+        }
+    }
+}
+
+fn external_file_key(token: &str) -> String {
+    let token = token
+        .trim()
+        .trim_matches(|character| character == '"' || character == '\'');
+    let segment = token.rsplit(['/', '\\']).next().unwrap_or(token);
+    let segment = segment.split(['?', '#']).next().unwrap_or(segment);
+    percent_decode(segment).trim().to_lowercase()
+}
+
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(hex) = std::str::from_utf8(&bytes[index + 1..index + 3]) {
+                if let Ok(value) = u8::from_str_radix(hex, 16) {
+                    decoded.push(value);
+                    index += 3;
+                    continue;
+                }
+            }
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+fn parse_external_book(token: &str) -> Option<ExternalBook> {
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+    if token.bytes().all(|byte| byte.is_ascii_digit()) {
+        let index = token.parse::<u32>().ok()?;
+        if index == 0 {
+            return None;
+        }
+        return Some(ExternalBook::Index(index));
+    }
+    let file = external_file_key(token);
+    if file.is_empty() {
+        None
+    } else {
+        Some(ExternalBook::File(file))
+    }
+}
+
+/// `None` when `sheet_name` is a local sheet. `Some(Err)` is a broken
+/// external qualifier (`[`, an empty book, or a 3D sheet).
+fn split_external_qualifier(sheet_name: &str) -> Option<Result<(ExternalBook, String), ()>> {
+    let open = sheet_name.find('[')?;
+    let rest = &sheet_name[open + 1..];
+    let Some(close) = rest.find(']') else {
+        return Some(Err(()));
+    };
+    let Some(book) = parse_external_book(&rest[..close]) else {
+        return Some(Err(()));
+    };
+    let sheet = rest[close + 1..].trim();
+    if sheet.is_empty() || sheet.contains([':', '[', ']']) {
+        return Some(Err(()));
+    }
+    Some(Ok((book, sheet.to_string())))
+}
+
+fn value_to_expr(value: Value) -> Expr {
+    match value {
+        Value::Blank => Expr::Empty,
+        Value::Number(number) => Expr::Number(number),
+        Value::Boolean(boolean) => Expr::Boolean(boolean),
+        Value::Text(text) => Expr::Text(text),
+        Value::Error(error) => Expr::Error(error),
+    }
+}
+
+fn external_rectangle(
+    first: &ExternalAddress,
+    second: &ExternalAddress,
+) -> Result<Expr, FormulaError> {
+    let row_start = first.row.min(second.row);
+    let row_end = first.row.max(second.row);
+    let column_start = first.column.min(second.column);
+    let column_end = first.column.max(second.column);
+    let rows = (row_end - row_start + 1) as usize;
+    let columns = (column_end - column_start + 1) as usize;
+    let count = rows
+        .checked_mul(columns)
+        .ok_or(FormulaError::RangeTooLarge)?;
+    if count > MAX_RANGE_CELLS {
+        return Err(FormulaError::RangeTooLarge);
+    }
+    if rows == 1 && columns == 1 {
+        return Ok(Expr::External(ExternalAddress {
+            book: first.book.clone(),
+            sheet: first.sheet.clone(),
+            row: row_start,
+            column: column_start,
+        }));
+    }
+    Ok(Expr::ExternalRange {
+        anchor: ExternalAddress {
+            book: first.book.clone(),
+            sheet: first.sheet.clone(),
+            row: row_start,
+            column: column_start,
+        },
+        rows,
+        columns,
+    })
+}
+
+fn lower_external_scalar(
+    cache: &ExternalCache,
+    address: &ExternalAddress,
+) -> Result<Expr, FormulaError> {
+    match cache.get(&address.book, &address.sheet, address.row, address.column) {
+        Some(value) => Ok(value_to_expr(value.clone())),
+        None if cache.require_inputs => Err(FormulaError::ExternalReference(
+            "linked cell input is unavailable".into(),
+        )),
+        None => Ok(Expr::Error(CalcError::InvalidReference)),
+    }
+}
+
+fn lower_external_range(
+    cache: &ExternalCache,
+    anchor: &ExternalAddress,
+    rows: usize,
+    columns: usize,
+) -> Result<Expr, FormulaError> {
+    if cache.require_inputs
+        && !cache
+            .sheets
+            .contains(&(anchor.book.clone(), anchor.sheet.trim().to_lowercase()))
+    {
+        return Err(FormulaError::ExternalReference(
+            "linked sheet inputs are unavailable".into(),
+        ));
+    }
+    let count = rows
+        .checked_mul(columns)
+        .ok_or(FormulaError::RangeTooLarge)?;
+    if count > MAX_RANGE_CELLS {
+        return Err(FormulaError::RangeTooLarge);
+    }
+    let key = ExternalRangeKey {
+        book: anchor.book.clone(),
+        sheet: anchor.sheet.trim().to_lowercase(),
+        row: anchor.row,
+        column: anchor.column,
+        rows,
+        columns,
+    };
+    if let Some(array) = cache.interned.borrow().get(&key).cloned() {
+        return Ok(Expr::Array(array));
+    }
+    let observed = cache
+        .interned_cells
+        .get()
+        .checked_add(count)
+        .ok_or(FormulaError::RangeTooLarge)?;
+    if observed > MAX_RANGE_CELLS {
+        return Err(FormulaError::RangeTooLarge);
+    }
+    let mut values = Vec::with_capacity(count);
+    for row in 0..rows {
+        for column in 0..columns {
+            let value = cache
+                .get(
+                    &anchor.book,
+                    &anchor.sheet,
+                    anchor.row + row as u32,
+                    anchor.column + column as u32,
+                )
+                .cloned()
+                .unwrap_or(Value::Blank);
+            values.push(value);
+        }
+    }
+    let array = ArrayValue::from_parts(rows, columns, values);
+    cache.interned.borrow_mut().insert(key, array.clone());
+    cache.interned_cells.set(observed);
+    Ok(Expr::Array(array))
+}
+
+fn lower_external_expressions(
+    expression: Expr,
+    cache: &ExternalCache,
+) -> Result<Expr, FormulaError> {
+    if cache.reject_references
+        && matches!(&expression, Expr::External(_) | Expr::ExternalRange { .. })
+    {
+        return Err(FormulaError::ExternalReference(
+            "external inputs are unavailable in native documents".into(),
+        ));
+    }
+    Ok(match expression {
+        Expr::External(address) => lower_external_scalar(cache, &address)?,
+        Expr::ExternalRange {
+            anchor,
+            rows,
+            columns,
+        } => lower_external_range(cache, &anchor, rows, columns)?,
+        Expr::UnaryMinus(inner) => {
+            Expr::UnaryMinus(Box::new(lower_external_expressions(*inner, cache)?))
+        }
+        Expr::Percent(inner) => Expr::Percent(Box::new(lower_external_expressions(*inner, cache)?)),
+        Expr::Binary(operator, left, right) => Expr::Binary(
+            operator,
+            Box::new(lower_external_expressions(*left, cache)?),
+            Box::new(lower_external_expressions(*right, cache)?),
+        ),
+        Expr::Function(function, arguments) => Expr::Function(
+            function,
+            arguments
+                .into_iter()
+                .map(|argument| lower_external_expressions(argument, cache))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        other => other,
+    })
 }
 
 struct Parser<'source, 'sheets> {
@@ -4595,6 +4953,7 @@ struct Parser<'source, 'sheets> {
     sheet: u32,
     sheet_names: &'sheets HashMap<String, u32>,
     defined_names: &'sheets DefinedNames,
+    external: &'sheets ExternalCache,
     structured: StructuredContext<'sheets>,
     used_tables: BTreeSet<String>,
     name_depth: usize,
@@ -4625,6 +4984,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
         sheet: u32,
         sheet_names: &'sheets HashMap<String, u32>,
         defined_names: &'sheets DefinedNames,
+        external: &'sheets ExternalCache,
     ) -> Self {
         let source = source.strip_prefix('=').unwrap_or(source);
         Self {
@@ -4633,6 +4993,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
             sheet,
             sheet_names,
             defined_names,
+            external,
             structured: StructuredContext::default(),
             used_tables: BTreeSet::new(),
             name_depth: 0,
@@ -4644,9 +5005,10 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
         sheet: u32,
         sheet_names: &'sheets HashMap<String, u32>,
         defined_names: &'sheets DefinedNames,
+        external: &'sheets ExternalCache,
         structured: StructuredContext<'sheets>,
     ) -> Self {
-        let mut parser = Self::new(source, sheet, sheet_names, defined_names);
+        let mut parser = Self::new(source, sheet, sheet_names, defined_names, external);
         parser.structured = structured;
         parser
     }
@@ -4670,7 +5032,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
         if self.offset != self.source.len() {
             return Err(FormulaError::UnexpectedToken(self.offset));
         }
-        Ok(expression)
+        lower_external_expressions(expression, self.external)
     }
 
     fn parse_comparison(&mut self) -> Result<Expr, FormulaError> {
@@ -4831,7 +5193,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
             {
                 self.parse_structured_reference(None)
             }
-            Some(b'[') => Err(FormulaError::ExternalReference(self.bounded_remainder())),
+            Some(b'[') => self.parse_external_reference(),
             Some(byte) if byte.is_ascii_digit() || byte == b'.' => self.parse_number(),
             Some(byte) if byte.is_ascii_alphabetic() || byte == b'$' || byte == b'_' => {
                 self.parse_reference_or_function()
@@ -4906,11 +5268,11 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
                     let finished = self.peek() == Some(b'}');
                     self.offset += 1;
                     if finished {
-                        return Ok(Expr::Array(ArrayValue {
+                        return Ok(Expr::Array(ArrayValue::from_parts(
                             rows,
-                            columns: columns.expect("completed row"),
+                            columns.expect("completed row"),
                             values,
-                        }));
+                        )));
                     }
                 }
                 _ => return Err(FormulaError::UnexpectedToken(self.offset)),
@@ -5033,6 +5395,7 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
             sheet,
             self.sheet_names,
             self.defined_names,
+            self.external,
             self.structured,
         );
         inner.name_depth = self.name_depth + 1;
@@ -5084,6 +5447,23 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
 
     fn parse_quoted_sheet_reference(&mut self) -> Result<Expr, FormulaError> {
         let start = self.offset;
+        let sheet_name = self.read_quoted_sheet_body()?;
+        self.skip_space();
+        if let Some(parsed) = split_external_qualifier(&sheet_name) {
+            if self.peek() != Some(b'!') {
+                return Err(self.external_error_at(start));
+            }
+            self.offset += 1;
+            let (book, sheet) = parsed.map_err(|_| self.external_error_at(start))?;
+            return self.parse_external_cell_and_span(book, sheet, start);
+        }
+        self.expect(b'!')?;
+        let sheet = self.resolve_sheet(&sheet_name)?;
+        self.parse_qualified_reference(sheet)
+    }
+
+    fn read_quoted_sheet_body(&mut self) -> Result<String, FormulaError> {
+        let start = self.offset;
         self.offset += 1;
         let mut sheet_name = String::new();
         loop {
@@ -5101,15 +5481,202 @@ impl<'source, 'sheets> Parser<'source, 'sheets> {
             }
             sheet_name.push(character);
         }
-        self.skip_space();
-        self.expect(b'!')?;
-        if sheet_name.starts_with('[') {
-            return Err(FormulaError::ExternalReference(
-                sheet_name.chars().take(64).collect(),
-            ));
+        Ok(sheet_name)
+    }
+
+    /// `[n]Sheet!A1`, `[Book.xlsx]Sheet!A1`, and the same forms with a range
+    /// endpoint. A scalar is copied now; a range shares interned cells. A
+    /// missing single cell is `#REF!` and a missing cell inside a range is
+    /// blank.
+    fn parse_external_reference(&mut self) -> Result<Expr, FormulaError> {
+        let start = self.offset;
+        let (book, sheet, cell) = self.parse_bare_external_address(start)?;
+        let Some(cell) = cell else {
+            return Ok(Expr::Error(CalcError::InvalidReference));
+        };
+        self.finish_external_span(
+            ExternalAddress {
+                book,
+                sheet,
+                row: cell.row,
+                column: cell.column,
+            },
+            start,
+        )
+    }
+
+    fn parse_external_cell_and_span(
+        &mut self,
+        book: ExternalBook,
+        sheet: String,
+        start: usize,
+    ) -> Result<Expr, FormulaError> {
+        let Some(cell) = self.parse_external_a1()? else {
+            return Ok(Expr::Error(CalcError::InvalidReference));
+        };
+        self.finish_external_span(
+            ExternalAddress {
+                book,
+                sheet,
+                row: cell.row,
+                column: cell.column,
+            },
+            start,
+        )
+    }
+
+    fn parse_bare_external_address(
+        &mut self,
+        start: usize,
+    ) -> Result<(ExternalBook, String, Option<CellId>), FormulaError> {
+        if self.peek() != Some(b'[') {
+            return Err(self.external_error_at(start));
         }
-        let sheet = self.resolve_sheet(&sheet_name)?;
-        self.parse_qualified_reference(sheet)
+        self.offset += 1;
+        let book_start = self.offset;
+        while let Some(character) = self.source[self.offset..].chars().next() {
+            if character == ']' {
+                break;
+            }
+            if character == '[' || character == '!' {
+                return Err(self.external_error_at(start));
+            }
+            self.offset += character.len_utf8();
+        }
+        if self.peek() != Some(b']') {
+            return Err(self.external_error_at(start));
+        }
+        let book = parse_external_book(&self.source[book_start..self.offset])
+            .ok_or_else(|| self.external_error_at(start))?;
+        self.offset += 1;
+        let sheet_start = self.offset;
+        while let Some(character) = self.source[self.offset..].chars().next() {
+            if character == '!'
+                || character.is_whitespace()
+                || " ,);+-*/^&=<>%:[]{}".contains(character)
+            {
+                break;
+            }
+            self.offset += character.len_utf8();
+        }
+        let sheet = self.source[sheet_start..self.offset].trim().to_string();
+        self.skip_space();
+        if sheet.is_empty() || self.peek() != Some(b'!') {
+            return Err(self.external_error_at(start));
+        }
+        self.offset += 1;
+        let cell = self.parse_external_a1()?;
+        Ok((book, sheet, cell))
+    }
+
+    fn parse_quoted_external_address(
+        &mut self,
+        start: usize,
+    ) -> Result<(ExternalBook, String, Option<CellId>), FormulaError> {
+        if self.peek() != Some(b'\'') {
+            return Err(self.external_error_at(start));
+        }
+        let sheet_name = self
+            .read_quoted_sheet_body()
+            .map_err(|_| self.external_error_at(start))?;
+        self.skip_space();
+        if self.peek() != Some(b'!') {
+            return Err(self.external_error_at(start));
+        }
+        self.offset += 1;
+        let (book, sheet) = match split_external_qualifier(&sheet_name) {
+            Some(Ok(pair)) => pair,
+            _ => return Err(self.external_error_at(start)),
+        };
+        let cell = self.parse_external_a1()?;
+        Ok((book, sheet, cell))
+    }
+
+    /// `None` is a deleted `#REF!` endpoint. Anything that is not an A1 cell
+    /// (an external defined name, a whole column) stays a parse error.
+    fn parse_external_a1(&mut self) -> Result<Option<CellId>, FormulaError> {
+        self.skip_space();
+        let start = self.offset;
+        if self.remaining().starts_with("#REF!") {
+            self.offset += "#REF!".len();
+            return Ok(None);
+        }
+        while matches!(self.peek(), Some(byte) if byte.is_ascii_alphanumeric() || matches!(byte, b'$' | b'_' | b'.'))
+        {
+            self.offset += 1;
+        }
+        if self.offset == start {
+            return Err(self.external_error_at(start));
+        }
+        let token = &self.source[start..self.offset];
+        match parse_a1(token, 0) {
+            Ok(cell) => Ok(Some(cell)),
+            Err(_) => Err(FormulaError::ExternalReference(
+                token.chars().take(64).collect(),
+            )),
+        }
+    }
+
+    fn finish_external_span(
+        &mut self,
+        first: ExternalAddress,
+        start: usize,
+    ) -> Result<Expr, FormulaError> {
+        self.skip_space();
+        if self.peek() != Some(b':') {
+            return Ok(Expr::External(first));
+        }
+        self.offset += 1;
+        self.skip_space();
+        if self.remaining().starts_with("#REF!") {
+            self.offset += "#REF!".len();
+            return Ok(Expr::Error(CalcError::InvalidReference));
+        }
+        let second = if self.peek() == Some(b'[') {
+            let (book, sheet, cell) = self.parse_bare_external_address(start)?;
+            let Some(cell) = cell else {
+                return Ok(Expr::Error(CalcError::InvalidReference));
+            };
+            ExternalAddress {
+                book,
+                sheet,
+                row: cell.row,
+                column: cell.column,
+            }
+        } else if self.peek() == Some(b'\'') {
+            let (book, sheet, cell) = self.parse_quoted_external_address(start)?;
+            let Some(cell) = cell else {
+                return Ok(Expr::Error(CalcError::InvalidReference));
+            };
+            ExternalAddress {
+                book,
+                sheet,
+                row: cell.row,
+                column: cell.column,
+            }
+        } else if matches!(self.peek(), Some(b'$'))
+            || self.peek().is_some_and(|byte| byte.is_ascii_alphabetic())
+        {
+            let Some(cell) = self.parse_external_a1()? else {
+                return Ok(Expr::Error(CalcError::InvalidReference));
+            };
+            ExternalAddress {
+                book: first.book.clone(),
+                sheet: first.sheet.clone(),
+                row: cell.row,
+                column: cell.column,
+            }
+        } else {
+            return Err(self.external_error_at(start));
+        };
+        if first.book != second.book || !first.sheet.eq_ignore_ascii_case(&second.sheet) {
+            return Ok(Expr::Error(CalcError::InvalidReference));
+        }
+        external_rectangle(&first, &second)
+    }
+
+    fn external_error_at(&self, start: usize) -> FormulaError {
+        FormulaError::ExternalReference(self.source[start..].chars().take(64).collect())
     }
 
     fn parse_qualified_reference(&mut self, sheet: u32) -> Result<Expr, FormulaError> {
@@ -5959,6 +6526,13 @@ mod tests {
             workbook.set_formula(cell(0, 1), "='[1]Other sheet'!rate.total"),
             Err(FormulaError::ExternalReference(_))
         ));
+        workbook
+            .set_formula(cell(0, 1), "='[1]Other sheet'!A1")
+            .unwrap();
+        assert_eq!(
+            workbook.value(cell(0, 1)),
+            Value::Error(CalcError::InvalidReference)
+        );
     }
 
     fn cell(row: u32, column: u32) -> CellId {
@@ -6892,14 +7466,44 @@ mod tests {
     }
 
     #[test]
-    fn external_references_and_defined_names_compile_explicitly() {
+    fn native_parsing_refuses_external_inputs_instead_of_inventing_values() {
+        for formula in [
+            "=[1]Inputs!A1",
+            "=SUM([1]Inputs!A1:A3)",
+            "=IFERROR('[Book.xlsx]Sheet 1'!A1,0)",
+        ] {
+            assert!(
+                matches!(
+                    ParsedFormula::parse(formula, 0, &HashMap::new()),
+                    Err(FormulaError::ExternalReference(_))
+                ),
+                "{formula}"
+            );
+            assert!(
+                matches!(
+                    ParsedFormula::parse_with_structured_references(
+                        formula,
+                        0,
+                        &HashMap::new(),
+                        StructuredContext::default()
+                    ),
+                    Err(FormulaError::ExternalReference(_))
+                ),
+                "{formula}"
+            );
+        }
+        assert!(ParsedFormula::parse("=LEN(\"[1]Inputs!A1\")", 0, &HashMap::new()).is_ok());
+    }
+
+    #[test]
+    fn cached_external_cells_sum_and_defined_names() {
         let mut workbook = Workbook::default();
         workbook.define_sheet(0, "Data");
         workbook.set_number(cell(0, 0), 10.0);
         workbook.set_number(cell(1, 0), 20.0);
         workbook.define_name("Rates", "Data!$A$1:$A$2");
         workbook.define_name("rate_total", "SUM(Rates)*2");
-        workbook.define_name("Broken", "[2]External!A1");
+        workbook.define_name("Broken", "[1]Inputs!A1");
         workbook.define_name("Loop", "Loop+1");
 
         workbook.set_formula(cell(0, 1), "=SUM(Rates)").unwrap();
@@ -6915,25 +7519,130 @@ mod tests {
             Err(FormulaError::UnknownName("Missing".into()))
         );
         assert_eq!(
-            workbook.set_formula(cell(0, 3), "=Broken"),
-            Err(FormulaError::UnsupportedName("Broken".into()))
-        );
-        assert_eq!(
             workbook.set_formula(cell(0, 3), "=Loop"),
             Err(FormulaError::UnsupportedName("Loop".into()))
         );
+        // No cache yet: the name and the cell compile, and the missing cell is #REF!.
+        workbook.set_formula(cell(0, 3), "=Broken").unwrap();
+        assert_eq!(
+            workbook.value(cell(0, 3)),
+            Value::Error(CalcError::InvalidReference)
+        );
+        workbook
+            .set_formula(cell(0, 4), "='[1]Data Sheet'!B11")
+            .unwrap();
+        assert_eq!(
+            workbook.value(cell(0, 4)),
+            Value::Error(CalcError::InvalidReference)
+        );
+        workbook
+            .set_formula(cell(0, 4), "=[3]daily!$Y$140")
+            .unwrap();
+        assert_eq!(
+            workbook.value(cell(0, 4)),
+            Value::Error(CalcError::InvalidReference)
+        );
+        workbook
+            .set_formula(cell(0, 4), "=VLOOKUP(1,[5]Q!$A$1:$C$5,3)")
+            .unwrap();
         assert!(matches!(
-            workbook.set_formula(cell(0, 3), "='[1]Data Sheet'!B11"),
+            workbook.set_formula(cell(0, 4), "=[1]Inputs!"),
             Err(FormulaError::ExternalReference(_))
         ));
         assert!(matches!(
-            workbook.set_formula(cell(0, 3), "=[3]daily!$Y$140"),
+            workbook.set_formula(cell(0, 4), "=[]Inputs!A1"),
             Err(FormulaError::ExternalReference(_))
         ));
-        assert!(matches!(
-            workbook.set_formula(cell(0, 3), "=VLOOKUP(1,[5]Q!$A$1:$C$5,3)"),
-            Err(FormulaError::ExternalReference(_))
-        ));
+
+        let mut cached = Workbook::default();
+        cached.set_number(cell(0, 0), 2.0);
+        cached
+            .set_formula(cell(0, 1), "=SUM([1]Inputs!A1,A1)")
+            .unwrap();
+        assert_eq!(
+            cached.value(cell(0, 1)),
+            Value::Error(CalcError::InvalidReference)
+        );
+        cached.cache_external_cell(1, Some("Book.xlsx"), "Inputs", 0, 0, Value::Number(10.0));
+        cached.cache_external_cell(1, Some("Book.xlsx"), "Inputs", 2, 0, Value::Number(5.0));
+        cached.cache_external_cell(1, Some("Book.xlsx"), "Sheet 1", 0, 0, Value::Number(10.0));
+        cached.define_name("Broken", "[1]Inputs!A1");
+        cached.define_name("Block", "[1]Inputs!A1:A3");
+        cached
+            .set_formula(cell(0, 1), "=SUM([1]Inputs!A1,A1)")
+            .unwrap();
+        assert_eq!(cached.value(cell(0, 1)), Value::Number(12.0));
+        cached
+            .set_formula(cell(0, 2), "=SUM([1]Inputs!A1:A3)")
+            .unwrap();
+        assert_eq!(cached.value(cell(0, 2)), Value::Number(15.0));
+        cached
+            .set_formula(cell(0, 3), "='[Book.xlsx]Sheet 1'!A1")
+            .unwrap();
+        assert_eq!(cached.value(cell(0, 3)), Value::Number(10.0));
+        cached
+            .set_formula(cell(0, 4), "=[Book.xlsx]Inputs!A1")
+            .unwrap();
+        assert_eq!(cached.value(cell(0, 4)), Value::Number(10.0));
+        cached.set_formula(cell(0, 5), "=Broken+2").unwrap();
+        assert_eq!(cached.value(cell(0, 5)), Value::Number(12.0));
+        cached.set_formula(cell(0, 6), "=SUM(Block)").unwrap();
+        assert_eq!(cached.value(cell(0, 6)), Value::Number(15.0));
+        cached
+            .set_formula(cell(1, 0), "=SUM([1]Inputs!A1:[1]Inputs!A3)")
+            .unwrap();
+        assert_eq!(cached.value(cell(1, 0)), Value::Number(15.0));
+    }
+
+    #[test]
+    fn interned_external_ranges_share_storage_and_an_aggregate_budget() {
+        let mut workbook = Workbook::default();
+        workbook.cache_external_cell(1, None, "Inputs", 0, 0, Value::Number(1.0));
+        workbook.cache_external_cell(1, None, "Inputs", 1, 0, Value::Number(2.0));
+        workbook.cache_external_cell(1, None, "Rates", 0, 0, Value::Number(3.0));
+        workbook.define_name("Block", "[1]Inputs!A1:A2");
+
+        workbook
+            .set_formula(cell(0, 0), "=SUM([1]Inputs!A1:A2)+SUM([1]Inputs!A1:A2)")
+            .unwrap();
+        assert_eq!(workbook.value(cell(0, 0)), Value::Number(6.0));
+        workbook.set_formula(cell(0, 1), "=SUM(Block)").unwrap();
+        assert_eq!(workbook.value(cell(0, 1)), Value::Number(3.0));
+        workbook
+            .set_formula(cell(0, 2), "=SUM([1]Rates!A1:A2)")
+            .unwrap();
+        assert_eq!(workbook.value(cell(0, 2)), Value::Number(3.0));
+        for row in 3..203 {
+            workbook
+                .set_formula(cell(row, 0), "=SUM([1]Inputs!A1:A2)")
+                .unwrap();
+            assert_eq!(workbook.value(cell(row, 0)), Value::Number(3.0));
+        }
+        assert_eq!(workbook.external.interned.borrow().len(), 2);
+        assert_eq!(workbook.external.interned_cells.get(), 4);
+
+        let mut exact = Workbook::default();
+        exact.cache_external_cell(1, None, "Grid", 0, 0, Value::Number(4.0));
+        exact
+            .set_formula(cell(0, 0), &format!("=SUM([1]Grid!A1:A{MAX_RANGE_CELLS})"))
+            .unwrap();
+        assert_eq!(exact.value(cell(0, 0)), Value::Number(4.0));
+        assert_eq!(
+            exact.set_formula(cell(0, 1), "=SUM([1]Grid!B1:B2)"),
+            Err(FormulaError::RangeTooLarge)
+        );
+
+        let mut over = Workbook::default();
+        over.cache_external_cell(1, None, "Grid", 0, 0, Value::Number(1.0));
+        over.set_formula(cell(0, 0), "=SUM([1]Grid!A1:A2)").unwrap();
+        assert_eq!(
+            over.set_formula(
+                cell(0, 1),
+                &format!("=SUM([1]Grid!A1:A{})", MAX_RANGE_CELLS - 1)
+            ),
+            Err(FormulaError::RangeTooLarge)
+        );
+        assert_eq!(over.value(cell(0, 0)), Value::Number(1.0));
     }
 
     /// Graph vertices beyond the cells that exist: the shared range nodes.
@@ -8046,6 +8755,10 @@ mod tests {
         ));
         assert!(matches!(
             ParsedFormula::parse_with_structured_references("=[1]Data!A1", 0, &names, context),
+            Err(FormulaError::ExternalReference(_))
+        ));
+        assert!(matches!(
+            ParsedFormula::parse_with_structured_references("=[1]Data!", 0, &names, context),
             Err(FormulaError::ExternalReference(_))
         ));
     }

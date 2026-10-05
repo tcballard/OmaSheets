@@ -62,6 +62,37 @@ single workbook. CI exercises both lanes on the deterministic fixtures; that
 establishes the comparison contract, and it is not real-corpus evidence until
 frozen Enron/EUSES manifests are scored through the same lanes.
 
+## Reproduce the sparse import checks
+
+Generate four small workbooks and a SHA-256 manifest, then run the bounded
+scorer and an independent reader:
+
+```bash
+cargo build --locked --release -p omasheets-corpus
+uv run --no-project --with openpyxl==3.1.5 python -m scripts.check_import_corpus \
+  /tmp/omasheets-import-evidence \
+  --corpus-bin target/release/omasheets-corpus --independent-reader
+```
+
+Use a new output directory for each run. The generator refuses to replace
+existing evidence. Fixed ZIP metadata and uncompressed members make workbook
+bytes and the hash-sorted manifest reproducible. The fixtures cover a formula
+at the far corner of the full Excel grid, a cached formula, a styled empty
+cell, and shared formulas whose anchor is not the top-left cell of the group.
+Openpyxl checks the saved values. The owned engine must load and match every
+formula. Rust importer tests separately exercise exact and exceeded cell and
+formula budgets, including pending shared formulas.
+
+Both scorer lanes retain their per-workbook memory and time limits. Candidate
+failures remain visible in `score.json` and the printed summary, but this gate
+requires success only in the owned lane. Synthetic fixtures demonstrate these
+contracts; they do not measure coverage of real workbooks.
+
+The [historical Spreadsheet-RL report](history/spreadsheet-rl.md) records an
+older branch's measurements. Its original local manifest and archive register
+are unavailable, so it is archived outside the registered sources and is not
+evidence for the current branch. No corpus improvement is claimed here.
+
 ## Verify a frozen manifest
 
 ```bash

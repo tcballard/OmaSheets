@@ -20,6 +20,10 @@ fn temp_document() -> PathBuf {
 }
 
 fn temp_xlsx() -> PathBuf {
+    temp_xlsx_with_formula("NOPE(A1)")
+}
+
+fn temp_xlsx_with_formula(formula: &str) -> PathBuf {
     let path = temp_document().with_extension("xlsx");
     let file = std::fs::File::create(&path).unwrap();
     let mut writer = zip::ZipWriter::new(file);
@@ -48,7 +52,9 @@ fn temp_xlsx() -> PathBuf {
         writer
             .start_file(name, zip::write::SimpleFileOptions::default())
             .unwrap();
-        writer.write_all(body.as_bytes()).unwrap();
+        writer
+            .write_all(body.replace("NOPE(A1)", formula).as_bytes())
+            .unwrap();
     }
     writer.finish().unwrap();
     path
@@ -1062,6 +1068,43 @@ fn xlsx_export_rejects_unrepresentable_workbooks_before_creating_output() {
     service.close_all().unwrap();
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
+
+#[test]
+fn native_xlsx_import_keeps_external_formula_caches_after_reopen() {
+    for formula in [
+        "[1]Inputs!A1",
+        "SUM([1]Inputs!A1:A3)",
+        "IFERROR('[Book.xlsx]Sheet 1'!A1,0)",
+    ] {
+        let source = temp_xlsx_with_formula(formula);
+        let output = temp_document();
+        let mut service = Service::new(|| 42);
+        let Response::ImportedXlsx(manifest) = service
+            .handle(Request::ImportXlsx {
+                source: source.clone(),
+                output: output.clone(),
+                actor: human("tom"),
+                name: None,
+            })
+            .unwrap()
+        else {
+            panic!("import response")
+        };
+        assert_eq!(manifest.formula_cells_cached_only, 1, "{formula}");
+        assert_eq!(manifest.formula_cells_native, 1, "{formula}");
+        for _ in 0..2 {
+            assert!(
+                matches!(service.handle(Request::Cell {
+                path: output.clone(), branch: None, sheet: manifest.sheets[0].id.to_string(), a1: "B2".into(),
+            }).unwrap(), Response::Cell(ref cell) if cell.value == CellValue::Number(9.0)),
+                "{formula}"
+            );
+            service.close_all().unwrap();
+        }
+        std::fs::remove_file(source).unwrap();
+        std::fs::remove_file(output).unwrap();
     }
 }
 
