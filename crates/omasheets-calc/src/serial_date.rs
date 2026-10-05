@@ -32,6 +32,56 @@ pub const MIN_SERIAL: i64 = 0;
 pub const MAX_SERIAL: i64 = 2_958_465;
 /// The fictitious 1900-02-29.
 pub const LEAP_BUG_SERIAL: i64 = 60;
+/// Milliseconds in a UTC day. Time-of-day is this fraction of a serial.
+const MILLIS_PER_DAY: i64 = 86_400_000;
+
+/// Excel 1900 serial for a UTC instant in Unix milliseconds, including the
+/// time-of-day fraction. Does not read a clock. The civil date is converted
+/// through [`serial_from_civil`], so the 1900 leap-day quirk applies. Instants
+/// outside serial `0..=2_958_465` are `#NUM!`.
+pub fn serial_from_unix_millis(millis: i64) -> Result<f64, CalcError> {
+    let days = millis.div_euclid(MILLIS_PER_DAY);
+    let within = millis.rem_euclid(MILLIS_PER_DAY);
+    let date = civil_from_days(days);
+    let serial = serial_from_civil(date.year, i64::from(date.month), i64::from(date.day))?;
+    Ok(serial as f64 + (within as f64) / (MILLIS_PER_DAY as f64))
+}
+
+/// Unix milliseconds for an Excel 1900 serial, UTC, without reading a clock.
+/// The fraction is the time of day, rounded to the nearest millisecond.
+/// The fictitious serial `60` (1900-02-29) has no UTC instant and is `#NUM!`.
+pub fn unix_millis_from_serial(serial: f64) -> Result<i64, CalcError> {
+    if !serial.is_finite() || serial < MIN_SERIAL as f64 || serial >= (MAX_SERIAL + 1) as f64 {
+        return Err(CalcError::InvalidNumber);
+    }
+    let whole = serial.floor();
+    let serial_int = whole as i64;
+    let fraction = serial - whole;
+    let unix_days = if serial_int < LEAP_BUG_SERIAL {
+        serial_int - (UNIX_EPOCH_SERIAL - 1)
+    } else {
+        serial_int - UNIX_EPOCH_SERIAL
+    };
+    let mut within = (fraction * (MILLIS_PER_DAY as f64)).round() as i64;
+    let mut days = unix_days;
+    if within >= MILLIS_PER_DAY {
+        days += 1;
+        within -= MILLIS_PER_DAY;
+    } else if within < 0 {
+        days -= 1;
+        within += MILLIS_PER_DAY;
+    }
+    let millis = days
+        .checked_mul(MILLIS_PER_DAY)
+        .and_then(|base| base.checked_add(within))
+        .ok_or(CalcError::InvalidNumber)?;
+    let round_trip = serial_from_unix_millis(millis)?;
+    if (round_trip - serial).abs() > 1e-6 {
+        return Err(CalcError::InvalidNumber);
+    }
+    Ok(millis)
+}
+
 /// 1970-01-01 in the 1900 date system.
 const UNIX_EPOCH_SERIAL: i64 = 25_569;
 /// Largest magnitude accepted for a `DATE`/`EDATE`/`EOMONTH` component before
@@ -427,6 +477,16 @@ mod tests {
 
     fn civil(year: i64, month: u32, day: u32) -> CivilDate {
         CivilDate { year, month, day }
+    }
+
+    #[test]
+    fn enron_mismatch_today_serial_round_trips_through_unix_millis() {
+        let midnight = unix_millis_from_serial(41_885.0).unwrap();
+        assert_eq!(serial_from_unix_millis(midnight), Ok(41_885.0));
+        let afternoon = unix_millis_from_serial(41_885.25).unwrap();
+        assert_eq!(serial_from_unix_millis(afternoon), Ok(41_885.25));
+        assert_eq!(afternoon - midnight, 21_600_000);
+        assert!(unix_millis_from_serial(60.0).is_err());
     }
 
     #[test]

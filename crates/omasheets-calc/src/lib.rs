@@ -858,6 +858,13 @@ impl Workbook {
             .insert(link_index, book_file, sheet, row, column, value);
     }
 
+    /// Records that an external sheet exists even when it has no cached cells.
+    /// A later formula that names this sheet and misses a cell is blank, not
+    /// `#REF!`. An unknown sheet stays `#REF!`.
+    pub fn note_external_sheet(&mut self, link_index: u32, book_file: Option<&str>, sheet: &str) {
+        self.external.note_sheet(link_index, book_file, sheet);
+    }
+
     pub fn set_error(&mut self, cell: CellId, error: CalcError) -> RecalcReport {
         self.commit(cell, Input::Literal(Value::Error(error)), Vec::new())
     }
@@ -1592,7 +1599,7 @@ impl Workbook {
                 let bits = mix64(key ^ mix64(sequence) ^ mix64(unix_ms as u64) ^ mix64(slot));
                 return Value::Number((bits >> 11) as f64 / ((1_u64 << 53) as f64));
             }
-            return match serial_date::from_unix_milliseconds(unix_ms) {
+            return match serial_date::serial_from_unix_millis(unix_ms) {
                 Ok(serial) => Value::Number(if function == Function::Today {
                     serial.floor()
                 } else {
@@ -4682,6 +4689,10 @@ struct ExternalCache {
     sheets: HashSet<(ExternalBook, String)>,
     by_index: HashMap<(u32, String, u32, u32), Value>,
     by_file: HashMap<(String, String, u32, u32), Value>,
+    /// Sheets the cache or a loaded target workbook knows, even with no cells.
+    /// A missing cell on one of these sheets is blank; an unknown sheet is `#REF!`.
+    sheets_by_index: HashSet<(u32, String)>,
+    sheets_by_file: HashSet<(String, String)>,
     /// Distinct external rectangles, each stored once for every formula and
     /// defined name that names the same cells.
     interned: RefCell<HashMap<ExternalRangeKey, ArrayValue>>,
@@ -4701,6 +4712,7 @@ impl ExternalCache {
         let sheet = sheet.trim().to_lowercase();
         self.sheets
             .insert((ExternalBook::Index(link_index), sheet.clone()));
+        self.note_sheet(link_index, book_file, &sheet);
         self.by_index
             .insert((link_index, sheet.clone(), row, column), value.clone());
         if let Some(file) = book_file {
@@ -4710,6 +4722,28 @@ impl ExternalCache {
                     .insert((ExternalBook::File(file.clone()), sheet.clone()));
                 self.by_file.insert((file, sheet, row, column), value);
             }
+        }
+    }
+
+    fn note_sheet(&mut self, link_index: u32, book_file: Option<&str>, sheet: &str) {
+        let sheet = sheet.trim().to_lowercase();
+        if sheet.is_empty() {
+            return;
+        }
+        self.sheets_by_index.insert((link_index, sheet.clone()));
+        if let Some(file) = book_file {
+            let file = external_file_key(file);
+            if !file.is_empty() {
+                self.sheets_by_file.insert((file, sheet));
+            }
+        }
+    }
+
+    fn knows_sheet(&self, book: &ExternalBook, sheet: &str) -> bool {
+        let sheet = sheet.trim().to_lowercase();
+        match book {
+            ExternalBook::Index(index) => self.sheets_by_index.contains(&(*index, sheet)),
+            ExternalBook::File(file) => self.sheets_by_file.contains(&(file.clone(), sheet)),
         }
     }
 
@@ -4841,9 +4875,14 @@ fn lower_external_scalar(
 ) -> Result<Expr, FormulaError> {
     match cache.get(&address.book, &address.sheet, address.row, address.column) {
         Some(value) => Ok(value_to_expr(value.clone())),
+        // Import keeps the source cache instead of installing a formula that
+        // would invent a zero or an error.
         None if cache.require_inputs => Err(FormulaError::ExternalReference(
             "linked cell input is unavailable".into(),
         )),
+        // The sheet is real and this cell was simply empty. A formula that
+        // returns that blank shows 0, matching Excel. An unknown sheet is `#REF!`.
+        None if cache.knows_sheet(&address.book, &address.sheet) => Ok(Expr::Empty),
         None => Ok(Expr::Error(CalcError::InvalidReference)),
     }
 }
@@ -5834,6 +5873,7 @@ fn volatile_function<T>(e: &Expr<T>) -> Option<&'static str> {
         _ => None,
     }
 }
+
 fn literal_integer(e: &Expr) -> Option<i64> {
     match e {
         Expr::Number(n) if n.is_finite() && n.abs() < 1.0e9 => Some(n.trunc() as i64),
@@ -5842,6 +5882,7 @@ fn literal_integer(e: &Expr) -> Option<i64> {
         _ => None,
     }
 }
+
 fn literal_offset(args: &[Expr]) -> Result<Expr, FormulaError> {
     if !(3..=5).contains(&args.len()) {
         return Ok(Expr::Error(CalcError::InvalidArguments));
@@ -7588,6 +7629,14 @@ mod tests {
         assert_eq!(cached.value(cell(0, 5)), Value::Number(12.0));
         cached.set_formula(cell(0, 6), "=SUM(Block)").unwrap();
         assert_eq!(cached.value(cell(0, 6)), Value::Number(15.0));
+        // Inputs is known, so an uncached cell is blank and the formula shows 0.
+        cached.set_formula(cell(2, 0), "=[1]Inputs!B1").unwrap();
+        assert_eq!(cached.value(cell(2, 0)), Value::Number(0.0));
+        cached.set_formula(cell(2, 1), "=[1]Missing!A1").unwrap();
+        assert_eq!(
+            cached.value(cell(2, 1)),
+            Value::Error(CalcError::InvalidReference)
+        );
         cached
             .set_formula(cell(1, 0), "=SUM([1]Inputs!A1:[1]Inputs!A3)")
             .unwrap();

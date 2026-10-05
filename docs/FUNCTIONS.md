@@ -39,11 +39,22 @@ relative path under the source workbook's directory, or when an absolute or
 `file://` target names a file sitting next to the source. Network targets,
 `..`, and a symlink that escapes that directory are not opened. A workbook
 already being imported keeps the stored link cache, and that cache is also
-used when the file is not opened. Cached external strings keep their decoded
-whitespace, including empty values. Occupied cells, cached link records and
-opened targets share the importer's cell budget. A single cell with no value
-in the opened file or the cache is `#REF!`. A missing cell inside an external
-range is blank.
+used when the file is not opened. A same-named file reached only as the base
+name of an absolute or `file://` target does not replace a populated cache.
+Cached external strings keep their decoded whitespace, including empty values.
+Occupied cells, cached link records and opened targets share the importer's
+cell budget. Import requires the linked inputs it resolved. A formula whose
+linked cell or sheet is missing keeps the source cache and is reported
+unsupported, instead of being installed as a blank or `#REF!`. When a formula
+is compiled without that requirement, a cell on a sheet the cache or target
+workbook knows, with no stored value, is blank and shows 0. An unknown sheet
+or link is `#REF!`. A missing cell inside an external range on a resolved
+sheet is blank.
+`TODAY`, `NOW`, and `RAND` read the stored tick and never the system clock.
+Import sets that tick from the cached numeric value of a `TODAY()` or `NOW()`
+cell, as a 1900 serial read in UTC, before formulas are installed. `NOW()`
+keeps the time fraction when the cache has one. A workbook with no such
+cached cell stays at no tick, so those formulas are not installed.
 Deliberately unsupported: clock/random evaluation without an explicit tick,
 3D references, spilling array formulas, dynamic `INDIRECT`/`OFFSET` arguments,
 `CELL`, add-in (`_xll.`) calls, locale-sensitive parsing such as `DATEVALUE`,
@@ -230,6 +241,10 @@ Formula criteria with nonmatching/blank headings are not implemented and return
 - `XIRR`
 - `RRI`
 
+
+`TODAY` is the 1900 serial of the tick instant's UTC date. `NOW` adds the
+time-of-day fraction. Import replays a cached `TODAY()` or `NOW()` serial
+as that instant and does not read a clock.
 
 `TEXTJOIN` joins scalar and bounded range arguments in row order, can skip blanks
 and empty strings, propagates errors, and refuses output beyond 32,767 UTF-16 units.
