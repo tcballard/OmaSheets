@@ -978,6 +978,9 @@ jobs:
           test ! -e "$XDG_DATA_HOME/applications/io.github.tcballard.OmaSheets.desktop"
 
   rust-compatibility:
+    defaults:
+      run:
+        shell: bash
     name: Rust compatibility sandbox acceptance
     runs-on: ubuntu-latest
     container:
