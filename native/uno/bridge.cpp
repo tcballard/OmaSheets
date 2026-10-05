@@ -4,6 +4,7 @@
 #include <com/sun/star/beans/PropertyConcept.hpp>
 #include <com/sun/star/bridge/XUnoUrlResolver.hpp>
 #include <com/sun/star/lang/XMultiComponentFactory.hpp>
+#include <com/sun/star/lang/XSingleServiceFactory.hpp>
 #include <com/sun/star/reflection/XIdlArray.hpp>
 #include <com/sun/star/reflection/XIdlField.hpp>
 #include <com/sun/star/reflection/XIdlField2.hpp>
@@ -54,10 +55,11 @@ class Bridge {
   unsigned next = 1;
   Reference<css::script::XInvocation> invocation(const Any &v) {
     Sequence<Any> args(&v, 1);
+    auto factory = Reference<css::lang::XSingleServiceFactory>(
+        local->getServiceManager()->createInstanceWithContext(
+            ou("com.sun.star.script.Invocation"), local), UNO_QUERY_THROW);
     return Reference<css::script::XInvocation>(
-        local->getServiceManager()->createInstanceWithArgumentsAndContext(
-            ou("com.sun.star.script.Invocation"), args, local),
-        UNO_QUERY_THROW);
+        factory->createInstanceWithArguments(args), UNO_QUERY_THROW);
   }
   Any object(const Json &v) {
     auto i = objects.find(v.at("$object").get<unsigned>());
@@ -207,6 +209,9 @@ public:
         {"fields", {{"X", 12}, {"Y", 34}, {"Width", 1000}, {"Height", 2000}}}};
     if (encode(decode(rectangle))["fields"]["Width"] != 1000)
       throw std::runtime_error("UNO struct conversion failed");
+    auto rect = invocation(decode(rectangle));
+    if (encode(rect->getValue(ou("Width"))) != 1000)
+      throw std::runtime_error("UNO invocation factory failed");
     Json sequence{{"$sequence", "[][]any"},
                   {"items", {{"Region", 20, true}, {"North", 30, false}}}};
     if (encode(decode(sequence))[0][1] != 20)
