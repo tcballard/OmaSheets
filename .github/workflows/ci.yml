@@ -1016,7 +1016,9 @@ jobs:
           git rev-parse HEAD > "$preview/SOURCE_COMMIT"
           pacman -Q libreoffice-fresh glibc bubblewrap > "$preview/BUILD_PACKAGES"
           (cd "$preview" && sha256sum omasheets omasheets-service omasheets-uno-bridge examples/* test.sh README.md SOURCE_COMMIT BUILD_PACKAGES > SHA256SUMS)
-          bash "$preview/test.sh"
+          useradd --create-home rust-preview
+          chown -R rust-preview:rust-preview "$preview"
+          runuser -u rust-preview -- bash "$GITHUB_WORKSPACE/$preview/test.sh"
           tar -czf "$preview.tar.gz" "$preview"
           sha256sum "$preview.tar.gz" > "$preview.tar.gz.sha256"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
