@@ -13,6 +13,8 @@
 #include <com/sun/star/script/XTypeConverter.hpp>
 #include <com/sun/star/uno/Any.hxx>
 #include <cppuhelper/bootstrap.hxx>
+#include <rtl/bootstrap.hxx>
+#include <osl/file.hxx>
 #include <iostream>
 #include <map>
 #include <nlohmann/json.hpp>
@@ -30,9 +32,21 @@ static rtl::OUString ou(const std::string &s) {
 static std::string utf8(const rtl::OUString &s) {
   return rtl::OUStringToOString(s, RTL_TEXTENCODING_UTF8).getStr();
 }
+static Reference<css::uno::XComponentContext> bootstrap() {
+  // Standalone adapters otherwise receive only URE types on Arch. Reflection
+  // also needs the installed office API registry (Rectangle, FillDirection...).
+  rtl::OUString core, office;
+  if (osl::FileBase::getFileURLFromSystemPath(
+          ou(OMASHEETS_LIBREOFFICE_PROGRAM "/types.rdb"), core) != osl::FileBase::E_None ||
+      osl::FileBase::getFileURLFromSystemPath(
+          ou(OMASHEETS_LIBREOFFICE_PROGRAM "/types/offapi.rdb"), office) != osl::FileBase::E_None)
+    throw std::runtime_error("invalid installed UNO type registry path");
+  rtl::Bootstrap::set(ou("UNO_TYPES"), core + ou(" ") + office);
+  return cppu::defaultBootstrap_InitialComponentContext();
+}
 class Bridge {
   Reference<css::uno::XComponentContext>
-      local = cppu::defaultBootstrap_InitialComponentContext(),
+      local = bootstrap(),
       remote;
   Reference<css::reflection::XIdlReflection> reflection;
   Reference<css::script::XTypeConverter> converter;

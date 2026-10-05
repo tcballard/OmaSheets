@@ -18,6 +18,7 @@ add_dependencies(omasheets-uno-bridge uno_headers)
 target_compile_features(omasheets-uno-bridge PRIVATE cxx_std_20)
 target_compile_options(omasheets-uno-bridge PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_compile_definitions(omasheets-uno-bridge PRIVATE UNX GCC LINUX CPPU_ENV=gcc3
+  OMASHEETS_LIBREOFFICE_PROGRAM="${LIBREOFFICE_ROOT}/program"
   OMASHEETS_SOURCE_SHA256="${OMASHEETS_SOURCE_SHA256}" OMASHEETS_SOURCE_COMMIT="${OMASHEETS_SOURCE_COMMIT}")
 target_include_directories(omasheets-uno-bridge PRIVATE "${UNO_INCLUDE_DIR}" "${GENERATED}")
 foreach(name uno_cppuhelpergcc3 uno_cppu uno_sal)
