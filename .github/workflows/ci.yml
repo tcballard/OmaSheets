@@ -82,7 +82,10 @@ jobs:
           cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build and test the isolated corpus scorer
         run: |
+          cargo build --locked --release -p omasheets-app -p omasheets-service
           cargo test --workspace --locked --release
+          cargo build --locked --release -p omasheets-app --examples
+          target/release/examples/native_acceptance
           python -m pip install --disable-pip-version-check openpyxl==3.1.5
           cargo test -p omasheets-service --locked --release --test native_controls independent_reader -- --ignored
           cargo build --locked --release -p omasheets-corpus
@@ -973,3 +976,62 @@ jobs:
           test ! -e "$HOME/.codex/plugins/omasheets"
           test -f "$HOME/.codex/plugins/keep-me/user.txt"
           test ! -e "$XDG_DATA_HOME/applications/io.github.tcballard.OmaSheets.desktop"
+
+  rust-compatibility:
+    defaults:
+      run:
+        shell: bash
+    name: Rust compatibility sandbox acceptance
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base
+      # Kernel namespaces are needed by the production Bubblewrap worker.
+      options: --privileged
+    steps:
+      - run: pacman -Syu --noconfirm --needed git rust cmake gcc make nlohmann-json libreoffice-fresh libreoffice-fresh-sdk bubblewrap ttf-dejavu
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the Rust worker and native UNO type adapter
+        run: |
+          OMASHEETS_SOURCE_COMMIT=$(git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD)
+          export OMASHEETS_SOURCE_COMMIT
+          cargo build --release --locked -p omasheets-app -p omasheets-service
+          cargo build --release --locked -p omasheets-app --examples
+          cmake -S native/uno -B .ci-uno -DCMAKE_BUILD_TYPE=Release
+          cmake --build .ci-uno --parallel 2
+          .ci-uno/omasheets-uno-bridge --self-test
+      - name: Exercise real compatibility workbooks without Python
+        env:
+          SAL_USE_VCLPLUGIN: svp
+        run: |
+          export OMASHEETS_APP="$GITHUB_WORKSPACE/target/release/omasheets"
+          export OMASHEETS_UNO_BRIDGE="$GITHUB_WORKSPACE/.ci-uno/omasheets-uno-bridge"
+          target/release/examples/compatibility_acceptance
+      - name: Package and exercise the compiler-free Rust preview
+        env:
+          SAL_USE_VCLPLUGIN: svp
+          # Only generated test workbooks enter this diagnostic run.
+          OMASHEETS_WORKER_DIAGNOSTICS: "1"
+        run: |
+          preview=omasheets-rust-preview-linux-x86_64
+          mkdir -p "$preview/examples"
+          cp target/release/omasheets target/release/omasheets-service "$preview/"
+          cp target/release/examples/{native_acceptance,compatibility_acceptance,grid_fixture} "$preview/examples/"
+          cp .ci-uno/omasheets-uno-bridge "$preview/"
+          cp scripts/test_rust_preview.sh "$preview/test.sh"
+          cp docs/RUST-PREVIEW.md "$preview/README.md"
+          git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD > "$preview/SOURCE_COMMIT"
+          pacman -Q libreoffice-fresh glibc bubblewrap > "$preview/BUILD_PACKAGES"
+          (cd "$preview" && sha256sum omasheets omasheets-service omasheets-uno-bridge examples/* test.sh README.md SOURCE_COMMIT BUILD_PACKAGES > SHA256SUMS)
+          useradd --create-home rust-preview
+          chown -R rust-preview:rust-preview "$preview"
+          runuser -u rust-preview -- bash "$GITHUB_WORKSPACE/$preview/test.sh"
+          tar -czf "$preview.tar.gz" "$preview"
+          sha256sum "$preview.tar.gz" > "$preview.tar.gz.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: omasheets-rust-preview-linux-x86_64
+          path: |
+            omasheets-rust-preview-linux-x86_64.tar.gz
+            omasheets-rust-preview-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30

@@ -47,6 +47,12 @@ jobs:
           gh run download "$BUILD_RUN" --name omasheets-arch-linux-x86_64 --dir arch
           cd arch
           sha256sum --check SHA256SUMS
+      - name: Download the tested Rust migration preview
+        if: ${{ hashFiles('crates/omasheets-app/Cargo.toml') != '' }}
+        run: |
+          gh run download "$BUILD_RUN" --name omasheets-rust-preview-linux-x86_64 --dir rust-preview
+          cd rust-preview
+          sha256sum --check omasheets-rust-preview-linux-x86_64.tar.gz.sha256
       - name: Publish an immutable development prerelease
         run: |
           tag="dev-$BUILD_SHA"
@@ -76,6 +82,9 @@ jobs:
           fi
           gh release upload "$tag" bundle/*.tar.gz bundle/*.tar.gz.sha256 --clobber
           gh release upload "$tag" arch/*.pkg.tar.zst arch/SHA256SUMS arch/*.tar.gz arch/*.sha256 --clobber
+          if test -d rust-preview; then
+            gh release upload "$tag" rust-preview/*.tar.gz rust-preview/*.sha256 --clobber
+          fi
           gh release edit "$tag" --draft=false
 
   install-public:

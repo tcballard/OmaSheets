@@ -1,0 +1,356 @@
+{
+  "schema": "OMASHEETS_CORRECTNESS_COMPARISON_V1",
+  "date": "2026-10-05",
+  "scope": "Frozen 1,000-file Enron sample, owned engine only; no exclusions changed",
+  "manifest": "corpus/sources/enron-figshare.jsonl",
+  "manifest_sha256": "2f5ea94c02ae3779206d6ca1b1da9e77002450bc070fa968ca566cfd526ff80d",
+  "source_archive_sha256": "d73bd1ea5be929236541331a58ef8e255857fb8f7b2397ad629a30425bd9e149",
+  "verified_files": 1000,
+  "baseline_commit": "15896e5744ce8e1c1e0e3362338ba031ea4d8ca5",
+  "candidate_commit": "f1578995b8856b4f898efdad3447e3855f0bdcbc",
+  "baseline": {
+    "files": 1000,
+    "opened": 998,
+    "failed": 2,
+    "timed_out": 0,
+    "formula_cells_observed": 980734,
+    "formula_cells_loaded": 881666,
+    "formula_cells_compared": 881666,
+    "stored_values_matched": 877770,
+    "stored_values_mismatched": 3896,
+    "unsupported_formulas": 99068,
+    "formula_parse_rate": 0.8989858616097739,
+    "comparison_coverage": 0.8989858616097739,
+    "stored_value_match_rate": 0.995581093066989,
+    "unsupported_functions": {
+      "AVERAGEPRICES": {
+        "formula_cells": 139,
+        "workbooks": 1
+      },
+      "BSD": {
+        "formula_cells": 3021,
+        "workbooks": 1
+      },
+      "CALCSKEW": {
+        "formula_cells": 1177,
+        "workbooks": 1
+      },
+      "CELL": {
+        "formula_cells": 48,
+        "workbooks": 15
+      },
+      "DATEVALUE": {
+        "formula_cells": 1413,
+        "workbooks": 3
+      },
+      "GENCOST": {
+        "formula_cells": 84,
+        "workbooks": 7
+      },
+      "GETPOSITIONOFNUMBER": {
+        "formula_cells": 10,
+        "workbooks": 1
+      },
+      "INDGENCOST": {
+        "formula_cells": 4025,
+        "workbooks": 7
+      },
+      "INDIRECT requires a literal same-workbook reference": {
+        "formula_cells": 228,
+        "workbooks": 3
+      },
+      "INTERPOLATEPRICES": {
+        "formula_cells": 482,
+        "workbooks": 1
+      },
+      "LINEST": {
+        "formula_cells": 85,
+        "workbooks": 1
+      },
+      "NOW": {
+        "formula_cells": 238,
+        "workbooks": 98
+      },
+      "OFFSET requires literal offsets and dimensions": {
+        "formula_cells": 3527,
+        "workbooks": 9
+      },
+      "RAND": {
+        "formula_cells": 936,
+        "workbooks": 1
+      },
+      "ROWS": {
+        "formula_cells": 84,
+        "workbooks": 7
+      },
+      "TODAY": {
+        "formula_cells": 570,
+        "workbooks": 38
+      },
+      "_XLL.AMER": {
+        "formula_cells": 30,
+        "workbooks": 2
+      },
+      "_XLL.ASN": {
+        "formula_cells": 150,
+        "workbooks": 1
+      },
+      "_XLL.DIGITAL": {
+        "formula_cells": 4,
+        "workbooks": 1
+      },
+      "_XLL.EURO": {
+        "formula_cells": 2992,
+        "workbooks": 2
+      },
+      "_XLL.HPVAL": {
+        "formula_cells": 6484,
+        "workbooks": 1
+      },
+      "_XLL.IMPVOLAB": {
+        "formula_cells": 22,
+        "workbooks": 1
+      },
+      "_XLL.OSTRIP": {
+        "formula_cells": 3052,
+        "workbooks": 1
+      },
+      "_XLL.SPRDOPT": {
+        "formula_cells": 1790,
+        "workbooks": 1
+      },
+      "_XLL.XASN": {
+        "formula_cells": 484,
+        "workbooks": 1
+      },
+      "_XLL.XASTRIP": {
+        "formula_cells": 2,
+        "workbooks": 1
+      },
+      "_XLL.XBASVOL": {
+        "formula_cells": 1,
+        "workbooks": 1
+      },
+      "_XLL.XCALCSKEW": {
+        "formula_cells": 476,
+        "workbooks": 1
+      },
+      "_XLL.XCRUDEAPO": {
+        "formula_cells": 2011,
+        "workbooks": 1
+      },
+      "_XLL.XEURO": {
+        "formula_cells": 3646,
+        "workbooks": 2
+      },
+      "_XLL.XXCOL2": {
+        "formula_cells": 2,
+        "workbooks": 1
+      }
+    },
+    "unsupported_reasons": {
+      "cycle": 7476,
+      "external_reference": 47165,
+      "structured_reference": 5,
+      "unknown_name": 122,
+      "unsupported_function": 37213,
+      "unsupported_name": 7087
+    },
+    "syntax_failure_tokens": {},
+    "reference_failure_kinds": {},
+    "mismatch_value_kinds": {
+      "#DIV/0! -> number": 1,
+      "#N/A -> #VALUE!": 74,
+      "#NAME? -> #VALUE!": 19,
+      "#VALUE! -> text": 3,
+      "number -> #N/A": 51,
+      "number -> #REF!": 892,
+      "number -> #VALUE!": 10,
+      "number -> number": 2844,
+      "text -> #VALUE!": 2
+    },
+    "workbooks_with_skipped_sheets": 24,
+    "skipped_sheets": 51,
+    "peak_rss_bytes_max": 346689536
+  },
+  "candidate": {
+    "files": 1000,
+    "opened": 998,
+    "failed": 2,
+    "timed_out": 0,
+    "formula_cells_observed": 980734,
+    "formula_cells_loaded": 919896,
+    "formula_cells_compared": 919896,
+    "stored_values_matched": 915900,
+    "stored_values_mismatched": 3996,
+    "unsupported_formulas": 60838,
+    "formula_parse_rate": 0.9379668697118688,
+    "comparison_coverage": 0.9379668697118688,
+    "stored_value_match_rate": 0.9956560306817293,
+    "unsupported_functions": {
+      "AVERAGEPRICES": {
+        "formula_cells": 139,
+        "workbooks": 1
+      },
+      "BSD": {
+        "formula_cells": 3021,
+        "workbooks": 1
+      },
+      "CALCSKEW": {
+        "formula_cells": 1177,
+        "workbooks": 1
+      },
+      "CELL": {
+        "formula_cells": 48,
+        "workbooks": 15
+      },
+      "DATEVALUE": {
+        "formula_cells": 1413,
+        "workbooks": 3
+      },
+      "GENCOST": {
+        "formula_cells": 84,
+        "workbooks": 7
+      },
+      "GETPOSITIONOFNUMBER": {
+        "formula_cells": 10,
+        "workbooks": 1
+      },
+      "INDGENCOST": {
+        "formula_cells": 4025,
+        "workbooks": 7
+      },
+      "INDIRECT requires a literal same-workbook reference": {
+        "formula_cells": 228,
+        "workbooks": 3
+      },
+      "INTERPOLATEPRICES": {
+        "formula_cells": 482,
+        "workbooks": 1
+      },
+      "LINEST": {
+        "formula_cells": 85,
+        "workbooks": 1
+      },
+      "NOW": {
+        "formula_cells": 238,
+        "workbooks": 98
+      },
+      "OFFSET requires literal offsets and dimensions": {
+        "formula_cells": 3527,
+        "workbooks": 9
+      },
+      "RAND": {
+        "formula_cells": 936,
+        "workbooks": 1
+      },
+      "ROWS": {
+        "formula_cells": 84,
+        "workbooks": 7
+      },
+      "TODAY": {
+        "formula_cells": 570,
+        "workbooks": 38
+      },
+      "_XLL.AMER": {
+        "formula_cells": 30,
+        "workbooks": 2
+      },
+      "_XLL.ASN": {
+        "formula_cells": 150,
+        "workbooks": 1
+      },
+      "_XLL.DIGITAL": {
+        "formula_cells": 4,
+        "workbooks": 1
+      },
+      "_XLL.EURO": {
+        "formula_cells": 2992,
+        "workbooks": 2
+      },
+      "_XLL.HPVAL": {
+        "formula_cells": 6484,
+        "workbooks": 1
+      },
+      "_XLL.IMPVOLAB": {
+        "formula_cells": 22,
+        "workbooks": 1
+      },
+      "_XLL.OSTRIP": {
+        "formula_cells": 3052,
+        "workbooks": 1
+      },
+      "_XLL.SPRDOPT": {
+        "formula_cells": 1790,
+        "workbooks": 1
+      },
+      "_XLL.XASN": {
+        "formula_cells": 484,
+        "workbooks": 1
+      },
+      "_XLL.XASTRIP": {
+        "formula_cells": 2,
+        "workbooks": 1
+      },
+      "_XLL.XBASVOL": {
+        "formula_cells": 1,
+        "workbooks": 1
+      },
+      "_XLL.XCALCSKEW": {
+        "formula_cells": 476,
+        "workbooks": 1
+      },
+      "_XLL.XCRUDEAPO": {
+        "formula_cells": 2011,
+        "workbooks": 1
+      },
+      "_XLL.XEURO": {
+        "formula_cells": 3646,
+        "workbooks": 2
+      },
+      "_XLL.XXCOL2": {
+        "formula_cells": 2,
+        "workbooks": 1
+      }
+    },
+    "unsupported_reasons": {
+      "cycle": 7494,
+      "external_reference": 11134,
+      "structured_reference": 5,
+      "unknown_name": 122,
+      "unsupported_function": 37213,
+      "unsupported_name": 4870
+    },
+    "syntax_failure_tokens": {},
+    "reference_failure_kinds": {},
+    "mismatch_value_kinds": {
+      "#DIV/0! -> number": 1,
+      "#N/A -> #VALUE!": 74,
+      "#NAME? -> #VALUE!": 19,
+      "#VALUE! -> number": 76,
+      "#VALUE! -> text": 3,
+      "number -> #N/A": 51,
+      "number -> #REF!": 892,
+      "number -> #VALUE!": 10,
+      "number -> number": 2858,
+      "text -> #VALUE!": 12
+    },
+    "workbooks_with_skipped_sheets": 24,
+    "skipped_sheets": 51,
+    "peak_rss_bytes_max": 365424640
+  },
+  "process_tree_memory": {
+    "available": false,
+    "reason": "Execution environment exposed no process samples; resource gate remains unverified."
+  },
+  "release_gate": {
+    "required_parse_rate": 0.97,
+    "passed": false
+  },
+  "comparison_limits": [
+    "Cached workbook values are a comparison oracle, not independent recomputation.",
+    "One workbook has 34 fewer prior matches and 76 total VALUE-to-number differences after linked SUMIF evaluation. Closed-workbook Excel behavior is a plausible explanation, not proven for this source.",
+    "Native document import retains external formula source caches and does not silently adopt scorer recalculation.",
+    "No real XPS or Omarchy desktop acceptance was performed in this workspace."
+  ]
+}
