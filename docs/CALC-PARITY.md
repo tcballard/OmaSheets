@@ -103,3 +103,24 @@ English maps are recorded. The Calc map has 432 named tokens; 118 names match
 the owned parser and 314 do not. These are token-name counts, include aliases
 and special names, and are **not a function-completion percentage**. Matching
 a name does not establish coercion, reference, error, array or locale semantics.
+
+## Common calculation target — 2026-10-10
+
+The maintainer has requested an iterative implementation until a reasonable
+common-calculation target is reached. The gate was declared before measuring
+the expansion: at least 400 scenarios, at least 99% fresh Calc agreement, zero
+unsupported formulas, and no unexplained mismatches. The only permitted known
+differences are the two typed internal-error inspection cases in issue #98;
+those continue to count as mismatches. Strict information mode still fails on
+them. Common mode reports both its target result and full exact agreement.
+
+`tests/calc-parity/common.json` initially contains 594 deterministic scenarios
+in information, mathematics, rounding, statistics, text, dates, finance and
+references/arrays. `scripts/generate_common_calc_cases.mjs` reproduces them.
+The denominator is this declared suite, not the percentage of real workbooks
+or of all Calc features. The owned registry expands to 180 names.
+
+The new common module reuses the engine's graph, reference binding, errors and
+array evaluator. FODS test generation maps function names through the pinned
+ODF/OOXML catalogue and converts delimiters without rewriting quoted strings.
+The test reference is isolated from product bundles and dependencies.

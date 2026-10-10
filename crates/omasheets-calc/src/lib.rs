@@ -7,6 +7,7 @@
 //! Dates are Excel 1900-system serial numbers; see [`serial_date`] for the
 //! boundary rules and the deliberately unsupported cases.
 
+mod common;
 mod database;
 mod matrix;
 mod reference;
@@ -432,6 +433,59 @@ enum Function {
     Rank,
     Text,
     Rri,
+    Sin,
+    Cos,
+    Tan,
+    Asin,
+    Acos,
+    Atan,
+    Atan2,
+    Sinh,
+    Cosh,
+    Tanh,
+    Asinh,
+    Acosh,
+    Atanh,
+    Degrees,
+    Radians,
+    Quotient,
+    MRound,
+    Even,
+    Odd,
+    Fact,
+    FactDouble,
+    Combin,
+    Combina,
+    IsEven,
+    IsOdd,
+    Search,
+    Substitute,
+    Replace,
+    Clean,
+    Proper,
+    Time,
+    Hour,
+    Minute,
+    Second,
+    Days,
+    Fv,
+    Nper,
+    Ipmt,
+    Ppmt,
+    Sln,
+    Syd,
+    SumSq,
+    CountBlank,
+    Gcd,
+    Lcm,
+    Xor,
+    Large,
+    Small,
+    PercentileInc,
+    PercentileExc,
+    QuartileInc,
+    QuartileExc,
+    RankAvg,
 }
 
 /// A parsed formula whose cell references can be enumerated and rebound
@@ -1579,6 +1633,9 @@ impl Workbook {
     }
 
     fn evaluate_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+        if let Some(value) = self.evaluate_common_function(function, arguments) {
+            return value;
+        }
         if matches!(function, Function::Today | Function::Now | Function::Rand) {
             if !arguments.is_empty() {
                 return Value::Error(CalcError::InvalidArguments);
@@ -2015,6 +2072,59 @@ impl Workbook {
             | Function::Hyperlink
             | Function::Rank
             | Function::Text
+            | Function::Sin
+            | Function::Cos
+            | Function::Tan
+            | Function::Asin
+            | Function::Acos
+            | Function::Atan
+            | Function::Atan2
+            | Function::Sinh
+            | Function::Cosh
+            | Function::Tanh
+            | Function::Asinh
+            | Function::Acosh
+            | Function::Atanh
+            | Function::Degrees
+            | Function::Radians
+            | Function::Quotient
+            | Function::MRound
+            | Function::Even
+            | Function::Odd
+            | Function::Fact
+            | Function::FactDouble
+            | Function::Combin
+            | Function::Combina
+            | Function::IsEven
+            | Function::IsOdd
+            | Function::Search
+            | Function::Substitute
+            | Function::Replace
+            | Function::Clean
+            | Function::Proper
+            | Function::Time
+            | Function::Hour
+            | Function::Minute
+            | Function::Second
+            | Function::Days
+            | Function::Fv
+            | Function::Nper
+            | Function::Ipmt
+            | Function::Ppmt
+            | Function::Sln
+            | Function::Syd
+            | Function::SumSq
+            | Function::CountBlank
+            | Function::Gcd
+            | Function::Lcm
+            | Function::Xor
+            | Function::Large
+            | Function::Small
+            | Function::PercentileInc
+            | Function::PercentileExc
+            | Function::QuartileInc
+            | Function::QuartileExc
+            | Function::RankAvg
             | Function::Rri => Value::Error(CalcError::InvalidArguments),
         }
     }
@@ -3292,68 +3402,69 @@ fn contains_array_operand(expression: &Expr<usize>) -> bool {
 /// Functions of scalar arguments only, which an array argument maps over
 /// element by element; every other function takes its ranges whole.
 fn is_elementwise(function: Function) -> bool {
-    matches!(
-        function,
-        Function::Abs
-            | Function::Round
-            | Function::RoundUp
-            | Function::RoundDown
-            | Function::Int
-            | Function::Mod
-            | Function::Power
-            | Function::Sqrt
-            | Function::Not
-            | Function::IfError
-            | Function::IfNa
-            | Function::Sign
-            | Function::Ceiling
-            | Function::Floor
-            | Function::Trunc
-            | Function::Exp
-            | Function::Ln
-            | Function::Log
-            | Function::Log10
-            | Function::Len
-            | Function::Left
-            | Function::Right
-            | Function::Mid
-            | Function::Trim
-            | Function::Upper
-            | Function::Lower
-            | Function::Concat
-            | Function::Value
-            | Function::Exact
-            | Function::Date
-            | Function::Year
-            | Function::Month
-            | Function::Day
-            | Function::EDate
-            | Function::EoMonth
-            | Function::Weekday
-            | Function::YearFrac
-            | Function::Days360
-            | Function::Pmt
-            | Function::Pv
-            | Function::NormDist
-            | Function::NormSDist
-            | Function::NormSDistLegacy
-            | Function::IsBlank
-            | Function::IsNumber
-            | Function::IsText
-            | Function::IsLogical
-            | Function::IsError
-            | Function::IsErr
-            | Function::IsNonText
-            | Function::ErrorType
-            | Function::IsNa
-            | Function::N
-            | Function::T
-            | Function::Find
-            | Function::Rept
-            | Function::Text
-            | Function::Hyperlink
-            | Function::Rri
-    )
+    common::elementwise(function)
+        || matches!(
+            function,
+            Function::Abs
+                | Function::Round
+                | Function::RoundUp
+                | Function::RoundDown
+                | Function::Int
+                | Function::Mod
+                | Function::Power
+                | Function::Sqrt
+                | Function::Not
+                | Function::IfError
+                | Function::IfNa
+                | Function::Sign
+                | Function::Ceiling
+                | Function::Floor
+                | Function::Trunc
+                | Function::Exp
+                | Function::Ln
+                | Function::Log
+                | Function::Log10
+                | Function::Len
+                | Function::Left
+                | Function::Right
+                | Function::Mid
+                | Function::Trim
+                | Function::Upper
+                | Function::Lower
+                | Function::Concat
+                | Function::Value
+                | Function::Exact
+                | Function::Date
+                | Function::Year
+                | Function::Month
+                | Function::Day
+                | Function::EDate
+                | Function::EoMonth
+                | Function::Weekday
+                | Function::YearFrac
+                | Function::Days360
+                | Function::Pmt
+                | Function::Pv
+                | Function::NormDist
+                | Function::NormSDist
+                | Function::NormSDistLegacy
+                | Function::IsBlank
+                | Function::IsNumber
+                | Function::IsText
+                | Function::IsLogical
+                | Function::IsError
+                | Function::IsErr
+                | Function::IsNonText
+                | Function::ErrorType
+                | Function::IsNa
+                | Function::N
+                | Function::T
+                | Function::Find
+                | Function::Rept
+                | Function::Text
+                | Function::Hyperlink
+                | Function::Rri
+        )
 }
 
 /// A value as a literal expression, for evaluating a scalar function once
@@ -5924,6 +6035,61 @@ fn literal_offset(args: &[Expr]) -> Result<Expr, FormulaError> {
 }
 
 const FUNCTION_REGISTRY: &[(&str, Function)] = &[
+    ("SIN", Function::Sin),
+    ("COS", Function::Cos),
+    ("TAN", Function::Tan),
+    ("ASIN", Function::Asin),
+    ("ACOS", Function::Acos),
+    ("ATAN", Function::Atan),
+    ("ATAN2", Function::Atan2),
+    ("SINH", Function::Sinh),
+    ("COSH", Function::Cosh),
+    ("TANH", Function::Tanh),
+    ("ASINH", Function::Asinh),
+    ("ACOSH", Function::Acosh),
+    ("ATANH", Function::Atanh),
+    ("DEGREES", Function::Degrees),
+    ("RADIANS", Function::Radians),
+    ("QUOTIENT", Function::Quotient),
+    ("MROUND", Function::MRound),
+    ("EVEN", Function::Even),
+    ("ODD", Function::Odd),
+    ("FACT", Function::Fact),
+    ("FACTDOUBLE", Function::FactDouble),
+    ("COMBIN", Function::Combin),
+    ("COMBINA", Function::Combina),
+    ("ISEVEN", Function::IsEven),
+    ("ISODD", Function::IsOdd),
+    ("SEARCH", Function::Search),
+    ("SUBSTITUTE", Function::Substitute),
+    ("REPLACE", Function::Replace),
+    ("CLEAN", Function::Clean),
+    ("PROPER", Function::Proper),
+    ("TIME", Function::Time),
+    ("HOUR", Function::Hour),
+    ("MINUTE", Function::Minute),
+    ("SECOND", Function::Second),
+    ("DAYS", Function::Days),
+    ("FV", Function::Fv),
+    ("NPER", Function::Nper),
+    ("IPMT", Function::Ipmt),
+    ("PPMT", Function::Ppmt),
+    ("SLN", Function::Sln),
+    ("SYD", Function::Syd),
+    ("SUMSQ", Function::SumSq),
+    ("COUNTBLANK", Function::CountBlank),
+    ("GCD", Function::Gcd),
+    ("LCM", Function::Lcm),
+    ("XOR", Function::Xor),
+    ("LARGE", Function::Large),
+    ("SMALL", Function::Small),
+    ("PERCENTILE.INC", Function::PercentileInc),
+    ("PERCENTILE.EXC", Function::PercentileExc),
+    ("QUARTILE.INC", Function::QuartileInc),
+    ("QUARTILE.EXC", Function::QuartileExc),
+    ("RANK.AVG", Function::RankAvg),
+    ("PERCENTILE", Function::PercentileInc),
+    ("QUARTILE", Function::QuartileInc),
     ("TODAY", Function::Today),
     ("NOW", Function::Now),
     ("RAND", Function::Rand),

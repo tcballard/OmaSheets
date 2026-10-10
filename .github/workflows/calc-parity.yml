@@ -8,6 +8,7 @@ on:
       - "crates/omasheets-calc/**"
       - "crates/omasheets-xlsx/**"
       - "scripts/check_calc_parity.mjs"
+      - "scripts/generate_common_calc_cases.mjs"
       - "tests/calc-parity/**"
       - ".github/workflows/calc-parity.yml"
 
@@ -20,7 +21,7 @@ concurrency:
 
 jobs:
   information:
-    name: Calc information function differential
+    name: Common calculations against Calc
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -36,10 +37,10 @@ jobs:
           cargo +1.88.0 test --locked -p omasheets-calc -p omasheets-xlsx
           cargo +1.88.0 build --locked -p omasheets-xlsx --example calc_parity
       - name: Generate fresh Calc results and compare every formula
-        run: node scripts/check_calc_parity.mjs "$RUNNER_TEMP/calc-parity" target/debug/examples/calc_parity
+        run: node scripts/check_calc_parity.mjs "$RUNNER_TEMP/calc-parity" target/debug/examples/calc_parity common
       - name: Retain differential evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: calc-parity-information
+          name: calc-parity-common
           path: ${{ runner.temp }}/calc-parity
