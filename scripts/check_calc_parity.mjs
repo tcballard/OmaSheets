@@ -64,6 +64,10 @@ function openFormula(formula) {
         if (!address) throw new Error('invalid trusted Inputs reference');
         result += `[Inputs.${address[1]}${address[2] ? `:Inputs.${address[2]}` : ''}]`;
         i += 1 + address[0].length;
+      } else if (/^[A-Z]+[0-9]+$/.test(match)) {
+        const end = next === ':' ? formula.slice(i + match.length + 1).match(/^[A-Z]+[0-9]+/) : null;
+        result += `[.${match}${end ? `:.${end[0]}` : ''}]`;
+        if (end) i += 1 + end[0].length;
       } else result += match;
       i += match.length - 1;
     } else result += c;

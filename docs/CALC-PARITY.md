@@ -117,7 +117,7 @@ Numeric comparisons use the existing XLSX scorer's tolerance:
 `|owned-reference| <= 1e-9 * max(|reference|, 1)`. Typed strings, booleans and
 errors must match. This is not a bit-for-bit floating-point equality claim.
 
-`tests/calc-parity/common.json` contains 645 deterministic scenarios
+`tests/calc-parity/common.json` contains 653 deterministic scenarios
 in information, mathematics, rounding, statistics, text, dates, finance and
 references/arrays. `scripts/generate_common_calc_cases.mjs` reproduces them.
 The denominator is this declared suite, not the percentage of real workbooks
@@ -146,6 +146,10 @@ financial future values, lazy `CHOOSE`, `SUBTOTAL`, positions and bounded
 reference functions. The corpus reaches all 177 nonvolatile registered names;
 the three explicit-tick clock/random functions need a separate reference-clock
 contract and are not part of this suite.
+That pass matched 642 of 645 with no refusals. One existing `SUBTOTAL` array
+flattening bug remained, alongside the two known inspection gaps. The next
+eight cases cover array subtotals and live dependent formulas that distinguish
+excluding nested subtotal cells from including ordinary formula cells.
 
 Calc-specific boundaries in this increment include `ATAN2(0,0) = 0`, flooring
 fractional `SMALL` ranks (while `LARGE` rounds up), preserving fractional

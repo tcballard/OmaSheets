@@ -117,7 +117,16 @@ for (const formula of [
   '=SUBTOTAL(2,Inputs!A1:A5)','=SUBTOTAL(10,{1,2,3})',
   '=ROW(Inputs!A2)','=COLUMN(Inputs!A2)',
   '=SUM(OFFSET(Inputs!A1,0,0,2,1))','=INDIRECT("A1")',
+  '=SUBTOTAL(9,{1,2;3,4})','=SUBTOTAL(7,{1,2,3})','=SUBTOTAL(11,{1,2,3})',
 ]) add('references',formula);
+// A live dependency slice: nested subtotal cells are excluded, ordinary
+// formula cells remain included, and SUM provides the independent contrast.
+const nestedRow = cases.length + 1;
+add('references', '=SUBTOTAL(9,Inputs!A1:A2)');
+add('references', '=Inputs!A1');
+add('references', `=SUBTOTAL(9,A${nestedRow}:A${nestedRow + 1})`);
+add('references', `=SUM(A${nestedRow}:A${nestedRow + 1})`);
+add('references', `=SUBTOTAL(9,A${nestedRow})`);
 writeFileSync('tests/calc-parity/common.json',JSON.stringify(cases,null,2)+'\n');
 const counts={};for(const c of cases) counts[c.group]=(counts[c.group]??0)+1;
 console.log(JSON.stringify({cases:cases.length,groups:counts}));

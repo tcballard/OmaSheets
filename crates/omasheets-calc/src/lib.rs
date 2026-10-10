@@ -2315,7 +2315,7 @@ impl Workbook {
                 output.push(self.cells[*index].value.clone());
             }
             Expr::Empty => {}
-            other => output.push(self.evaluate(other)),
+            other => self.flatten_values(other, output),
         }
     }
 
@@ -8189,6 +8189,9 @@ mod tests {
             (14, "=VAR.P(A1:A8)", Value::Number(4.0)),
             (15, "=STDEV(A1)", Value::Error(CalcError::DivisionByZero)),
             (16, "=ROUND(SUBTOTAL(7,A1:A9),5)", Value::Number(2.13809)),
+            (17, "=SUBTOTAL(10,{1,2,3})", Value::Number(1.0)),
+            (18, "=SUBTOTAL(9,{1,2;3,4})", Value::Number(10.0)),
+            (19, "=SUBTOTAL(11,{1,2,3})", Value::Number(2.0 / 3.0)),
         ] {
             workbook.set_formula(cell(0, column), formula).unwrap();
             assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");

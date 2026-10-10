@@ -3223,5 +3223,45 @@
     "id": "references-0645",
     "group": "references",
     "formula": "=INDIRECT(\"A1\")"
+  },
+  {
+    "id": "references-0646",
+    "group": "references",
+    "formula": "=SUBTOTAL(9,{1,2;3,4})"
+  },
+  {
+    "id": "references-0647",
+    "group": "references",
+    "formula": "=SUBTOTAL(7,{1,2,3})"
+  },
+  {
+    "id": "references-0648",
+    "group": "references",
+    "formula": "=SUBTOTAL(11,{1,2,3})"
+  },
+  {
+    "id": "references-0649",
+    "group": "references",
+    "formula": "=SUBTOTAL(9,Inputs!A1:A2)"
+  },
+  {
+    "id": "references-0650",
+    "group": "references",
+    "formula": "=Inputs!A1"
+  },
+  {
+    "id": "references-0651",
+    "group": "references",
+    "formula": "=SUBTOTAL(9,A649:A650)"
+  },
+  {
+    "id": "references-0652",
+    "group": "references",
+    "formula": "=SUM(A649:A650)"
+  },
+  {
+    "id": "references-0653",
+    "group": "references",
+    "formula": "=SUBTOTAL(9,A649)"
   }
 ]
