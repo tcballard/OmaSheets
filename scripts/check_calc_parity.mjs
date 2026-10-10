@@ -12,6 +12,8 @@ if (!outputArg || !scorerArg || ![4, 5].includes(process.argv.length) || !['info
 }
 const output = resolve(outputArg);
 const scorer = resolve(scorerArg);
+const reference = process.env.CALC_REFERENCE ?? 'libreoffice';
+const referenceSettings = { useWildcards: true, useRegularExpressions: false, caseSensitive: false };
 mkdirSync(output, { recursive: false, mode: 0o700 });
 const workbooks = join(output, 'workbooks');
 mkdirSync(workbooks);
@@ -71,9 +73,9 @@ function openFormula(formula) {
 const inputs = '<table:table table:name="Inputs"><table:table-row><table:table-cell office:value-type="float" office:value="2"/></table:table-row><table:table-row><table:table-cell office:value-type="float" office:value="3"/></table:table-row><table:table-row><table:table-cell office:value-type="string"><text:p>abc</text:p></table:table-cell></table:table-row><table:table-row><table:table-cell office:value-type="boolean" office:boolean-value="true"/></table:table-row><table:table-row><table:table-cell/></table:table-row></table:table>';
 const rows = formulas.map(formula => `<table:table-row><table:table-cell table:formula="of:${xml(openFormula(formula))}" office:value-type="float" office:value="0"><text:p>0</text:p></table:table-cell></table:table-row>`).join('\n');
 writeFileSync(source, `<?xml version="1.0" encoding="UTF-8"?>
-<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:of="urn:oasis:names:tc:opendocument:xmlns:of:1.2" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.spreadsheet"><office:body><office:spreadsheet><table:table table:name="Information">${rows}</table:table>${suite === 'common' ? inputs : ''}</office:spreadsheet></office:body></office:document>\n`, { flag: 'wx' });
-const referenceVersion = run('libreoffice', ['--version']).trim();
-const conversion = run('libreoffice', [
+<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:of="urn:oasis:names:tc:opendocument:xmlns:of:1.2" office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.spreadsheet"><office:body><office:spreadsheet><table:calculation-settings table:use-wildcards="true" table:use-regular-expressions="false" table:case-sensitive="false"/><table:table table:name="Information">${rows}</table:table>${suite === 'common' ? inputs : ''}</office:spreadsheet></office:body></office:document>\n`, { flag: 'wx' });
+const referenceVersion = run(reference, ['--version']).trim();
+const conversion = run(reference, [
   `-env:UserInstallation=${pathToFileURL(join(output, 'profile')).href}`,
   '--headless', '--convert-to', 'xlsx:Calc MS Excel 2007 XML', '--outdir', workbooks, source,
 ]);
@@ -105,7 +107,7 @@ const targetPassed = suite === 'common'
     && score.stored_values_matched / formulas.length >= 0.99 && diagnostic.mismatches.every(known)
   : fullParityPassed;
 const evidence = {
-  schema: 1, referenceVersion, fixtureSha256: createHash('sha256').update(fixtureBytes).digest('hex'),
+  schema: 1, referenceVersion, referenceSettings, fixtureSha256: createHash('sha256').update(fixtureBytes).digest('hex'),
   sourceSha256: createHash('sha256').update(readFileSync(source)).digest('hex'),
   suite, cases, groups, passed: targetPassed, fullParityPassed, score, mismatches: diagnostic.mismatches, unsupported: diagnostic.unsupported,
   scope: suite === 'common' ? 'declared common-calculation suite: minimum 400 cases, >=99% match, no refusals; only issue #98 internal-error gaps permitted' : 'strict information function reference slice; not full Calc parity',

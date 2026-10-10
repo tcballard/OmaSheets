@@ -116,8 +116,12 @@ impl Workbook {
         };
         let result = match function {
             Function::Large | Function::Small => {
-                // Rank selectors round upward; unlike QUARTILE, they do not truncate.
-                let k = n.ceil();
+                // Calc floors SMALL ranks and rounds LARGE ranks upward.
+                let k = if function == Function::Small {
+                    n.floor()
+                } else {
+                    n.ceil()
+                };
                 if k < 1.0 || k > data.len() as f64 {
                     return Value::Error(CalcError::InvalidNumber);
                 }
@@ -204,13 +208,7 @@ fn common_scalar(function: Function, values: &[Value]) -> Value {
                 Err(e) => return Value::Error(e),
             };
             match function {
-                Function::Atan2 => {
-                    if n[0] == 0.0 && n[1] == 0.0 {
-                        Value::Error(CalcError::DivisionByZero)
-                    } else {
-                        finite(n[1].atan2(n[0]))
-                    }
-                }
+                Function::Atan2 => finite(n[1].atan2(n[0])),
                 Function::Quotient => {
                     if n[1] == 0.0 {
                         Value::Error(CalcError::DivisionByZero)
@@ -273,6 +271,9 @@ fn common_scalar(function: Function, values: &[Value]) -> Value {
             }
             let mut a = n[0].trunc() as u64;
             let mut b = n[1].trunc() as u64;
+            if function == Function::Combina && b > a {
+                return Value::Error(CalcError::InvalidValue);
+            }
             if function == Function::Combina {
                 if b == 0 {
                     return Value::Number(1.0);
@@ -487,7 +488,7 @@ fn common_text(function: Function, values: &[Value]) -> Value {
         },
     };
     let chars: Vec<_> = second.chars().collect();
-    if start > chars.len() + 1 {
+    if text.is_empty() || start > chars.len() + 1 {
         return Value::Error(CalcError::InvalidValue);
     }
     // SEARCH is case-insensitive and accepts ?, * and ~ escapes. The
@@ -524,7 +525,7 @@ fn common_time(function: Function, values: &[Value]) -> Value {
         if n.iter().any(|n| n.abs() > 1e9) {
             return Value::Error(CalcError::InvalidNumber);
         }
-        let seconds = n[0].trunc() * 3600.0 + n[1].trunc() * 60.0 + n[2].trunc();
+        let seconds = n[0] * 3600.0 + n[1] * 60.0 + n[2];
         return if seconds < 0.0 {
             Value::Error(CalcError::InvalidNumber)
         } else {
@@ -532,7 +533,7 @@ fn common_time(function: Function, values: &[Value]) -> Value {
         };
     }
     if function == Function::Days {
-        return finite(n[0].trunc() - n[1].trunc());
+        return finite(n[0] - n[1]);
     }
     if n[0] < 0.0 {
         return Value::Error(CalcError::InvalidNumber);

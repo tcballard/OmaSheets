@@ -31,7 +31,7 @@ function count, workbook open rate or passing CI is not full parity evidence.
 | Dimension | Required behaviour | Current known gap |
 | --- | --- | --- |
 | Formula language | Calc/Excel/ODF dialects, references, names, arrays, dynamic dependencies, errors | Bounded Excel syntax; no 3D refs or spilling; limited dynamic refs |
-| Function semantics | Every supported Calc built-in, argument coercion, domains, locale, precision | 125 parser names, including aliases; comprehensive Calc inventory not yet measured |
+| Function semantics | Every supported Calc built-in, argument coercion, domains, locale, precision | 180 parser names, including aliases; comprehensive Calc semantics not yet measured |
 | Recalculation | Dirty graph, cycles/iteration, volatility, calculation settings | Iteration and Calc clock/random policies unresolved |
 | Document model | All sheet/cell properties, annotations, protection, merges, hidden content | Strict admission refuses many source features |
 | Data workflows | Sort/filter, tables, validation, conditional formatting, pivots, links and refresh | Incomplete owned workflows and source admission |
@@ -99,8 +99,8 @@ and are not removed or accepted as matching results. Per-cell typed diagnostics 
 A reproducible source catalogue is retained in
 `tests/calc-parity/calc-catalogue.json`, generated with
 `scripts/inventory_calc_parity.mjs` from the pinned upstream header. All five
-English maps are recorded. The Calc map has 432 named tokens; 118 names match
-the owned parser and 314 do not. These are token-name counts, include aliases
+English maps are recorded. The Calc map has 432 named tokens; 170 names match
+the owned parser and 262 do not. These are token-name counts, include aliases
 and special names, and are **not a function-completion percentage**. Matching
 a name does not establish coercion, reference, error, array or locale semantics.
 
@@ -114,7 +114,7 @@ differences are the two typed internal-error inspection cases in issue #98;
 those continue to count as mismatches. Strict information mode still fails on
 them. Common mode reports both its target result and full exact agreement.
 
-`tests/calc-parity/common.json` initially contains 594 deterministic scenarios
+`tests/calc-parity/common.json` contains 595 deterministic scenarios
 in information, mathematics, rounding, statistics, text, dates, finance and
 references/arrays. `scripts/generate_common_calc_cases.mjs` reproduces them.
 The denominator is this declared suite, not the percentage of real workbooks
@@ -124,3 +124,25 @@ The new common module reuses the engine's graph, reference binding, errors and
 array evaluator. FODS test generation maps function names through the pinned
 ODF/OOXML catalogue and converts delimiters without rewriting quoted strings.
 The test reference is isolated from product bundles and dependencies.
+
+The common job pins the official Linux LibreOffice 26.8.1.1 reference archive
+with SHA-256 `30903df3b9f61360d9660cd707de48cd2831469114492a5008ed58a0ac77d044`.
+It enables wildcards and disables regular expressions in the generated FODS,
+with case-insensitive searches. `CALC_REFERENCE` selects this isolated binary;
+the exact binary version and settings are retained in the evidence. The first
+594-case pass used Ubuntu's older 24.2 reference and matched 579 cases, with
+14 differences and one refused modern `XLOOKUP` name. Those cases remain in
+the suite. A fractional `DAYS` regression adds the 595th case.
+
+Calc-specific boundaries in this increment include `ATAN2(0,0) = 0`, flooring
+fractional `SMALL` ranks (while `LARGE` rounds up), preserving fractional
+`TIME` components and `DAYS` differences, rejecting an empty `SEARCH` pattern,
+and rejecting `COMBINA` when the selection exceeds the first argument. These
+must not be described as complete Excel dialect compatibility. Existing
+`SIGN(0)` and negative-divisor `MOD` results are also corrected.
+
+An owned workbook session regression imports new common formulas, changes an
+input, checks dependent recalculation, saves with all nine formulas preserved,
+and reopens both the native document and exported XLSX. Independent ZIP checks
+verify selected formula caches. This exercises the product path as well as
+the differential calculation scorer.

@@ -68,6 +68,7 @@ for (const [h,m,s] of [[0,0,0],[12,30,45],[23,59,59],[25,61,61],[0,0,59.9]]) {
 }
 for (const formula of [
   '=DAYS(DATE(2024,3,1),DATE(2024,2,28))','=DAYS(DATE(2025,1,1),DATE(2024,1,1))',
+  '=DAYS(10.5,2.25)',
   '=NETWORKDAYS(DATE(2024,1,1),DATE(2024,1,12))','=WORKDAY(DATE(2024,1,1),10)',
   '=YEARFRAC(DATE(2024,1,1),DATE(2025,1,1),3)','=DAYS360(DATE(2024,1,1),DATE(2025,1,1))',
 ]) add('dates',formula);

@@ -1945,11 +1945,23 @@ impl Workbook {
                 if right == 0.0 {
                     None
                 } else {
-                    Some(left.rem_euclid(right))
+                    let remainder = left % right;
+                    Some(if remainder == 0.0 {
+                        0.0
+                    } else if remainder.signum() != right.signum() {
+                        remainder + right
+                    } else {
+                        remainder
+                    })
                 }
             }),
             Function::Power => binary_number(&values, |left, right| Some(left.powf(right))),
-            Function::Sign => unary_number(&values, |value| value.signum()),
+            Function::Sign => {
+                unary_number(
+                    &values,
+                    |value| if value == 0.0 { 0.0 } else { value.signum() },
+                )
+            }
             Function::Ceiling => binary_number(&values, |value, significance| {
                 (significance != 0.0).then(|| (value / significance).ceil() * significance)
             }),

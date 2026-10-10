@@ -30,6 +30,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends libreoffice-calc
+          reference_dir="$RUNNER_TEMP/calc-reference"
+          mkdir -p "$reference_dir/packages" "$reference_dir/root"
+          curl --fail --location --retry 3 --output "$reference_dir/reference.tar.gz" https://download.documentfoundation.org/libreoffice/stable/26.8.1/deb/x86_64/LibreOffice_26.8.1_Linux_x86-64_deb.tar.gz
+          echo '30903df3b9f61360d9660cd707de48cd2831469114492a5008ed58a0ac77d044' "$reference_dir/reference.tar.gz" | sha256sum --check --strict
+          tar -xzf "$reference_dir/reference.tar.gz" -C "$reference_dir/packages"
+          for package in "$reference_dir"/packages/*/DEBS/*.deb; do
+            dpkg-deb -x "$package" "$reference_dir/root"
+          done
+          echo "CALC_REFERENCE=$reference_dir/root/opt/libreoffice26.8/program/soffice" >> "$GITHUB_ENV"
       - name: Build independent owned scorer
         run: |
           rustup toolchain install 1.88.0 --profile minimal --component clippy,rustfmt --no-self-update

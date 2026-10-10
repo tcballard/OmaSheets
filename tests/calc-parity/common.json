@@ -2477,495 +2477,500 @@
   {
     "id": "dates-0496",
     "group": "dates",
-    "formula": "=NETWORKDAYS(DATE(2024,1,1),DATE(2024,1,12))"
+    "formula": "=DAYS(10.5,2.25)"
   },
   {
     "id": "dates-0497",
     "group": "dates",
-    "formula": "=WORKDAY(DATE(2024,1,1),10)"
+    "formula": "=NETWORKDAYS(DATE(2024,1,1),DATE(2024,1,12))"
   },
   {
     "id": "dates-0498",
     "group": "dates",
-    "formula": "=YEARFRAC(DATE(2024,1,1),DATE(2025,1,1),3)"
+    "formula": "=WORKDAY(DATE(2024,1,1),10)"
   },
   {
     "id": "dates-0499",
     "group": "dates",
-    "formula": "=DAYS360(DATE(2024,1,1),DATE(2025,1,1))"
+    "formula": "=YEARFRAC(DATE(2024,1,1),DATE(2025,1,1),3)"
   },
   {
-    "id": "finance-0500",
-    "group": "finance",
-    "formula": "=PMT(0,24,2000,0,0)"
+    "id": "dates-0500",
+    "group": "dates",
+    "formula": "=DAYS360(DATE(2024,1,1),DATE(2025,1,1))"
   },
   {
     "id": "finance-0501",
     "group": "finance",
-    "formula": "=PV(0,24,-100,0,0)"
+    "formula": "=PMT(0,24,2000,0,0)"
   },
   {
     "id": "finance-0502",
     "group": "finance",
-    "formula": "=FV(0,24,-100,0,0)"
+    "formula": "=PV(0,24,-100,0,0)"
   },
   {
     "id": "finance-0503",
     "group": "finance",
-    "formula": "=NPER(0,-100,2000,0,0)"
+    "formula": "=FV(0,24,-100,0,0)"
   },
   {
     "id": "finance-0504",
     "group": "finance",
-    "formula": "=IPMT(0,1,24,2000,0,0)"
+    "formula": "=NPER(0,-100,2000,0,0)"
   },
   {
     "id": "finance-0505",
     "group": "finance",
-    "formula": "=PPMT(0,1,24,2000,0,0)"
+    "formula": "=IPMT(0,1,24,2000,0,0)"
   },
   {
     "id": "finance-0506",
     "group": "finance",
-    "formula": "=IPMT(0,2,24,2000,0,0)"
+    "formula": "=PPMT(0,1,24,2000,0,0)"
   },
   {
     "id": "finance-0507",
     "group": "finance",
-    "formula": "=PPMT(0,2,24,2000,0,0)"
+    "formula": "=IPMT(0,2,24,2000,0,0)"
   },
   {
     "id": "finance-0508",
     "group": "finance",
-    "formula": "=IPMT(0,24,24,2000,0,0)"
+    "formula": "=PPMT(0,2,24,2000,0,0)"
   },
   {
     "id": "finance-0509",
     "group": "finance",
-    "formula": "=PPMT(0,24,24,2000,0,0)"
+    "formula": "=IPMT(0,24,24,2000,0,0)"
   },
   {
     "id": "finance-0510",
     "group": "finance",
-    "formula": "=PMT(0,24,2000,0,1)"
+    "formula": "=PPMT(0,24,24,2000,0,0)"
   },
   {
     "id": "finance-0511",
     "group": "finance",
-    "formula": "=PV(0,24,-100,0,1)"
+    "formula": "=PMT(0,24,2000,0,1)"
   },
   {
     "id": "finance-0512",
     "group": "finance",
-    "formula": "=FV(0,24,-100,0,1)"
+    "formula": "=PV(0,24,-100,0,1)"
   },
   {
     "id": "finance-0513",
     "group": "finance",
-    "formula": "=NPER(0,-100,2000,0,1)"
+    "formula": "=FV(0,24,-100,0,1)"
   },
   {
     "id": "finance-0514",
     "group": "finance",
-    "formula": "=IPMT(0,1,24,2000,0,1)"
+    "formula": "=NPER(0,-100,2000,0,1)"
   },
   {
     "id": "finance-0515",
     "group": "finance",
-    "formula": "=PPMT(0,1,24,2000,0,1)"
+    "formula": "=IPMT(0,1,24,2000,0,1)"
   },
   {
     "id": "finance-0516",
     "group": "finance",
-    "formula": "=IPMT(0,2,24,2000,0,1)"
+    "formula": "=PPMT(0,1,24,2000,0,1)"
   },
   {
     "id": "finance-0517",
     "group": "finance",
-    "formula": "=PPMT(0,2,24,2000,0,1)"
+    "formula": "=IPMT(0,2,24,2000,0,1)"
   },
   {
     "id": "finance-0518",
     "group": "finance",
-    "formula": "=IPMT(0,24,24,2000,0,1)"
+    "formula": "=PPMT(0,2,24,2000,0,1)"
   },
   {
     "id": "finance-0519",
     "group": "finance",
-    "formula": "=PPMT(0,24,24,2000,0,1)"
+    "formula": "=IPMT(0,24,24,2000,0,1)"
   },
   {
     "id": "finance-0520",
     "group": "finance",
-    "formula": "=PMT(0.005,24,2000,0,0)"
+    "formula": "=PPMT(0,24,24,2000,0,1)"
   },
   {
     "id": "finance-0521",
     "group": "finance",
-    "formula": "=PV(0.005,24,-100,0,0)"
+    "formula": "=PMT(0.005,24,2000,0,0)"
   },
   {
     "id": "finance-0522",
     "group": "finance",
-    "formula": "=FV(0.005,24,-100,0,0)"
+    "formula": "=PV(0.005,24,-100,0,0)"
   },
   {
     "id": "finance-0523",
     "group": "finance",
-    "formula": "=NPER(0.005,-100,2000,0,0)"
+    "formula": "=FV(0.005,24,-100,0,0)"
   },
   {
     "id": "finance-0524",
     "group": "finance",
-    "formula": "=IPMT(0.005,1,24,2000,0,0)"
+    "formula": "=NPER(0.005,-100,2000,0,0)"
   },
   {
     "id": "finance-0525",
     "group": "finance",
-    "formula": "=PPMT(0.005,1,24,2000,0,0)"
+    "formula": "=IPMT(0.005,1,24,2000,0,0)"
   },
   {
     "id": "finance-0526",
     "group": "finance",
-    "formula": "=IPMT(0.005,2,24,2000,0,0)"
+    "formula": "=PPMT(0.005,1,24,2000,0,0)"
   },
   {
     "id": "finance-0527",
     "group": "finance",
-    "formula": "=PPMT(0.005,2,24,2000,0,0)"
+    "formula": "=IPMT(0.005,2,24,2000,0,0)"
   },
   {
     "id": "finance-0528",
     "group": "finance",
-    "formula": "=IPMT(0.005,24,24,2000,0,0)"
+    "formula": "=PPMT(0.005,2,24,2000,0,0)"
   },
   {
     "id": "finance-0529",
     "group": "finance",
-    "formula": "=PPMT(0.005,24,24,2000,0,0)"
+    "formula": "=IPMT(0.005,24,24,2000,0,0)"
   },
   {
     "id": "finance-0530",
     "group": "finance",
-    "formula": "=PMT(0.005,24,2000,0,1)"
+    "formula": "=PPMT(0.005,24,24,2000,0,0)"
   },
   {
     "id": "finance-0531",
     "group": "finance",
-    "formula": "=PV(0.005,24,-100,0,1)"
+    "formula": "=PMT(0.005,24,2000,0,1)"
   },
   {
     "id": "finance-0532",
     "group": "finance",
-    "formula": "=FV(0.005,24,-100,0,1)"
+    "formula": "=PV(0.005,24,-100,0,1)"
   },
   {
     "id": "finance-0533",
     "group": "finance",
-    "formula": "=NPER(0.005,-100,2000,0,1)"
+    "formula": "=FV(0.005,24,-100,0,1)"
   },
   {
     "id": "finance-0534",
     "group": "finance",
-    "formula": "=IPMT(0.005,1,24,2000,0,1)"
+    "formula": "=NPER(0.005,-100,2000,0,1)"
   },
   {
     "id": "finance-0535",
     "group": "finance",
-    "formula": "=PPMT(0.005,1,24,2000,0,1)"
+    "formula": "=IPMT(0.005,1,24,2000,0,1)"
   },
   {
     "id": "finance-0536",
     "group": "finance",
-    "formula": "=IPMT(0.005,2,24,2000,0,1)"
+    "formula": "=PPMT(0.005,1,24,2000,0,1)"
   },
   {
     "id": "finance-0537",
     "group": "finance",
-    "formula": "=PPMT(0.005,2,24,2000,0,1)"
+    "formula": "=IPMT(0.005,2,24,2000,0,1)"
   },
   {
     "id": "finance-0538",
     "group": "finance",
-    "formula": "=IPMT(0.005,24,24,2000,0,1)"
+    "formula": "=PPMT(0.005,2,24,2000,0,1)"
   },
   {
     "id": "finance-0539",
     "group": "finance",
-    "formula": "=PPMT(0.005,24,24,2000,0,1)"
+    "formula": "=IPMT(0.005,24,24,2000,0,1)"
   },
   {
     "id": "finance-0540",
     "group": "finance",
-    "formula": "=PMT(0.01,24,2000,0,0)"
+    "formula": "=PPMT(0.005,24,24,2000,0,1)"
   },
   {
     "id": "finance-0541",
     "group": "finance",
-    "formula": "=PV(0.01,24,-100,0,0)"
+    "formula": "=PMT(0.01,24,2000,0,0)"
   },
   {
     "id": "finance-0542",
     "group": "finance",
-    "formula": "=FV(0.01,24,-100,0,0)"
+    "formula": "=PV(0.01,24,-100,0,0)"
   },
   {
     "id": "finance-0543",
     "group": "finance",
-    "formula": "=NPER(0.01,-100,2000,0,0)"
+    "formula": "=FV(0.01,24,-100,0,0)"
   },
   {
     "id": "finance-0544",
     "group": "finance",
-    "formula": "=IPMT(0.01,1,24,2000,0,0)"
+    "formula": "=NPER(0.01,-100,2000,0,0)"
   },
   {
     "id": "finance-0545",
     "group": "finance",
-    "formula": "=PPMT(0.01,1,24,2000,0,0)"
+    "formula": "=IPMT(0.01,1,24,2000,0,0)"
   },
   {
     "id": "finance-0546",
     "group": "finance",
-    "formula": "=IPMT(0.01,2,24,2000,0,0)"
+    "formula": "=PPMT(0.01,1,24,2000,0,0)"
   },
   {
     "id": "finance-0547",
     "group": "finance",
-    "formula": "=PPMT(0.01,2,24,2000,0,0)"
+    "formula": "=IPMT(0.01,2,24,2000,0,0)"
   },
   {
     "id": "finance-0548",
     "group": "finance",
-    "formula": "=IPMT(0.01,24,24,2000,0,0)"
+    "formula": "=PPMT(0.01,2,24,2000,0,0)"
   },
   {
     "id": "finance-0549",
     "group": "finance",
-    "formula": "=PPMT(0.01,24,24,2000,0,0)"
+    "formula": "=IPMT(0.01,24,24,2000,0,0)"
   },
   {
     "id": "finance-0550",
     "group": "finance",
-    "formula": "=PMT(0.01,24,2000,0,1)"
+    "formula": "=PPMT(0.01,24,24,2000,0,0)"
   },
   {
     "id": "finance-0551",
     "group": "finance",
-    "formula": "=PV(0.01,24,-100,0,1)"
+    "formula": "=PMT(0.01,24,2000,0,1)"
   },
   {
     "id": "finance-0552",
     "group": "finance",
-    "formula": "=FV(0.01,24,-100,0,1)"
+    "formula": "=PV(0.01,24,-100,0,1)"
   },
   {
     "id": "finance-0553",
     "group": "finance",
-    "formula": "=NPER(0.01,-100,2000,0,1)"
+    "formula": "=FV(0.01,24,-100,0,1)"
   },
   {
     "id": "finance-0554",
     "group": "finance",
-    "formula": "=IPMT(0.01,1,24,2000,0,1)"
+    "formula": "=NPER(0.01,-100,2000,0,1)"
   },
   {
     "id": "finance-0555",
     "group": "finance",
-    "formula": "=PPMT(0.01,1,24,2000,0,1)"
+    "formula": "=IPMT(0.01,1,24,2000,0,1)"
   },
   {
     "id": "finance-0556",
     "group": "finance",
-    "formula": "=IPMT(0.01,2,24,2000,0,1)"
+    "formula": "=PPMT(0.01,1,24,2000,0,1)"
   },
   {
     "id": "finance-0557",
     "group": "finance",
-    "formula": "=PPMT(0.01,2,24,2000,0,1)"
+    "formula": "=IPMT(0.01,2,24,2000,0,1)"
   },
   {
     "id": "finance-0558",
     "group": "finance",
-    "formula": "=IPMT(0.01,24,24,2000,0,1)"
+    "formula": "=PPMT(0.01,2,24,2000,0,1)"
   },
   {
     "id": "finance-0559",
     "group": "finance",
-    "formula": "=PPMT(0.01,24,24,2000,0,1)"
+    "formula": "=IPMT(0.01,24,24,2000,0,1)"
   },
   {
     "id": "finance-0560",
     "group": "finance",
-    "formula": "=SLN(10000,1000,5)"
+    "formula": "=PPMT(0.01,24,24,2000,0,1)"
   },
   {
     "id": "finance-0561",
     "group": "finance",
-    "formula": "=SYD(10000,1000,5,1)"
+    "formula": "=SLN(10000,1000,5)"
   },
   {
     "id": "finance-0562",
     "group": "finance",
-    "formula": "=SYD(10000,1000,5,5)"
+    "formula": "=SYD(10000,1000,5,1)"
   },
   {
     "id": "finance-0563",
     "group": "finance",
-    "formula": "=NPV(0.1,{-100,40,50,60})"
+    "formula": "=SYD(10000,1000,5,5)"
   },
   {
     "id": "finance-0564",
     "group": "finance",
-    "formula": "=IRR({-100,40,50,60})"
+    "formula": "=NPV(0.1,{-100,40,50,60})"
   },
   {
     "id": "finance-0565",
     "group": "finance",
-    "formula": "=RRI(5,100,200)"
+    "formula": "=IRR({-100,40,50,60})"
   },
   {
-    "id": "references-0566",
-    "group": "references",
-    "formula": "=IF(TRUE(),7,1/0)"
+    "id": "finance-0566",
+    "group": "finance",
+    "formula": "=RRI(5,100,200)"
   },
   {
     "id": "references-0567",
     "group": "references",
-    "formula": "=IF(FALSE(),1/0,7)"
+    "formula": "=IF(TRUE(),7,1/0)"
   },
   {
     "id": "references-0568",
     "group": "references",
-    "formula": "=AND(TRUE(),TRUE())"
+    "formula": "=IF(FALSE(),1/0,7)"
   },
   {
     "id": "references-0569",
     "group": "references",
-    "formula": "=OR(FALSE(),TRUE())"
+    "formula": "=AND(TRUE(),TRUE())"
   },
   {
     "id": "references-0570",
     "group": "references",
-    "formula": "=NOT(FALSE())"
+    "formula": "=OR(FALSE(),TRUE())"
   },
   {
     "id": "references-0571",
     "group": "references",
-    "formula": "=XOR(TRUE(),FALSE())"
+    "formula": "=NOT(FALSE())"
   },
   {
     "id": "references-0572",
     "group": "references",
-    "formula": "=XOR(TRUE(),TRUE())"
+    "formula": "=XOR(TRUE(),FALSE())"
   },
   {
     "id": "references-0573",
     "group": "references",
-    "formula": "=XOR(1,0,1)"
+    "formula": "=XOR(TRUE(),TRUE())"
   },
   {
     "id": "references-0574",
     "group": "references",
-    "formula": "=ISBLANK(Inputs!A5)"
+    "formula": "=XOR(1,0,1)"
   },
   {
     "id": "references-0575",
     "group": "references",
-    "formula": "=ISNUMBER(Inputs!A1)"
+    "formula": "=ISBLANK(Inputs!A5)"
   },
   {
     "id": "references-0576",
     "group": "references",
-    "formula": "=ISTEXT(Inputs!A3)"
+    "formula": "=ISNUMBER(Inputs!A1)"
   },
   {
     "id": "references-0577",
     "group": "references",
-    "formula": "=ISLOGICAL(Inputs!A4)"
+    "formula": "=ISTEXT(Inputs!A3)"
   },
   {
     "id": "references-0578",
     "group": "references",
-    "formula": "=SUM(Inputs!A1:A5)"
+    "formula": "=ISLOGICAL(Inputs!A4)"
   },
   {
     "id": "references-0579",
     "group": "references",
-    "formula": "=COUNTA(Inputs!A1:A5)"
+    "formula": "=SUM(Inputs!A1:A5)"
   },
   {
     "id": "references-0580",
     "group": "references",
-    "formula": "=COUNTBLANK(Inputs!A1:A5)"
+    "formula": "=COUNTA(Inputs!A1:A5)"
   },
   {
     "id": "references-0581",
     "group": "references",
-    "formula": "=INDEX({10,20,30},1,2)"
+    "formula": "=COUNTBLANK(Inputs!A1:A5)"
   },
   {
     "id": "references-0582",
     "group": "references",
-    "formula": "=MATCH(20,{10,20,30},0)"
+    "formula": "=INDEX({10,20,30},1,2)"
   },
   {
     "id": "references-0583",
     "group": "references",
-    "formula": "=LOOKUP(25,{10,20,30},{1,2,3})"
+    "formula": "=MATCH(20,{10,20,30},0)"
   },
   {
     "id": "references-0584",
     "group": "references",
-    "formula": "=VLOOKUP(2,{1,10;2,20;3,30},2,FALSE())"
+    "formula": "=LOOKUP(25,{10,20,30},{1,2,3})"
   },
   {
     "id": "references-0585",
     "group": "references",
-    "formula": "=HLOOKUP(2,{1,2,3;10,20,30},2,FALSE())"
+    "formula": "=VLOOKUP(2,{1,10;2,20;3,30},2,FALSE())"
   },
   {
     "id": "references-0586",
     "group": "references",
-    "formula": "=XLOOKUP(2,{1,2,3},{10,20,30})"
+    "formula": "=HLOOKUP(2,{1,2,3;10,20,30},2,FALSE())"
   },
   {
     "id": "references-0587",
     "group": "references",
-    "formula": "=SUM(INDEX({1,2;3,4},0,2))"
+    "formula": "=XLOOKUP(2,{1,2,3},{10,20,30})"
   },
   {
     "id": "references-0588",
     "group": "references",
-    "formula": "=SUM(TRANSPOSE({1,2;3,4}))"
+    "formula": "=SUM(INDEX({1,2;3,4},0,2))"
   },
   {
     "id": "references-0589",
     "group": "references",
-    "formula": "=SUM(MMULT({1,2;3,4},{1,0;0,1}))"
+    "formula": "=SUM(TRANSPOSE({1,2;3,4}))"
   },
   {
     "id": "references-0590",
     "group": "references",
-    "formula": "=SUM(IF({1,2,3}>1,{10,20,30},0))"
+    "formula": "=SUM(MMULT({1,2;3,4},{1,0;0,1}))"
   },
   {
     "id": "references-0591",
     "group": "references",
-    "formula": "=SUMPRODUCT(SIN({0,1,2})*1)"
+    "formula": "=SUM(IF({1,2,3}>1,{10,20,30},0))"
   },
   {
     "id": "references-0592",
     "group": "references",
-    "formula": "=IFERROR(QUOTIENT(2,0),99)"
+    "formula": "=SUMPRODUCT(SIN({0,1,2})*1)"
   },
   {
     "id": "references-0593",
     "group": "references",
-    "formula": "=ISERROR(ASIN(2))"
+    "formula": "=IFERROR(QUOTIENT(2,0),99)"
   },
   {
     "id": "references-0594",
+    "group": "references",
+    "formula": "=ISERROR(ASIN(2))"
+  },
+  {
+    "id": "references-0595",
     "group": "references",
     "formula": "=ISERROR(FACT(-1))"
   }
