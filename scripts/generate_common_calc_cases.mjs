@@ -26,6 +26,7 @@ for (const [name, pairs] of Object.entries({
   GCD: [[12,18],[0,18],[7,11],[12.5,18.9]], LCM: [[12,18],[0,18],[7,11],[12.5,18.9]],
   LOG: [[8,2],[100,10],[0.5,2]], CEILING: [[5.1,2],[-5.1,-2],[0,2]], FLOOR: [[5.1,2],[-5.1,-2],[0,2]],
 })) for (const pair of pairs) add('math', `=${name}(${pair})`);
+add('math', '=PI()');
 const data = '{1,2,2,4,8,16}';
 for (const name of ['SUM','AVERAGE','MIN','MAX','COUNT','COUNTA','PRODUCT','MEDIAN','STDEV','STDEVP','VAR','VARP','SUMSQ','AVERAGEA']) {
   for (const values of [data,'{0,2,4}','{-5,-2,1,7}']) add('statistics', `=${name}(${values})`);
@@ -41,7 +42,21 @@ for (const formula of [
   '=COUNTIF({1,2,2,4},2)','=SUMIF({1,2,2,4},">1")','=AVERAGEIF({1,2,2,4},">1")',
   '=COUNTIFS({1,2,2,4},">1",{1,2,2,4},"<4")','=SUMIFS({1,2,2,4},{1,2,2,4},">1")',
   '=AVERAGEIFS({1,2,2,4},{1,2,2,4},">1")',
+  '=COUNTIF({"apple","Apricot","berry"},"a*")',
+  '=COUNTIF({"a*b","axb","a?b"},"a~*b")',
+  '=SUMIF({"apple","Apricot","berry"},"a*",{2,3,4})',
+  '=SUMIFS({10,20,30},{"N","S","N"},"N",{1,2,3},">1")',
+  '=AVERAGEIFS({10,20,30},{"N","S","N"},"N")',
+  '=COUNTIF(Inputs!A1:A5,"")','=COUNTIF(Inputs!A1:A5,">=2")',
+  '=SUMIF(Inputs!A1:A5,">=2",Inputs!A1:A5)',
+  '=NORM.DIST(1,0,1,TRUE())','=NORM.S.DIST(1,TRUE())',
+  '=COVARIANCE.P({1,2,3},{4,5,6})',
 ]) add('statistics', formula);
+for (const name of ['STDEV.S','STDEV.P','VAR.S','VAR.P']) add('statistics', `=${name}(${data})`);
+const database = '{"item","cost";"one",10;"two",20;"one",30}';
+for (const name of ['DAVERAGE','DMAX','DMIN','DSTDEV']) {
+  for (const criteria of ['{"item";"one"}','{"cost";">15"}']) add('statistics', `=${name}(${database},"cost",${criteria})`);
+}
 for (const text of ['"Hello WORLD"','"two words"','""','"éclair"']) for (const name of ['LEN','UPPER','LOWER','PROPER','CLEAN']) add('text', `=${name}(${text})`);
 for (const formula of [
   '=LEFT("abcdef",3)','=RIGHT("abcdef",3)','=MID("abcdef",2,3)','=LEFT("abc",0)',
@@ -55,13 +70,14 @@ for (const formula of [
   '=SUBSTITUTE("abc","","x")','=SUBSTITUTE("abc","z","x",1)',
   '=REPLACE("abcdef",2,3,"X")','=REPLACE("abc",5,3,"X")','=REPLACE("éclair",2,2,"X")',
   '=TEXT(1234.5,"0.00")','=TEXT(0.25,"0%")',
+  '=HYPERLINK("https://example.com","Docs")',
 ]) add('text', formula);
 for (const [y,m,d] of [[2024,2,29],[2025,1,1],[2026,10,10],[2024,13,1],[2024,3,0]]) {
   const date=`DATE(${y},${m},${d})`;
   for (const name of ['YEAR','MONTH','DAY','WEEKDAY']) add('dates', `=${name}(${date})`);
   for (const offset of [-1,0,1]) for (const name of ['EDATE','EOMONTH']) add('dates', `=${name}(${date},${offset})`);
 }
-for (const [h,m,s] of [[0,0,0],[12,30,45],[23,59,59],[25,61,61],[0,0,59.9]]) {
+for (const [h,m,s] of [[0,0,0],[12,30,45],[23,59,59],[25,61,61],[0,0,59.9],[12,30,0],[23,59,59.9]]) {
   const time=`TIME(${h},${m},${s})`;
   add('dates',`=${time}`);
   for (const name of ['HOUR','MINUTE','SECOND']) add('dates',`=${name}(${time})`);
@@ -80,8 +96,11 @@ for (const rate of [0,0.005,0.01]) for (const due of [0,1]) {
 for (const formula of [
   '=SLN(10000,1000,5)','=SYD(10000,1000,5,1)','=SYD(10000,1000,5,5)',
   '=NPV(0.1,{-100,40,50,60})','=IRR({-100,40,50,60})','=RRI(5,100,200)',
-  '=XNPV(0.1,{-100,110},{DATE(2024,1,1),DATE(2025,1,1)})',
-]) if(!formula.includes('{DATE')) add('finance',formula);
+  '=XNPV(0.1,{-100,110},{45292,45658})','=XIRR({-100,110},{45292,45658})',
+  '=FV(0.05,10,-100,-1000,0)','=FV(0.05,10,-100,-1000,1)',
+  '=NPER(0.01,-100,2000,500,1)',
+  '=IPMT(0.005,12,24,2000,500,0)','=PPMT(0.005,12,24,2000,500,0)',
+]) add('finance',formula);
 for (const formula of [
   '=IF(TRUE(),7,1/0)','=IF(FALSE(),1/0,7)','=AND(TRUE(),TRUE())','=OR(FALSE(),TRUE())',
   '=NOT(FALSE())','=XOR(TRUE(),FALSE())','=XOR(TRUE(),TRUE())','=XOR(1,0,1)',
@@ -93,6 +112,11 @@ for (const formula of [
   '=SUM(TRANSPOSE({1,2;3,4}))','=SUM(MMULT({1,2;3,4},{1,0;0,1}))',
   '=SUM(IF({1,2,3}>1,{10,20,30},0))','=SUMPRODUCT(SIN({0,1,2})*1)',
   '=IFERROR(QUOTIENT(2,0),99)','=ISERROR(ASIN(2))','=ISERROR(FACT(-1))',
+  '=CHOOSE(2,1/0,7,NA())','=CHOOSE(1,Inputs!A1,Inputs!A2)',
+  '=SUBTOTAL(9,Inputs!A1:A5)','=SUBTOTAL(1,Inputs!A1:A5)',
+  '=SUBTOTAL(2,Inputs!A1:A5)','=SUBTOTAL(10,{1,2,3})',
+  '=ROW(Inputs!A2)','=COLUMN(Inputs!A2)',
+  '=SUM(OFFSET(Inputs!A1,0,0,2,1))','=INDIRECT("A1")',
 ]) add('references',formula);
 writeFileSync('tests/calc-parity/common.json',JSON.stringify(cases,null,2)+'\n');
 const counts={};for(const c of cases) counts[c.group]=(counts[c.group]??0)+1;

@@ -1365,1613 +1365,1863 @@
     "formula": "=FLOOR(0,2)"
   },
   {
-    "id": "statistics-0274",
-    "group": "statistics",
-    "formula": "=SUM({1,2,2,4,8,16})"
+    "id": "math-0274",
+    "group": "math",
+    "formula": "=PI()"
   },
   {
     "id": "statistics-0275",
     "group": "statistics",
-    "formula": "=SUM({0,2,4})"
+    "formula": "=SUM({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0276",
     "group": "statistics",
-    "formula": "=SUM({-5,-2,1,7})"
+    "formula": "=SUM({0,2,4})"
   },
   {
     "id": "statistics-0277",
     "group": "statistics",
-    "formula": "=AVERAGE({1,2,2,4,8,16})"
+    "formula": "=SUM({-5,-2,1,7})"
   },
   {
     "id": "statistics-0278",
     "group": "statistics",
-    "formula": "=AVERAGE({0,2,4})"
+    "formula": "=AVERAGE({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0279",
     "group": "statistics",
-    "formula": "=AVERAGE({-5,-2,1,7})"
+    "formula": "=AVERAGE({0,2,4})"
   },
   {
     "id": "statistics-0280",
     "group": "statistics",
-    "formula": "=MIN({1,2,2,4,8,16})"
+    "formula": "=AVERAGE({-5,-2,1,7})"
   },
   {
     "id": "statistics-0281",
     "group": "statistics",
-    "formula": "=MIN({0,2,4})"
+    "formula": "=MIN({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0282",
     "group": "statistics",
-    "formula": "=MIN({-5,-2,1,7})"
+    "formula": "=MIN({0,2,4})"
   },
   {
     "id": "statistics-0283",
     "group": "statistics",
-    "formula": "=MAX({1,2,2,4,8,16})"
+    "formula": "=MIN({-5,-2,1,7})"
   },
   {
     "id": "statistics-0284",
     "group": "statistics",
-    "formula": "=MAX({0,2,4})"
+    "formula": "=MAX({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0285",
     "group": "statistics",
-    "formula": "=MAX({-5,-2,1,7})"
+    "formula": "=MAX({0,2,4})"
   },
   {
     "id": "statistics-0286",
     "group": "statistics",
-    "formula": "=COUNT({1,2,2,4,8,16})"
+    "formula": "=MAX({-5,-2,1,7})"
   },
   {
     "id": "statistics-0287",
     "group": "statistics",
-    "formula": "=COUNT({0,2,4})"
+    "formula": "=COUNT({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0288",
     "group": "statistics",
-    "formula": "=COUNT({-5,-2,1,7})"
+    "formula": "=COUNT({0,2,4})"
   },
   {
     "id": "statistics-0289",
     "group": "statistics",
-    "formula": "=COUNTA({1,2,2,4,8,16})"
+    "formula": "=COUNT({-5,-2,1,7})"
   },
   {
     "id": "statistics-0290",
     "group": "statistics",
-    "formula": "=COUNTA({0,2,4})"
+    "formula": "=COUNTA({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0291",
     "group": "statistics",
-    "formula": "=COUNTA({-5,-2,1,7})"
+    "formula": "=COUNTA({0,2,4})"
   },
   {
     "id": "statistics-0292",
     "group": "statistics",
-    "formula": "=PRODUCT({1,2,2,4,8,16})"
+    "formula": "=COUNTA({-5,-2,1,7})"
   },
   {
     "id": "statistics-0293",
     "group": "statistics",
-    "formula": "=PRODUCT({0,2,4})"
+    "formula": "=PRODUCT({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0294",
     "group": "statistics",
-    "formula": "=PRODUCT({-5,-2,1,7})"
+    "formula": "=PRODUCT({0,2,4})"
   },
   {
     "id": "statistics-0295",
     "group": "statistics",
-    "formula": "=MEDIAN({1,2,2,4,8,16})"
+    "formula": "=PRODUCT({-5,-2,1,7})"
   },
   {
     "id": "statistics-0296",
     "group": "statistics",
-    "formula": "=MEDIAN({0,2,4})"
+    "formula": "=MEDIAN({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0297",
     "group": "statistics",
-    "formula": "=MEDIAN({-5,-2,1,7})"
+    "formula": "=MEDIAN({0,2,4})"
   },
   {
     "id": "statistics-0298",
     "group": "statistics",
-    "formula": "=STDEV({1,2,2,4,8,16})"
+    "formula": "=MEDIAN({-5,-2,1,7})"
   },
   {
     "id": "statistics-0299",
     "group": "statistics",
-    "formula": "=STDEV({0,2,4})"
+    "formula": "=STDEV({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0300",
     "group": "statistics",
-    "formula": "=STDEV({-5,-2,1,7})"
+    "formula": "=STDEV({0,2,4})"
   },
   {
     "id": "statistics-0301",
     "group": "statistics",
-    "formula": "=STDEVP({1,2,2,4,8,16})"
+    "formula": "=STDEV({-5,-2,1,7})"
   },
   {
     "id": "statistics-0302",
     "group": "statistics",
-    "formula": "=STDEVP({0,2,4})"
+    "formula": "=STDEVP({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0303",
     "group": "statistics",
-    "formula": "=STDEVP({-5,-2,1,7})"
+    "formula": "=STDEVP({0,2,4})"
   },
   {
     "id": "statistics-0304",
     "group": "statistics",
-    "formula": "=VAR({1,2,2,4,8,16})"
+    "formula": "=STDEVP({-5,-2,1,7})"
   },
   {
     "id": "statistics-0305",
     "group": "statistics",
-    "formula": "=VAR({0,2,4})"
+    "formula": "=VAR({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0306",
     "group": "statistics",
-    "formula": "=VAR({-5,-2,1,7})"
+    "formula": "=VAR({0,2,4})"
   },
   {
     "id": "statistics-0307",
     "group": "statistics",
-    "formula": "=VARP({1,2,2,4,8,16})"
+    "formula": "=VAR({-5,-2,1,7})"
   },
   {
     "id": "statistics-0308",
     "group": "statistics",
-    "formula": "=VARP({0,2,4})"
+    "formula": "=VARP({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0309",
     "group": "statistics",
-    "formula": "=VARP({-5,-2,1,7})"
+    "formula": "=VARP({0,2,4})"
   },
   {
     "id": "statistics-0310",
     "group": "statistics",
-    "formula": "=SUMSQ({1,2,2,4,8,16})"
+    "formula": "=VARP({-5,-2,1,7})"
   },
   {
     "id": "statistics-0311",
     "group": "statistics",
-    "formula": "=SUMSQ({0,2,4})"
+    "formula": "=SUMSQ({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0312",
     "group": "statistics",
-    "formula": "=SUMSQ({-5,-2,1,7})"
+    "formula": "=SUMSQ({0,2,4})"
   },
   {
     "id": "statistics-0313",
     "group": "statistics",
-    "formula": "=AVERAGEA({1,2,2,4,8,16})"
+    "formula": "=SUMSQ({-5,-2,1,7})"
   },
   {
     "id": "statistics-0314",
     "group": "statistics",
-    "formula": "=AVERAGEA({0,2,4})"
+    "formula": "=AVERAGEA({1,2,2,4,8,16})"
   },
   {
     "id": "statistics-0315",
     "group": "statistics",
-    "formula": "=AVERAGEA({-5,-2,1,7})"
+    "formula": "=AVERAGEA({0,2,4})"
   },
   {
     "id": "statistics-0316",
     "group": "statistics",
-    "formula": "=LARGE({1,2,2,4,8,16},1)"
+    "formula": "=AVERAGEA({-5,-2,1,7})"
   },
   {
     "id": "statistics-0317",
     "group": "statistics",
-    "formula": "=LARGE({1,2,2,4,8,16},2)"
+    "formula": "=LARGE({1,2,2,4,8,16},1)"
   },
   {
     "id": "statistics-0318",
     "group": "statistics",
-    "formula": "=LARGE({1,2,2,4,8,16},3.2)"
+    "formula": "=LARGE({1,2,2,4,8,16},2)"
   },
   {
     "id": "statistics-0319",
     "group": "statistics",
-    "formula": "=LARGE({1,2,2,4,8,16},6)"
+    "formula": "=LARGE({1,2,2,4,8,16},3.2)"
   },
   {
     "id": "statistics-0320",
     "group": "statistics",
-    "formula": "=SMALL({1,2,2,4,8,16},1)"
+    "formula": "=LARGE({1,2,2,4,8,16},6)"
   },
   {
     "id": "statistics-0321",
     "group": "statistics",
-    "formula": "=SMALL({1,2,2,4,8,16},2)"
+    "formula": "=SMALL({1,2,2,4,8,16},1)"
   },
   {
     "id": "statistics-0322",
     "group": "statistics",
-    "formula": "=SMALL({1,2,2,4,8,16},3.2)"
+    "formula": "=SMALL({1,2,2,4,8,16},2)"
   },
   {
     "id": "statistics-0323",
     "group": "statistics",
-    "formula": "=SMALL({1,2,2,4,8,16},6)"
+    "formula": "=SMALL({1,2,2,4,8,16},3.2)"
   },
   {
     "id": "statistics-0324",
     "group": "statistics",
-    "formula": "=PERCENTILE({1,2,2,4,8,16},0.2)"
+    "formula": "=SMALL({1,2,2,4,8,16},6)"
   },
   {
     "id": "statistics-0325",
     "group": "statistics",
-    "formula": "=PERCENTILE({1,2,2,4,8,16},0.5)"
+    "formula": "=PERCENTILE({1,2,2,4,8,16},0.2)"
   },
   {
     "id": "statistics-0326",
     "group": "statistics",
-    "formula": "=PERCENTILE({1,2,2,4,8,16},0.8)"
+    "formula": "=PERCENTILE({1,2,2,4,8,16},0.5)"
   },
   {
     "id": "statistics-0327",
     "group": "statistics",
-    "formula": "=PERCENTILE.INC({1,2,2,4,8,16},0.2)"
+    "formula": "=PERCENTILE({1,2,2,4,8,16},0.8)"
   },
   {
     "id": "statistics-0328",
     "group": "statistics",
-    "formula": "=PERCENTILE.INC({1,2,2,4,8,16},0.5)"
+    "formula": "=PERCENTILE.INC({1,2,2,4,8,16},0.2)"
   },
   {
     "id": "statistics-0329",
     "group": "statistics",
-    "formula": "=PERCENTILE.INC({1,2,2,4,8,16},0.8)"
+    "formula": "=PERCENTILE.INC({1,2,2,4,8,16},0.5)"
   },
   {
     "id": "statistics-0330",
     "group": "statistics",
-    "formula": "=PERCENTILE.EXC({1,2,2,4,8,16},0.2)"
+    "formula": "=PERCENTILE.INC({1,2,2,4,8,16},0.8)"
   },
   {
     "id": "statistics-0331",
     "group": "statistics",
-    "formula": "=PERCENTILE.EXC({1,2,2,4,8,16},0.5)"
+    "formula": "=PERCENTILE.EXC({1,2,2,4,8,16},0.2)"
   },
   {
     "id": "statistics-0332",
     "group": "statistics",
-    "formula": "=PERCENTILE.EXC({1,2,2,4,8,16},0.8)"
+    "formula": "=PERCENTILE.EXC({1,2,2,4,8,16},0.5)"
   },
   {
     "id": "statistics-0333",
     "group": "statistics",
-    "formula": "=QUARTILE({1,2,2,4,8,16},1)"
+    "formula": "=PERCENTILE.EXC({1,2,2,4,8,16},0.8)"
   },
   {
     "id": "statistics-0334",
     "group": "statistics",
-    "formula": "=QUARTILE({1,2,2,4,8,16},2)"
+    "formula": "=QUARTILE({1,2,2,4,8,16},1)"
   },
   {
     "id": "statistics-0335",
     "group": "statistics",
-    "formula": "=QUARTILE({1,2,2,4,8,16},3)"
+    "formula": "=QUARTILE({1,2,2,4,8,16},2)"
   },
   {
     "id": "statistics-0336",
     "group": "statistics",
-    "formula": "=QUARTILE.INC({1,2,2,4,8,16},1)"
+    "formula": "=QUARTILE({1,2,2,4,8,16},3)"
   },
   {
     "id": "statistics-0337",
     "group": "statistics",
-    "formula": "=QUARTILE.INC({1,2,2,4,8,16},2)"
+    "formula": "=QUARTILE.INC({1,2,2,4,8,16},1)"
   },
   {
     "id": "statistics-0338",
     "group": "statistics",
-    "formula": "=QUARTILE.INC({1,2,2,4,8,16},3)"
+    "formula": "=QUARTILE.INC({1,2,2,4,8,16},2)"
   },
   {
     "id": "statistics-0339",
     "group": "statistics",
-    "formula": "=QUARTILE.EXC({1,2,2,4,8,16},1)"
+    "formula": "=QUARTILE.INC({1,2,2,4,8,16},3)"
   },
   {
     "id": "statistics-0340",
     "group": "statistics",
-    "formula": "=QUARTILE.EXC({1,2,2,4,8,16},2)"
+    "formula": "=QUARTILE.EXC({1,2,2,4,8,16},1)"
   },
   {
     "id": "statistics-0341",
     "group": "statistics",
-    "formula": "=QUARTILE.EXC({1,2,2,4,8,16},3)"
+    "formula": "=QUARTILE.EXC({1,2,2,4,8,16},2)"
   },
   {
     "id": "statistics-0342",
     "group": "statistics",
-    "formula": "=RANK(1,{1,2,2,4,8,16},0)"
+    "formula": "=QUARTILE.EXC({1,2,2,4,8,16},3)"
   },
   {
     "id": "statistics-0343",
     "group": "statistics",
-    "formula": "=RANK(1,{1,2,2,4,8,16},1)"
+    "formula": "=RANK(1,{1,2,2,4,8,16},0)"
   },
   {
     "id": "statistics-0344",
     "group": "statistics",
-    "formula": "=RANK(2,{1,2,2,4,8,16},0)"
+    "formula": "=RANK(1,{1,2,2,4,8,16},1)"
   },
   {
     "id": "statistics-0345",
     "group": "statistics",
-    "formula": "=RANK(2,{1,2,2,4,8,16},1)"
+    "formula": "=RANK(2,{1,2,2,4,8,16},0)"
   },
   {
     "id": "statistics-0346",
     "group": "statistics",
-    "formula": "=RANK(4,{1,2,2,4,8,16},0)"
+    "formula": "=RANK(2,{1,2,2,4,8,16},1)"
   },
   {
     "id": "statistics-0347",
     "group": "statistics",
-    "formula": "=RANK(4,{1,2,2,4,8,16},1)"
+    "formula": "=RANK(4,{1,2,2,4,8,16},0)"
   },
   {
     "id": "statistics-0348",
     "group": "statistics",
-    "formula": "=RANK(16,{1,2,2,4,8,16},0)"
+    "formula": "=RANK(4,{1,2,2,4,8,16},1)"
   },
   {
     "id": "statistics-0349",
     "group": "statistics",
-    "formula": "=RANK(16,{1,2,2,4,8,16},1)"
+    "formula": "=RANK(16,{1,2,2,4,8,16},0)"
   },
   {
     "id": "statistics-0350",
     "group": "statistics",
-    "formula": "=RANK.AVG(1,{1,2,2,4,8,16},0)"
+    "formula": "=RANK(16,{1,2,2,4,8,16},1)"
   },
   {
     "id": "statistics-0351",
     "group": "statistics",
-    "formula": "=RANK.AVG(1,{1,2,2,4,8,16},1)"
+    "formula": "=RANK.AVG(1,{1,2,2,4,8,16},0)"
   },
   {
     "id": "statistics-0352",
     "group": "statistics",
-    "formula": "=RANK.AVG(2,{1,2,2,4,8,16},0)"
+    "formula": "=RANK.AVG(1,{1,2,2,4,8,16},1)"
   },
   {
     "id": "statistics-0353",
     "group": "statistics",
-    "formula": "=RANK.AVG(2,{1,2,2,4,8,16},1)"
+    "formula": "=RANK.AVG(2,{1,2,2,4,8,16},0)"
   },
   {
     "id": "statistics-0354",
     "group": "statistics",
-    "formula": "=RANK.AVG(4,{1,2,2,4,8,16},0)"
+    "formula": "=RANK.AVG(2,{1,2,2,4,8,16},1)"
   },
   {
     "id": "statistics-0355",
     "group": "statistics",
-    "formula": "=RANK.AVG(4,{1,2,2,4,8,16},1)"
+    "formula": "=RANK.AVG(4,{1,2,2,4,8,16},0)"
   },
   {
     "id": "statistics-0356",
     "group": "statistics",
-    "formula": "=RANK.AVG(16,{1,2,2,4,8,16},0)"
+    "formula": "=RANK.AVG(4,{1,2,2,4,8,16},1)"
   },
   {
     "id": "statistics-0357",
     "group": "statistics",
-    "formula": "=RANK.AVG(16,{1,2,2,4,8,16},1)"
+    "formula": "=RANK.AVG(16,{1,2,2,4,8,16},0)"
   },
   {
     "id": "statistics-0358",
     "group": "statistics",
-    "formula": "=COUNTBLANK({1,\"\",2,\"x\"})"
+    "formula": "=RANK.AVG(16,{1,2,2,4,8,16},1)"
   },
   {
     "id": "statistics-0359",
     "group": "statistics",
-    "formula": "=SUMPRODUCT({1,2,3},{4,5,6})"
+    "formula": "=COUNTBLANK({1,\"\",2,\"x\"})"
   },
   {
     "id": "statistics-0360",
     "group": "statistics",
-    "formula": "=SUMPRODUCT(({1,2,3}>1)*{4,5,6})"
+    "formula": "=SUMPRODUCT({1,2,3},{4,5,6})"
   },
   {
     "id": "statistics-0361",
     "group": "statistics",
-    "formula": "=CORREL({1,2,3,4},{2,4,6,8})"
+    "formula": "=SUMPRODUCT(({1,2,3}>1)*{4,5,6})"
   },
   {
     "id": "statistics-0362",
     "group": "statistics",
-    "formula": "=COVAR({1,2,3},{4,5,6})"
+    "formula": "=CORREL({1,2,3,4},{2,4,6,8})"
   },
   {
     "id": "statistics-0363",
     "group": "statistics",
-    "formula": "=COVARIANCE.S({1,2,3},{4,5,6})"
+    "formula": "=COVAR({1,2,3},{4,5,6})"
   },
   {
     "id": "statistics-0364",
     "group": "statistics",
-    "formula": "=NORMDIST(0,0,1,TRUE())"
+    "formula": "=COVARIANCE.S({1,2,3},{4,5,6})"
   },
   {
     "id": "statistics-0365",
     "group": "statistics",
-    "formula": "=NORMDIST(1,0,1,FALSE())"
+    "formula": "=NORMDIST(0,0,1,TRUE())"
   },
   {
     "id": "statistics-0366",
     "group": "statistics",
-    "formula": "=NORMSDIST(1)"
+    "formula": "=NORMDIST(1,0,1,FALSE())"
   },
   {
     "id": "statistics-0367",
     "group": "statistics",
-    "formula": "=COUNTIF({1,2,2,4},2)"
+    "formula": "=NORMSDIST(1)"
   },
   {
     "id": "statistics-0368",
     "group": "statistics",
-    "formula": "=SUMIF({1,2,2,4},\">1\")"
+    "formula": "=COUNTIF({1,2,2,4},2)"
   },
   {
     "id": "statistics-0369",
     "group": "statistics",
-    "formula": "=AVERAGEIF({1,2,2,4},\">1\")"
+    "formula": "=SUMIF({1,2,2,4},\">1\")"
   },
   {
     "id": "statistics-0370",
     "group": "statistics",
-    "formula": "=COUNTIFS({1,2,2,4},\">1\",{1,2,2,4},\"<4\")"
+    "formula": "=AVERAGEIF({1,2,2,4},\">1\")"
   },
   {
     "id": "statistics-0371",
     "group": "statistics",
-    "formula": "=SUMIFS({1,2,2,4},{1,2,2,4},\">1\")"
+    "formula": "=COUNTIFS({1,2,2,4},\">1\",{1,2,2,4},\"<4\")"
   },
   {
     "id": "statistics-0372",
     "group": "statistics",
+    "formula": "=SUMIFS({1,2,2,4},{1,2,2,4},\">1\")"
+  },
+  {
+    "id": "statistics-0373",
+    "group": "statistics",
     "formula": "=AVERAGEIFS({1,2,2,4},{1,2,2,4},\">1\")"
   },
   {
-    "id": "text-0373",
-    "group": "text",
-    "formula": "=LEN(\"Hello WORLD\")"
+    "id": "statistics-0374",
+    "group": "statistics",
+    "formula": "=COUNTIF({\"apple\",\"Apricot\",\"berry\"},\"a*\")"
   },
   {
-    "id": "text-0374",
-    "group": "text",
-    "formula": "=UPPER(\"Hello WORLD\")"
+    "id": "statistics-0375",
+    "group": "statistics",
+    "formula": "=COUNTIF({\"a*b\",\"axb\",\"a?b\"},\"a~*b\")"
   },
   {
-    "id": "text-0375",
-    "group": "text",
-    "formula": "=LOWER(\"Hello WORLD\")"
+    "id": "statistics-0376",
+    "group": "statistics",
+    "formula": "=SUMIF({\"apple\",\"Apricot\",\"berry\"},\"a*\",{2,3,4})"
   },
   {
-    "id": "text-0376",
-    "group": "text",
-    "formula": "=PROPER(\"Hello WORLD\")"
+    "id": "statistics-0377",
+    "group": "statistics",
+    "formula": "=SUMIFS({10,20,30},{\"N\",\"S\",\"N\"},\"N\",{1,2,3},\">1\")"
   },
   {
-    "id": "text-0377",
-    "group": "text",
-    "formula": "=CLEAN(\"Hello WORLD\")"
+    "id": "statistics-0378",
+    "group": "statistics",
+    "formula": "=AVERAGEIFS({10,20,30},{\"N\",\"S\",\"N\"},\"N\")"
   },
   {
-    "id": "text-0378",
-    "group": "text",
-    "formula": "=LEN(\"two words\")"
+    "id": "statistics-0379",
+    "group": "statistics",
+    "formula": "=COUNTIF(Inputs!A1:A5,\"\")"
   },
   {
-    "id": "text-0379",
-    "group": "text",
-    "formula": "=UPPER(\"two words\")"
+    "id": "statistics-0380",
+    "group": "statistics",
+    "formula": "=COUNTIF(Inputs!A1:A5,\">=2\")"
   },
   {
-    "id": "text-0380",
-    "group": "text",
-    "formula": "=LOWER(\"two words\")"
+    "id": "statistics-0381",
+    "group": "statistics",
+    "formula": "=SUMIF(Inputs!A1:A5,\">=2\",Inputs!A1:A5)"
   },
   {
-    "id": "text-0381",
-    "group": "text",
-    "formula": "=PROPER(\"two words\")"
+    "id": "statistics-0382",
+    "group": "statistics",
+    "formula": "=NORM.DIST(1,0,1,TRUE())"
   },
   {
-    "id": "text-0382",
-    "group": "text",
-    "formula": "=CLEAN(\"two words\")"
+    "id": "statistics-0383",
+    "group": "statistics",
+    "formula": "=NORM.S.DIST(1,TRUE())"
   },
   {
-    "id": "text-0383",
-    "group": "text",
-    "formula": "=LEN(\"\")"
+    "id": "statistics-0384",
+    "group": "statistics",
+    "formula": "=COVARIANCE.P({1,2,3},{4,5,6})"
   },
   {
-    "id": "text-0384",
-    "group": "text",
-    "formula": "=UPPER(\"\")"
+    "id": "statistics-0385",
+    "group": "statistics",
+    "formula": "=STDEV.S({1,2,2,4,8,16})"
   },
   {
-    "id": "text-0385",
-    "group": "text",
-    "formula": "=LOWER(\"\")"
+    "id": "statistics-0386",
+    "group": "statistics",
+    "formula": "=STDEV.P({1,2,2,4,8,16})"
   },
   {
-    "id": "text-0386",
-    "group": "text",
-    "formula": "=PROPER(\"\")"
+    "id": "statistics-0387",
+    "group": "statistics",
+    "formula": "=VAR.S({1,2,2,4,8,16})"
   },
   {
-    "id": "text-0387",
-    "group": "text",
-    "formula": "=CLEAN(\"\")"
+    "id": "statistics-0388",
+    "group": "statistics",
+    "formula": "=VAR.P({1,2,2,4,8,16})"
   },
   {
-    "id": "text-0388",
-    "group": "text",
-    "formula": "=LEN(\"éclair\")"
+    "id": "statistics-0389",
+    "group": "statistics",
+    "formula": "=DAVERAGE({\"item\",\"cost\";\"one\",10;\"two\",20;\"one\",30},\"cost\",{\"item\";\"one\"})"
   },
   {
-    "id": "text-0389",
-    "group": "text",
-    "formula": "=UPPER(\"éclair\")"
+    "id": "statistics-0390",
+    "group": "statistics",
+    "formula": "=DAVERAGE({\"item\",\"cost\";\"one\",10;\"two\",20;\"one\",30},\"cost\",{\"cost\";\">15\"})"
   },
   {
-    "id": "text-0390",
-    "group": "text",
-    "formula": "=LOWER(\"éclair\")"
+    "id": "statistics-0391",
+    "group": "statistics",
+    "formula": "=DMAX({\"item\",\"cost\";\"one\",10;\"two\",20;\"one\",30},\"cost\",{\"item\";\"one\"})"
   },
   {
-    "id": "text-0391",
-    "group": "text",
-    "formula": "=PROPER(\"éclair\")"
+    "id": "statistics-0392",
+    "group": "statistics",
+    "formula": "=DMAX({\"item\",\"cost\";\"one\",10;\"two\",20;\"one\",30},\"cost\",{\"cost\";\">15\"})"
   },
   {
-    "id": "text-0392",
-    "group": "text",
-    "formula": "=CLEAN(\"éclair\")"
+    "id": "statistics-0393",
+    "group": "statistics",
+    "formula": "=DMIN({\"item\",\"cost\";\"one\",10;\"two\",20;\"one\",30},\"cost\",{\"item\";\"one\"})"
   },
   {
-    "id": "text-0393",
-    "group": "text",
-    "formula": "=LEFT(\"abcdef\",3)"
+    "id": "statistics-0394",
+    "group": "statistics",
+    "formula": "=DMIN({\"item\",\"cost\";\"one\",10;\"two\",20;\"one\",30},\"cost\",{\"cost\";\">15\"})"
   },
   {
-    "id": "text-0394",
-    "group": "text",
-    "formula": "=RIGHT(\"abcdef\",3)"
+    "id": "statistics-0395",
+    "group": "statistics",
+    "formula": "=DSTDEV({\"item\",\"cost\";\"one\",10;\"two\",20;\"one\",30},\"cost\",{\"item\";\"one\"})"
   },
   {
-    "id": "text-0395",
-    "group": "text",
-    "formula": "=MID(\"abcdef\",2,3)"
-  },
-  {
-    "id": "text-0396",
-    "group": "text",
-    "formula": "=LEFT(\"abc\",0)"
+    "id": "statistics-0396",
+    "group": "statistics",
+    "formula": "=DSTDEV({\"item\",\"cost\";\"one\",10;\"two\",20;\"one\",30},\"cost\",{\"cost\";\">15\"})"
   },
   {
     "id": "text-0397",
     "group": "text",
-    "formula": "=TRIM(\"  two   words  \")"
+    "formula": "=LEN(\"Hello WORLD\")"
   },
   {
     "id": "text-0398",
     "group": "text",
-    "formula": "=CONCAT(\"a\",\"b\",\"c\")"
+    "formula": "=UPPER(\"Hello WORLD\")"
   },
   {
     "id": "text-0399",
     "group": "text",
-    "formula": "=CONCATENATE(\"a\",2,\"c\")"
+    "formula": "=LOWER(\"Hello WORLD\")"
   },
   {
     "id": "text-0400",
     "group": "text",
-    "formula": "=TEXTJOIN(\",\",TRUE(),{\"a\",\"\",\"b\"})"
+    "formula": "=PROPER(\"Hello WORLD\")"
   },
   {
     "id": "text-0401",
     "group": "text",
-    "formula": "=TEXTJOIN(\"-\",FALSE(),{\"a\",\"\",\"b\"})"
+    "formula": "=CLEAN(\"Hello WORLD\")"
   },
   {
     "id": "text-0402",
     "group": "text",
-    "formula": "=VALUE(\"123.5\")"
+    "formula": "=LEN(\"two words\")"
   },
   {
     "id": "text-0403",
     "group": "text",
-    "formula": "=EXACT(\"a\",\"A\")"
+    "formula": "=UPPER(\"two words\")"
   },
   {
     "id": "text-0404",
     "group": "text",
-    "formula": "=EXACT(\"abc\",\"abc\")"
+    "formula": "=LOWER(\"two words\")"
   },
   {
     "id": "text-0405",
     "group": "text",
-    "formula": "=FIND(\"b\",\"abcabc\")"
+    "formula": "=PROPER(\"two words\")"
   },
   {
     "id": "text-0406",
     "group": "text",
-    "formula": "=FIND(\"b\",\"abcabc\",3)"
+    "formula": "=CLEAN(\"two words\")"
   },
   {
     "id": "text-0407",
     "group": "text",
-    "formula": "=REPT(\"ab\",3)"
+    "formula": "=LEN(\"\")"
   },
   {
     "id": "text-0408",
     "group": "text",
-    "formula": "=REPT(\"x\",0)"
+    "formula": "=UPPER(\"\")"
   },
   {
     "id": "text-0409",
     "group": "text",
-    "formula": "=SEARCH(\"B\",\"abcABC\")"
+    "formula": "=LOWER(\"\")"
   },
   {
     "id": "text-0410",
     "group": "text",
-    "formula": "=SEARCH(\"b\",\"abcABC\",3)"
+    "formula": "=PROPER(\"\")"
   },
   {
     "id": "text-0411",
     "group": "text",
-    "formula": "=SEARCH(\"a?c\",\"xxAbczz\")"
+    "formula": "=CLEAN(\"\")"
   },
   {
     "id": "text-0412",
     "group": "text",
-    "formula": "=SEARCH(\"a*c\",\"xxAbbbCzz\")"
+    "formula": "=LEN(\"éclair\")"
   },
   {
     "id": "text-0413",
     "group": "text",
-    "formula": "=SEARCH(\"~*\",\"ab*cd\")"
+    "formula": "=UPPER(\"éclair\")"
   },
   {
     "id": "text-0414",
     "group": "text",
-    "formula": "=SEARCH(\"\",\"abc\",2)"
+    "formula": "=LOWER(\"éclair\")"
   },
   {
     "id": "text-0415",
     "group": "text",
-    "formula": "=SUBSTITUTE(\"one-one-one\",\"one\",\"two\")"
+    "formula": "=PROPER(\"éclair\")"
   },
   {
     "id": "text-0416",
     "group": "text",
-    "formula": "=SUBSTITUTE(\"one-one-one\",\"one\",\"two\",2)"
+    "formula": "=CLEAN(\"éclair\")"
   },
   {
     "id": "text-0417",
     "group": "text",
-    "formula": "=SUBSTITUTE(\"abc\",\"\",\"x\")"
+    "formula": "=LEFT(\"abcdef\",3)"
   },
   {
     "id": "text-0418",
     "group": "text",
-    "formula": "=SUBSTITUTE(\"abc\",\"z\",\"x\",1)"
+    "formula": "=RIGHT(\"abcdef\",3)"
   },
   {
     "id": "text-0419",
     "group": "text",
-    "formula": "=REPLACE(\"abcdef\",2,3,\"X\")"
+    "formula": "=MID(\"abcdef\",2,3)"
   },
   {
     "id": "text-0420",
     "group": "text",
-    "formula": "=REPLACE(\"abc\",5,3,\"X\")"
+    "formula": "=LEFT(\"abc\",0)"
   },
   {
     "id": "text-0421",
     "group": "text",
-    "formula": "=REPLACE(\"éclair\",2,2,\"X\")"
+    "formula": "=TRIM(\"  two   words  \")"
   },
   {
     "id": "text-0422",
     "group": "text",
-    "formula": "=TEXT(1234.5,\"0.00\")"
+    "formula": "=CONCAT(\"a\",\"b\",\"c\")"
   },
   {
     "id": "text-0423",
     "group": "text",
+    "formula": "=CONCATENATE(\"a\",2,\"c\")"
+  },
+  {
+    "id": "text-0424",
+    "group": "text",
+    "formula": "=TEXTJOIN(\",\",TRUE(),{\"a\",\"\",\"b\"})"
+  },
+  {
+    "id": "text-0425",
+    "group": "text",
+    "formula": "=TEXTJOIN(\"-\",FALSE(),{\"a\",\"\",\"b\"})"
+  },
+  {
+    "id": "text-0426",
+    "group": "text",
+    "formula": "=VALUE(\"123.5\")"
+  },
+  {
+    "id": "text-0427",
+    "group": "text",
+    "formula": "=EXACT(\"a\",\"A\")"
+  },
+  {
+    "id": "text-0428",
+    "group": "text",
+    "formula": "=EXACT(\"abc\",\"abc\")"
+  },
+  {
+    "id": "text-0429",
+    "group": "text",
+    "formula": "=FIND(\"b\",\"abcabc\")"
+  },
+  {
+    "id": "text-0430",
+    "group": "text",
+    "formula": "=FIND(\"b\",\"abcabc\",3)"
+  },
+  {
+    "id": "text-0431",
+    "group": "text",
+    "formula": "=REPT(\"ab\",3)"
+  },
+  {
+    "id": "text-0432",
+    "group": "text",
+    "formula": "=REPT(\"x\",0)"
+  },
+  {
+    "id": "text-0433",
+    "group": "text",
+    "formula": "=SEARCH(\"B\",\"abcABC\")"
+  },
+  {
+    "id": "text-0434",
+    "group": "text",
+    "formula": "=SEARCH(\"b\",\"abcABC\",3)"
+  },
+  {
+    "id": "text-0435",
+    "group": "text",
+    "formula": "=SEARCH(\"a?c\",\"xxAbczz\")"
+  },
+  {
+    "id": "text-0436",
+    "group": "text",
+    "formula": "=SEARCH(\"a*c\",\"xxAbbbCzz\")"
+  },
+  {
+    "id": "text-0437",
+    "group": "text",
+    "formula": "=SEARCH(\"~*\",\"ab*cd\")"
+  },
+  {
+    "id": "text-0438",
+    "group": "text",
+    "formula": "=SEARCH(\"\",\"abc\",2)"
+  },
+  {
+    "id": "text-0439",
+    "group": "text",
+    "formula": "=SUBSTITUTE(\"one-one-one\",\"one\",\"two\")"
+  },
+  {
+    "id": "text-0440",
+    "group": "text",
+    "formula": "=SUBSTITUTE(\"one-one-one\",\"one\",\"two\",2)"
+  },
+  {
+    "id": "text-0441",
+    "group": "text",
+    "formula": "=SUBSTITUTE(\"abc\",\"\",\"x\")"
+  },
+  {
+    "id": "text-0442",
+    "group": "text",
+    "formula": "=SUBSTITUTE(\"abc\",\"z\",\"x\",1)"
+  },
+  {
+    "id": "text-0443",
+    "group": "text",
+    "formula": "=REPLACE(\"abcdef\",2,3,\"X\")"
+  },
+  {
+    "id": "text-0444",
+    "group": "text",
+    "formula": "=REPLACE(\"abc\",5,3,\"X\")"
+  },
+  {
+    "id": "text-0445",
+    "group": "text",
+    "formula": "=REPLACE(\"éclair\",2,2,\"X\")"
+  },
+  {
+    "id": "text-0446",
+    "group": "text",
+    "formula": "=TEXT(1234.5,\"0.00\")"
+  },
+  {
+    "id": "text-0447",
+    "group": "text",
     "formula": "=TEXT(0.25,\"0%\")"
   },
   {
-    "id": "dates-0424",
-    "group": "dates",
-    "formula": "=YEAR(DATE(2024,2,29))"
-  },
-  {
-    "id": "dates-0425",
-    "group": "dates",
-    "formula": "=MONTH(DATE(2024,2,29))"
-  },
-  {
-    "id": "dates-0426",
-    "group": "dates",
-    "formula": "=DAY(DATE(2024,2,29))"
-  },
-  {
-    "id": "dates-0427",
-    "group": "dates",
-    "formula": "=WEEKDAY(DATE(2024,2,29))"
-  },
-  {
-    "id": "dates-0428",
-    "group": "dates",
-    "formula": "=EDATE(DATE(2024,2,29),-1)"
-  },
-  {
-    "id": "dates-0429",
-    "group": "dates",
-    "formula": "=EOMONTH(DATE(2024,2,29),-1)"
-  },
-  {
-    "id": "dates-0430",
-    "group": "dates",
-    "formula": "=EDATE(DATE(2024,2,29),0)"
-  },
-  {
-    "id": "dates-0431",
-    "group": "dates",
-    "formula": "=EOMONTH(DATE(2024,2,29),0)"
-  },
-  {
-    "id": "dates-0432",
-    "group": "dates",
-    "formula": "=EDATE(DATE(2024,2,29),1)"
-  },
-  {
-    "id": "dates-0433",
-    "group": "dates",
-    "formula": "=EOMONTH(DATE(2024,2,29),1)"
-  },
-  {
-    "id": "dates-0434",
-    "group": "dates",
-    "formula": "=YEAR(DATE(2025,1,1))"
-  },
-  {
-    "id": "dates-0435",
-    "group": "dates",
-    "formula": "=MONTH(DATE(2025,1,1))"
-  },
-  {
-    "id": "dates-0436",
-    "group": "dates",
-    "formula": "=DAY(DATE(2025,1,1))"
-  },
-  {
-    "id": "dates-0437",
-    "group": "dates",
-    "formula": "=WEEKDAY(DATE(2025,1,1))"
-  },
-  {
-    "id": "dates-0438",
-    "group": "dates",
-    "formula": "=EDATE(DATE(2025,1,1),-1)"
-  },
-  {
-    "id": "dates-0439",
-    "group": "dates",
-    "formula": "=EOMONTH(DATE(2025,1,1),-1)"
-  },
-  {
-    "id": "dates-0440",
-    "group": "dates",
-    "formula": "=EDATE(DATE(2025,1,1),0)"
-  },
-  {
-    "id": "dates-0441",
-    "group": "dates",
-    "formula": "=EOMONTH(DATE(2025,1,1),0)"
-  },
-  {
-    "id": "dates-0442",
-    "group": "dates",
-    "formula": "=EDATE(DATE(2025,1,1),1)"
-  },
-  {
-    "id": "dates-0443",
-    "group": "dates",
-    "formula": "=EOMONTH(DATE(2025,1,1),1)"
-  },
-  {
-    "id": "dates-0444",
-    "group": "dates",
-    "formula": "=YEAR(DATE(2026,10,10))"
-  },
-  {
-    "id": "dates-0445",
-    "group": "dates",
-    "formula": "=MONTH(DATE(2026,10,10))"
-  },
-  {
-    "id": "dates-0446",
-    "group": "dates",
-    "formula": "=DAY(DATE(2026,10,10))"
-  },
-  {
-    "id": "dates-0447",
-    "group": "dates",
-    "formula": "=WEEKDAY(DATE(2026,10,10))"
-  },
-  {
-    "id": "dates-0448",
-    "group": "dates",
-    "formula": "=EDATE(DATE(2026,10,10),-1)"
+    "id": "text-0448",
+    "group": "text",
+    "formula": "=HYPERLINK(\"https://example.com\",\"Docs\")"
   },
   {
     "id": "dates-0449",
     "group": "dates",
-    "formula": "=EOMONTH(DATE(2026,10,10),-1)"
+    "formula": "=YEAR(DATE(2024,2,29))"
   },
   {
     "id": "dates-0450",
     "group": "dates",
-    "formula": "=EDATE(DATE(2026,10,10),0)"
+    "formula": "=MONTH(DATE(2024,2,29))"
   },
   {
     "id": "dates-0451",
     "group": "dates",
-    "formula": "=EOMONTH(DATE(2026,10,10),0)"
+    "formula": "=DAY(DATE(2024,2,29))"
   },
   {
     "id": "dates-0452",
     "group": "dates",
-    "formula": "=EDATE(DATE(2026,10,10),1)"
+    "formula": "=WEEKDAY(DATE(2024,2,29))"
   },
   {
     "id": "dates-0453",
     "group": "dates",
-    "formula": "=EOMONTH(DATE(2026,10,10),1)"
+    "formula": "=EDATE(DATE(2024,2,29),-1)"
   },
   {
     "id": "dates-0454",
     "group": "dates",
-    "formula": "=YEAR(DATE(2024,13,1))"
+    "formula": "=EOMONTH(DATE(2024,2,29),-1)"
   },
   {
     "id": "dates-0455",
     "group": "dates",
-    "formula": "=MONTH(DATE(2024,13,1))"
+    "formula": "=EDATE(DATE(2024,2,29),0)"
   },
   {
     "id": "dates-0456",
     "group": "dates",
-    "formula": "=DAY(DATE(2024,13,1))"
+    "formula": "=EOMONTH(DATE(2024,2,29),0)"
   },
   {
     "id": "dates-0457",
     "group": "dates",
-    "formula": "=WEEKDAY(DATE(2024,13,1))"
+    "formula": "=EDATE(DATE(2024,2,29),1)"
   },
   {
     "id": "dates-0458",
     "group": "dates",
-    "formula": "=EDATE(DATE(2024,13,1),-1)"
+    "formula": "=EOMONTH(DATE(2024,2,29),1)"
   },
   {
     "id": "dates-0459",
     "group": "dates",
-    "formula": "=EOMONTH(DATE(2024,13,1),-1)"
+    "formula": "=YEAR(DATE(2025,1,1))"
   },
   {
     "id": "dates-0460",
     "group": "dates",
-    "formula": "=EDATE(DATE(2024,13,1),0)"
+    "formula": "=MONTH(DATE(2025,1,1))"
   },
   {
     "id": "dates-0461",
     "group": "dates",
-    "formula": "=EOMONTH(DATE(2024,13,1),0)"
+    "formula": "=DAY(DATE(2025,1,1))"
   },
   {
     "id": "dates-0462",
     "group": "dates",
-    "formula": "=EDATE(DATE(2024,13,1),1)"
+    "formula": "=WEEKDAY(DATE(2025,1,1))"
   },
   {
     "id": "dates-0463",
     "group": "dates",
-    "formula": "=EOMONTH(DATE(2024,13,1),1)"
+    "formula": "=EDATE(DATE(2025,1,1),-1)"
   },
   {
     "id": "dates-0464",
     "group": "dates",
-    "formula": "=YEAR(DATE(2024,3,0))"
+    "formula": "=EOMONTH(DATE(2025,1,1),-1)"
   },
   {
     "id": "dates-0465",
     "group": "dates",
-    "formula": "=MONTH(DATE(2024,3,0))"
+    "formula": "=EDATE(DATE(2025,1,1),0)"
   },
   {
     "id": "dates-0466",
     "group": "dates",
-    "formula": "=DAY(DATE(2024,3,0))"
+    "formula": "=EOMONTH(DATE(2025,1,1),0)"
   },
   {
     "id": "dates-0467",
     "group": "dates",
-    "formula": "=WEEKDAY(DATE(2024,3,0))"
+    "formula": "=EDATE(DATE(2025,1,1),1)"
   },
   {
     "id": "dates-0468",
     "group": "dates",
-    "formula": "=EDATE(DATE(2024,3,0),-1)"
+    "formula": "=EOMONTH(DATE(2025,1,1),1)"
   },
   {
     "id": "dates-0469",
     "group": "dates",
-    "formula": "=EOMONTH(DATE(2024,3,0),-1)"
+    "formula": "=YEAR(DATE(2026,10,10))"
   },
   {
     "id": "dates-0470",
     "group": "dates",
-    "formula": "=EDATE(DATE(2024,3,0),0)"
+    "formula": "=MONTH(DATE(2026,10,10))"
   },
   {
     "id": "dates-0471",
     "group": "dates",
-    "formula": "=EOMONTH(DATE(2024,3,0),0)"
+    "formula": "=DAY(DATE(2026,10,10))"
   },
   {
     "id": "dates-0472",
     "group": "dates",
-    "formula": "=EDATE(DATE(2024,3,0),1)"
+    "formula": "=WEEKDAY(DATE(2026,10,10))"
   },
   {
     "id": "dates-0473",
     "group": "dates",
-    "formula": "=EOMONTH(DATE(2024,3,0),1)"
+    "formula": "=EDATE(DATE(2026,10,10),-1)"
   },
   {
     "id": "dates-0474",
     "group": "dates",
-    "formula": "=TIME(0,0,0)"
+    "formula": "=EOMONTH(DATE(2026,10,10),-1)"
   },
   {
     "id": "dates-0475",
     "group": "dates",
-    "formula": "=HOUR(TIME(0,0,0))"
+    "formula": "=EDATE(DATE(2026,10,10),0)"
   },
   {
     "id": "dates-0476",
     "group": "dates",
-    "formula": "=MINUTE(TIME(0,0,0))"
+    "formula": "=EOMONTH(DATE(2026,10,10),0)"
   },
   {
     "id": "dates-0477",
     "group": "dates",
-    "formula": "=SECOND(TIME(0,0,0))"
+    "formula": "=EDATE(DATE(2026,10,10),1)"
   },
   {
     "id": "dates-0478",
     "group": "dates",
-    "formula": "=TIME(12,30,45)"
+    "formula": "=EOMONTH(DATE(2026,10,10),1)"
   },
   {
     "id": "dates-0479",
     "group": "dates",
-    "formula": "=HOUR(TIME(12,30,45))"
+    "formula": "=YEAR(DATE(2024,13,1))"
   },
   {
     "id": "dates-0480",
     "group": "dates",
-    "formula": "=MINUTE(TIME(12,30,45))"
+    "formula": "=MONTH(DATE(2024,13,1))"
   },
   {
     "id": "dates-0481",
     "group": "dates",
-    "formula": "=SECOND(TIME(12,30,45))"
+    "formula": "=DAY(DATE(2024,13,1))"
   },
   {
     "id": "dates-0482",
     "group": "dates",
-    "formula": "=TIME(23,59,59)"
+    "formula": "=WEEKDAY(DATE(2024,13,1))"
   },
   {
     "id": "dates-0483",
     "group": "dates",
-    "formula": "=HOUR(TIME(23,59,59))"
+    "formula": "=EDATE(DATE(2024,13,1),-1)"
   },
   {
     "id": "dates-0484",
     "group": "dates",
-    "formula": "=MINUTE(TIME(23,59,59))"
+    "formula": "=EOMONTH(DATE(2024,13,1),-1)"
   },
   {
     "id": "dates-0485",
     "group": "dates",
-    "formula": "=SECOND(TIME(23,59,59))"
+    "formula": "=EDATE(DATE(2024,13,1),0)"
   },
   {
     "id": "dates-0486",
     "group": "dates",
-    "formula": "=TIME(25,61,61)"
+    "formula": "=EOMONTH(DATE(2024,13,1),0)"
   },
   {
     "id": "dates-0487",
     "group": "dates",
-    "formula": "=HOUR(TIME(25,61,61))"
+    "formula": "=EDATE(DATE(2024,13,1),1)"
   },
   {
     "id": "dates-0488",
     "group": "dates",
-    "formula": "=MINUTE(TIME(25,61,61))"
+    "formula": "=EOMONTH(DATE(2024,13,1),1)"
   },
   {
     "id": "dates-0489",
     "group": "dates",
-    "formula": "=SECOND(TIME(25,61,61))"
+    "formula": "=YEAR(DATE(2024,3,0))"
   },
   {
     "id": "dates-0490",
     "group": "dates",
-    "formula": "=TIME(0,0,59.9)"
+    "formula": "=MONTH(DATE(2024,3,0))"
   },
   {
     "id": "dates-0491",
     "group": "dates",
-    "formula": "=HOUR(TIME(0,0,59.9))"
+    "formula": "=DAY(DATE(2024,3,0))"
   },
   {
     "id": "dates-0492",
     "group": "dates",
-    "formula": "=MINUTE(TIME(0,0,59.9))"
+    "formula": "=WEEKDAY(DATE(2024,3,0))"
   },
   {
     "id": "dates-0493",
     "group": "dates",
-    "formula": "=SECOND(TIME(0,0,59.9))"
+    "formula": "=EDATE(DATE(2024,3,0),-1)"
   },
   {
     "id": "dates-0494",
     "group": "dates",
-    "formula": "=DAYS(DATE(2024,3,1),DATE(2024,2,28))"
+    "formula": "=EOMONTH(DATE(2024,3,0),-1)"
   },
   {
     "id": "dates-0495",
     "group": "dates",
-    "formula": "=DAYS(DATE(2025,1,1),DATE(2024,1,1))"
+    "formula": "=EDATE(DATE(2024,3,0),0)"
   },
   {
     "id": "dates-0496",
     "group": "dates",
-    "formula": "=DAYS(10.5,2.25)"
+    "formula": "=EOMONTH(DATE(2024,3,0),0)"
   },
   {
     "id": "dates-0497",
     "group": "dates",
-    "formula": "=NETWORKDAYS(DATE(2024,1,1),DATE(2024,1,12))"
+    "formula": "=EDATE(DATE(2024,3,0),1)"
   },
   {
     "id": "dates-0498",
     "group": "dates",
-    "formula": "=WORKDAY(DATE(2024,1,1),10)"
+    "formula": "=EOMONTH(DATE(2024,3,0),1)"
   },
   {
     "id": "dates-0499",
     "group": "dates",
-    "formula": "=YEARFRAC(DATE(2024,1,1),DATE(2025,1,1),3)"
+    "formula": "=TIME(0,0,0)"
   },
   {
     "id": "dates-0500",
     "group": "dates",
+    "formula": "=HOUR(TIME(0,0,0))"
+  },
+  {
+    "id": "dates-0501",
+    "group": "dates",
+    "formula": "=MINUTE(TIME(0,0,0))"
+  },
+  {
+    "id": "dates-0502",
+    "group": "dates",
+    "formula": "=SECOND(TIME(0,0,0))"
+  },
+  {
+    "id": "dates-0503",
+    "group": "dates",
+    "formula": "=TIME(12,30,45)"
+  },
+  {
+    "id": "dates-0504",
+    "group": "dates",
+    "formula": "=HOUR(TIME(12,30,45))"
+  },
+  {
+    "id": "dates-0505",
+    "group": "dates",
+    "formula": "=MINUTE(TIME(12,30,45))"
+  },
+  {
+    "id": "dates-0506",
+    "group": "dates",
+    "formula": "=SECOND(TIME(12,30,45))"
+  },
+  {
+    "id": "dates-0507",
+    "group": "dates",
+    "formula": "=TIME(23,59,59)"
+  },
+  {
+    "id": "dates-0508",
+    "group": "dates",
+    "formula": "=HOUR(TIME(23,59,59))"
+  },
+  {
+    "id": "dates-0509",
+    "group": "dates",
+    "formula": "=MINUTE(TIME(23,59,59))"
+  },
+  {
+    "id": "dates-0510",
+    "group": "dates",
+    "formula": "=SECOND(TIME(23,59,59))"
+  },
+  {
+    "id": "dates-0511",
+    "group": "dates",
+    "formula": "=TIME(25,61,61)"
+  },
+  {
+    "id": "dates-0512",
+    "group": "dates",
+    "formula": "=HOUR(TIME(25,61,61))"
+  },
+  {
+    "id": "dates-0513",
+    "group": "dates",
+    "formula": "=MINUTE(TIME(25,61,61))"
+  },
+  {
+    "id": "dates-0514",
+    "group": "dates",
+    "formula": "=SECOND(TIME(25,61,61))"
+  },
+  {
+    "id": "dates-0515",
+    "group": "dates",
+    "formula": "=TIME(0,0,59.9)"
+  },
+  {
+    "id": "dates-0516",
+    "group": "dates",
+    "formula": "=HOUR(TIME(0,0,59.9))"
+  },
+  {
+    "id": "dates-0517",
+    "group": "dates",
+    "formula": "=MINUTE(TIME(0,0,59.9))"
+  },
+  {
+    "id": "dates-0518",
+    "group": "dates",
+    "formula": "=SECOND(TIME(0,0,59.9))"
+  },
+  {
+    "id": "dates-0519",
+    "group": "dates",
+    "formula": "=TIME(12,30,0)"
+  },
+  {
+    "id": "dates-0520",
+    "group": "dates",
+    "formula": "=HOUR(TIME(12,30,0))"
+  },
+  {
+    "id": "dates-0521",
+    "group": "dates",
+    "formula": "=MINUTE(TIME(12,30,0))"
+  },
+  {
+    "id": "dates-0522",
+    "group": "dates",
+    "formula": "=SECOND(TIME(12,30,0))"
+  },
+  {
+    "id": "dates-0523",
+    "group": "dates",
+    "formula": "=TIME(23,59,59.9)"
+  },
+  {
+    "id": "dates-0524",
+    "group": "dates",
+    "formula": "=HOUR(TIME(23,59,59.9))"
+  },
+  {
+    "id": "dates-0525",
+    "group": "dates",
+    "formula": "=MINUTE(TIME(23,59,59.9))"
+  },
+  {
+    "id": "dates-0526",
+    "group": "dates",
+    "formula": "=SECOND(TIME(23,59,59.9))"
+  },
+  {
+    "id": "dates-0527",
+    "group": "dates",
+    "formula": "=DAYS(DATE(2024,3,1),DATE(2024,2,28))"
+  },
+  {
+    "id": "dates-0528",
+    "group": "dates",
+    "formula": "=DAYS(DATE(2025,1,1),DATE(2024,1,1))"
+  },
+  {
+    "id": "dates-0529",
+    "group": "dates",
+    "formula": "=DAYS(10.5,2.25)"
+  },
+  {
+    "id": "dates-0530",
+    "group": "dates",
+    "formula": "=NETWORKDAYS(DATE(2024,1,1),DATE(2024,1,12))"
+  },
+  {
+    "id": "dates-0531",
+    "group": "dates",
+    "formula": "=WORKDAY(DATE(2024,1,1),10)"
+  },
+  {
+    "id": "dates-0532",
+    "group": "dates",
+    "formula": "=YEARFRAC(DATE(2024,1,1),DATE(2025,1,1),3)"
+  },
+  {
+    "id": "dates-0533",
+    "group": "dates",
     "formula": "=DAYS360(DATE(2024,1,1),DATE(2025,1,1))"
-  },
-  {
-    "id": "finance-0501",
-    "group": "finance",
-    "formula": "=PMT(0,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0502",
-    "group": "finance",
-    "formula": "=PV(0,24,-100,0,0)"
-  },
-  {
-    "id": "finance-0503",
-    "group": "finance",
-    "formula": "=FV(0,24,-100,0,0)"
-  },
-  {
-    "id": "finance-0504",
-    "group": "finance",
-    "formula": "=NPER(0,-100,2000,0,0)"
-  },
-  {
-    "id": "finance-0505",
-    "group": "finance",
-    "formula": "=IPMT(0,1,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0506",
-    "group": "finance",
-    "formula": "=PPMT(0,1,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0507",
-    "group": "finance",
-    "formula": "=IPMT(0,2,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0508",
-    "group": "finance",
-    "formula": "=PPMT(0,2,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0509",
-    "group": "finance",
-    "formula": "=IPMT(0,24,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0510",
-    "group": "finance",
-    "formula": "=PPMT(0,24,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0511",
-    "group": "finance",
-    "formula": "=PMT(0,24,2000,0,1)"
-  },
-  {
-    "id": "finance-0512",
-    "group": "finance",
-    "formula": "=PV(0,24,-100,0,1)"
-  },
-  {
-    "id": "finance-0513",
-    "group": "finance",
-    "formula": "=FV(0,24,-100,0,1)"
-  },
-  {
-    "id": "finance-0514",
-    "group": "finance",
-    "formula": "=NPER(0,-100,2000,0,1)"
-  },
-  {
-    "id": "finance-0515",
-    "group": "finance",
-    "formula": "=IPMT(0,1,24,2000,0,1)"
-  },
-  {
-    "id": "finance-0516",
-    "group": "finance",
-    "formula": "=PPMT(0,1,24,2000,0,1)"
-  },
-  {
-    "id": "finance-0517",
-    "group": "finance",
-    "formula": "=IPMT(0,2,24,2000,0,1)"
-  },
-  {
-    "id": "finance-0518",
-    "group": "finance",
-    "formula": "=PPMT(0,2,24,2000,0,1)"
-  },
-  {
-    "id": "finance-0519",
-    "group": "finance",
-    "formula": "=IPMT(0,24,24,2000,0,1)"
-  },
-  {
-    "id": "finance-0520",
-    "group": "finance",
-    "formula": "=PPMT(0,24,24,2000,0,1)"
-  },
-  {
-    "id": "finance-0521",
-    "group": "finance",
-    "formula": "=PMT(0.005,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0522",
-    "group": "finance",
-    "formula": "=PV(0.005,24,-100,0,0)"
-  },
-  {
-    "id": "finance-0523",
-    "group": "finance",
-    "formula": "=FV(0.005,24,-100,0,0)"
-  },
-  {
-    "id": "finance-0524",
-    "group": "finance",
-    "formula": "=NPER(0.005,-100,2000,0,0)"
-  },
-  {
-    "id": "finance-0525",
-    "group": "finance",
-    "formula": "=IPMT(0.005,1,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0526",
-    "group": "finance",
-    "formula": "=PPMT(0.005,1,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0527",
-    "group": "finance",
-    "formula": "=IPMT(0.005,2,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0528",
-    "group": "finance",
-    "formula": "=PPMT(0.005,2,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0529",
-    "group": "finance",
-    "formula": "=IPMT(0.005,24,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0530",
-    "group": "finance",
-    "formula": "=PPMT(0.005,24,24,2000,0,0)"
-  },
-  {
-    "id": "finance-0531",
-    "group": "finance",
-    "formula": "=PMT(0.005,24,2000,0,1)"
-  },
-  {
-    "id": "finance-0532",
-    "group": "finance",
-    "formula": "=PV(0.005,24,-100,0,1)"
-  },
-  {
-    "id": "finance-0533",
-    "group": "finance",
-    "formula": "=FV(0.005,24,-100,0,1)"
   },
   {
     "id": "finance-0534",
     "group": "finance",
-    "formula": "=NPER(0.005,-100,2000,0,1)"
+    "formula": "=PMT(0,24,2000,0,0)"
   },
   {
     "id": "finance-0535",
     "group": "finance",
-    "formula": "=IPMT(0.005,1,24,2000,0,1)"
+    "formula": "=PV(0,24,-100,0,0)"
   },
   {
     "id": "finance-0536",
     "group": "finance",
-    "formula": "=PPMT(0.005,1,24,2000,0,1)"
+    "formula": "=FV(0,24,-100,0,0)"
   },
   {
     "id": "finance-0537",
     "group": "finance",
-    "formula": "=IPMT(0.005,2,24,2000,0,1)"
+    "formula": "=NPER(0,-100,2000,0,0)"
   },
   {
     "id": "finance-0538",
     "group": "finance",
-    "formula": "=PPMT(0.005,2,24,2000,0,1)"
+    "formula": "=IPMT(0,1,24,2000,0,0)"
   },
   {
     "id": "finance-0539",
     "group": "finance",
-    "formula": "=IPMT(0.005,24,24,2000,0,1)"
+    "formula": "=PPMT(0,1,24,2000,0,0)"
   },
   {
     "id": "finance-0540",
     "group": "finance",
-    "formula": "=PPMT(0.005,24,24,2000,0,1)"
+    "formula": "=IPMT(0,2,24,2000,0,0)"
   },
   {
     "id": "finance-0541",
     "group": "finance",
-    "formula": "=PMT(0.01,24,2000,0,0)"
+    "formula": "=PPMT(0,2,24,2000,0,0)"
   },
   {
     "id": "finance-0542",
     "group": "finance",
-    "formula": "=PV(0.01,24,-100,0,0)"
+    "formula": "=IPMT(0,24,24,2000,0,0)"
   },
   {
     "id": "finance-0543",
     "group": "finance",
-    "formula": "=FV(0.01,24,-100,0,0)"
+    "formula": "=PPMT(0,24,24,2000,0,0)"
   },
   {
     "id": "finance-0544",
     "group": "finance",
-    "formula": "=NPER(0.01,-100,2000,0,0)"
+    "formula": "=PMT(0,24,2000,0,1)"
   },
   {
     "id": "finance-0545",
     "group": "finance",
-    "formula": "=IPMT(0.01,1,24,2000,0,0)"
+    "formula": "=PV(0,24,-100,0,1)"
   },
   {
     "id": "finance-0546",
     "group": "finance",
-    "formula": "=PPMT(0.01,1,24,2000,0,0)"
+    "formula": "=FV(0,24,-100,0,1)"
   },
   {
     "id": "finance-0547",
     "group": "finance",
-    "formula": "=IPMT(0.01,2,24,2000,0,0)"
+    "formula": "=NPER(0,-100,2000,0,1)"
   },
   {
     "id": "finance-0548",
     "group": "finance",
-    "formula": "=PPMT(0.01,2,24,2000,0,0)"
+    "formula": "=IPMT(0,1,24,2000,0,1)"
   },
   {
     "id": "finance-0549",
     "group": "finance",
-    "formula": "=IPMT(0.01,24,24,2000,0,0)"
+    "formula": "=PPMT(0,1,24,2000,0,1)"
   },
   {
     "id": "finance-0550",
     "group": "finance",
-    "formula": "=PPMT(0.01,24,24,2000,0,0)"
+    "formula": "=IPMT(0,2,24,2000,0,1)"
   },
   {
     "id": "finance-0551",
     "group": "finance",
-    "formula": "=PMT(0.01,24,2000,0,1)"
+    "formula": "=PPMT(0,2,24,2000,0,1)"
   },
   {
     "id": "finance-0552",
     "group": "finance",
-    "formula": "=PV(0.01,24,-100,0,1)"
+    "formula": "=IPMT(0,24,24,2000,0,1)"
   },
   {
     "id": "finance-0553",
     "group": "finance",
-    "formula": "=FV(0.01,24,-100,0,1)"
+    "formula": "=PPMT(0,24,24,2000,0,1)"
   },
   {
     "id": "finance-0554",
     "group": "finance",
-    "formula": "=NPER(0.01,-100,2000,0,1)"
+    "formula": "=PMT(0.005,24,2000,0,0)"
   },
   {
     "id": "finance-0555",
     "group": "finance",
-    "formula": "=IPMT(0.01,1,24,2000,0,1)"
+    "formula": "=PV(0.005,24,-100,0,0)"
   },
   {
     "id": "finance-0556",
     "group": "finance",
-    "formula": "=PPMT(0.01,1,24,2000,0,1)"
+    "formula": "=FV(0.005,24,-100,0,0)"
   },
   {
     "id": "finance-0557",
     "group": "finance",
-    "formula": "=IPMT(0.01,2,24,2000,0,1)"
+    "formula": "=NPER(0.005,-100,2000,0,0)"
   },
   {
     "id": "finance-0558",
     "group": "finance",
-    "formula": "=PPMT(0.01,2,24,2000,0,1)"
+    "formula": "=IPMT(0.005,1,24,2000,0,0)"
   },
   {
     "id": "finance-0559",
     "group": "finance",
-    "formula": "=IPMT(0.01,24,24,2000,0,1)"
+    "formula": "=PPMT(0.005,1,24,2000,0,0)"
   },
   {
     "id": "finance-0560",
     "group": "finance",
-    "formula": "=PPMT(0.01,24,24,2000,0,1)"
+    "formula": "=IPMT(0.005,2,24,2000,0,0)"
   },
   {
     "id": "finance-0561",
     "group": "finance",
-    "formula": "=SLN(10000,1000,5)"
+    "formula": "=PPMT(0.005,2,24,2000,0,0)"
   },
   {
     "id": "finance-0562",
     "group": "finance",
-    "formula": "=SYD(10000,1000,5,1)"
+    "formula": "=IPMT(0.005,24,24,2000,0,0)"
   },
   {
     "id": "finance-0563",
     "group": "finance",
-    "formula": "=SYD(10000,1000,5,5)"
+    "formula": "=PPMT(0.005,24,24,2000,0,0)"
   },
   {
     "id": "finance-0564",
     "group": "finance",
-    "formula": "=NPV(0.1,{-100,40,50,60})"
+    "formula": "=PMT(0.005,24,2000,0,1)"
   },
   {
     "id": "finance-0565",
     "group": "finance",
-    "formula": "=IRR({-100,40,50,60})"
+    "formula": "=PV(0.005,24,-100,0,1)"
   },
   {
     "id": "finance-0566",
     "group": "finance",
+    "formula": "=FV(0.005,24,-100,0,1)"
+  },
+  {
+    "id": "finance-0567",
+    "group": "finance",
+    "formula": "=NPER(0.005,-100,2000,0,1)"
+  },
+  {
+    "id": "finance-0568",
+    "group": "finance",
+    "formula": "=IPMT(0.005,1,24,2000,0,1)"
+  },
+  {
+    "id": "finance-0569",
+    "group": "finance",
+    "formula": "=PPMT(0.005,1,24,2000,0,1)"
+  },
+  {
+    "id": "finance-0570",
+    "group": "finance",
+    "formula": "=IPMT(0.005,2,24,2000,0,1)"
+  },
+  {
+    "id": "finance-0571",
+    "group": "finance",
+    "formula": "=PPMT(0.005,2,24,2000,0,1)"
+  },
+  {
+    "id": "finance-0572",
+    "group": "finance",
+    "formula": "=IPMT(0.005,24,24,2000,0,1)"
+  },
+  {
+    "id": "finance-0573",
+    "group": "finance",
+    "formula": "=PPMT(0.005,24,24,2000,0,1)"
+  },
+  {
+    "id": "finance-0574",
+    "group": "finance",
+    "formula": "=PMT(0.01,24,2000,0,0)"
+  },
+  {
+    "id": "finance-0575",
+    "group": "finance",
+    "formula": "=PV(0.01,24,-100,0,0)"
+  },
+  {
+    "id": "finance-0576",
+    "group": "finance",
+    "formula": "=FV(0.01,24,-100,0,0)"
+  },
+  {
+    "id": "finance-0577",
+    "group": "finance",
+    "formula": "=NPER(0.01,-100,2000,0,0)"
+  },
+  {
+    "id": "finance-0578",
+    "group": "finance",
+    "formula": "=IPMT(0.01,1,24,2000,0,0)"
+  },
+  {
+    "id": "finance-0579",
+    "group": "finance",
+    "formula": "=PPMT(0.01,1,24,2000,0,0)"
+  },
+  {
+    "id": "finance-0580",
+    "group": "finance",
+    "formula": "=IPMT(0.01,2,24,2000,0,0)"
+  },
+  {
+    "id": "finance-0581",
+    "group": "finance",
+    "formula": "=PPMT(0.01,2,24,2000,0,0)"
+  },
+  {
+    "id": "finance-0582",
+    "group": "finance",
+    "formula": "=IPMT(0.01,24,24,2000,0,0)"
+  },
+  {
+    "id": "finance-0583",
+    "group": "finance",
+    "formula": "=PPMT(0.01,24,24,2000,0,0)"
+  },
+  {
+    "id": "finance-0584",
+    "group": "finance",
+    "formula": "=PMT(0.01,24,2000,0,1)"
+  },
+  {
+    "id": "finance-0585",
+    "group": "finance",
+    "formula": "=PV(0.01,24,-100,0,1)"
+  },
+  {
+    "id": "finance-0586",
+    "group": "finance",
+    "formula": "=FV(0.01,24,-100,0,1)"
+  },
+  {
+    "id": "finance-0587",
+    "group": "finance",
+    "formula": "=NPER(0.01,-100,2000,0,1)"
+  },
+  {
+    "id": "finance-0588",
+    "group": "finance",
+    "formula": "=IPMT(0.01,1,24,2000,0,1)"
+  },
+  {
+    "id": "finance-0589",
+    "group": "finance",
+    "formula": "=PPMT(0.01,1,24,2000,0,1)"
+  },
+  {
+    "id": "finance-0590",
+    "group": "finance",
+    "formula": "=IPMT(0.01,2,24,2000,0,1)"
+  },
+  {
+    "id": "finance-0591",
+    "group": "finance",
+    "formula": "=PPMT(0.01,2,24,2000,0,1)"
+  },
+  {
+    "id": "finance-0592",
+    "group": "finance",
+    "formula": "=IPMT(0.01,24,24,2000,0,1)"
+  },
+  {
+    "id": "finance-0593",
+    "group": "finance",
+    "formula": "=PPMT(0.01,24,24,2000,0,1)"
+  },
+  {
+    "id": "finance-0594",
+    "group": "finance",
+    "formula": "=SLN(10000,1000,5)"
+  },
+  {
+    "id": "finance-0595",
+    "group": "finance",
+    "formula": "=SYD(10000,1000,5,1)"
+  },
+  {
+    "id": "finance-0596",
+    "group": "finance",
+    "formula": "=SYD(10000,1000,5,5)"
+  },
+  {
+    "id": "finance-0597",
+    "group": "finance",
+    "formula": "=NPV(0.1,{-100,40,50,60})"
+  },
+  {
+    "id": "finance-0598",
+    "group": "finance",
+    "formula": "=IRR({-100,40,50,60})"
+  },
+  {
+    "id": "finance-0599",
+    "group": "finance",
     "formula": "=RRI(5,100,200)"
   },
   {
-    "id": "references-0567",
+    "id": "finance-0600",
+    "group": "finance",
+    "formula": "=XNPV(0.1,{-100,110},{45292,45658})"
+  },
+  {
+    "id": "finance-0601",
+    "group": "finance",
+    "formula": "=XIRR({-100,110},{45292,45658})"
+  },
+  {
+    "id": "finance-0602",
+    "group": "finance",
+    "formula": "=FV(0.05,10,-100,-1000,0)"
+  },
+  {
+    "id": "finance-0603",
+    "group": "finance",
+    "formula": "=FV(0.05,10,-100,-1000,1)"
+  },
+  {
+    "id": "finance-0604",
+    "group": "finance",
+    "formula": "=NPER(0.01,-100,2000,500,1)"
+  },
+  {
+    "id": "finance-0605",
+    "group": "finance",
+    "formula": "=IPMT(0.005,12,24,2000,500,0)"
+  },
+  {
+    "id": "finance-0606",
+    "group": "finance",
+    "formula": "=PPMT(0.005,12,24,2000,500,0)"
+  },
+  {
+    "id": "references-0607",
     "group": "references",
     "formula": "=IF(TRUE(),7,1/0)"
   },
   {
-    "id": "references-0568",
+    "id": "references-0608",
     "group": "references",
     "formula": "=IF(FALSE(),1/0,7)"
   },
   {
-    "id": "references-0569",
+    "id": "references-0609",
     "group": "references",
     "formula": "=AND(TRUE(),TRUE())"
   },
   {
-    "id": "references-0570",
+    "id": "references-0610",
     "group": "references",
     "formula": "=OR(FALSE(),TRUE())"
   },
   {
-    "id": "references-0571",
+    "id": "references-0611",
     "group": "references",
     "formula": "=NOT(FALSE())"
   },
   {
-    "id": "references-0572",
+    "id": "references-0612",
     "group": "references",
     "formula": "=XOR(TRUE(),FALSE())"
   },
   {
-    "id": "references-0573",
+    "id": "references-0613",
     "group": "references",
     "formula": "=XOR(TRUE(),TRUE())"
   },
   {
-    "id": "references-0574",
+    "id": "references-0614",
     "group": "references",
     "formula": "=XOR(1,0,1)"
   },
   {
-    "id": "references-0575",
+    "id": "references-0615",
     "group": "references",
     "formula": "=ISBLANK(Inputs!A5)"
   },
   {
-    "id": "references-0576",
+    "id": "references-0616",
     "group": "references",
     "formula": "=ISNUMBER(Inputs!A1)"
   },
   {
-    "id": "references-0577",
+    "id": "references-0617",
     "group": "references",
     "formula": "=ISTEXT(Inputs!A3)"
   },
   {
-    "id": "references-0578",
+    "id": "references-0618",
     "group": "references",
     "formula": "=ISLOGICAL(Inputs!A4)"
   },
   {
-    "id": "references-0579",
+    "id": "references-0619",
     "group": "references",
     "formula": "=SUM(Inputs!A1:A5)"
   },
   {
-    "id": "references-0580",
+    "id": "references-0620",
     "group": "references",
     "formula": "=COUNTA(Inputs!A1:A5)"
   },
   {
-    "id": "references-0581",
+    "id": "references-0621",
     "group": "references",
     "formula": "=COUNTBLANK(Inputs!A1:A5)"
   },
   {
-    "id": "references-0582",
+    "id": "references-0622",
     "group": "references",
     "formula": "=INDEX({10,20,30},1,2)"
   },
   {
-    "id": "references-0583",
+    "id": "references-0623",
     "group": "references",
     "formula": "=MATCH(20,{10,20,30},0)"
   },
   {
-    "id": "references-0584",
+    "id": "references-0624",
     "group": "references",
     "formula": "=LOOKUP(25,{10,20,30},{1,2,3})"
   },
   {
-    "id": "references-0585",
+    "id": "references-0625",
     "group": "references",
     "formula": "=VLOOKUP(2,{1,10;2,20;3,30},2,FALSE())"
   },
   {
-    "id": "references-0586",
+    "id": "references-0626",
     "group": "references",
     "formula": "=HLOOKUP(2,{1,2,3;10,20,30},2,FALSE())"
   },
   {
-    "id": "references-0587",
+    "id": "references-0627",
     "group": "references",
     "formula": "=XLOOKUP(2,{1,2,3},{10,20,30})"
   },
   {
-    "id": "references-0588",
+    "id": "references-0628",
     "group": "references",
     "formula": "=SUM(INDEX({1,2;3,4},0,2))"
   },
   {
-    "id": "references-0589",
+    "id": "references-0629",
     "group": "references",
     "formula": "=SUM(TRANSPOSE({1,2;3,4}))"
   },
   {
-    "id": "references-0590",
+    "id": "references-0630",
     "group": "references",
     "formula": "=SUM(MMULT({1,2;3,4},{1,0;0,1}))"
   },
   {
-    "id": "references-0591",
+    "id": "references-0631",
     "group": "references",
     "formula": "=SUM(IF({1,2,3}>1,{10,20,30},0))"
   },
   {
-    "id": "references-0592",
+    "id": "references-0632",
     "group": "references",
     "formula": "=SUMPRODUCT(SIN({0,1,2})*1)"
   },
   {
-    "id": "references-0593",
+    "id": "references-0633",
     "group": "references",
     "formula": "=IFERROR(QUOTIENT(2,0),99)"
   },
   {
-    "id": "references-0594",
+    "id": "references-0634",
     "group": "references",
     "formula": "=ISERROR(ASIN(2))"
   },
   {
-    "id": "references-0595",
+    "id": "references-0635",
     "group": "references",
     "formula": "=ISERROR(FACT(-1))"
+  },
+  {
+    "id": "references-0636",
+    "group": "references",
+    "formula": "=CHOOSE(2,1/0,7,NA())"
+  },
+  {
+    "id": "references-0637",
+    "group": "references",
+    "formula": "=CHOOSE(1,Inputs!A1,Inputs!A2)"
+  },
+  {
+    "id": "references-0638",
+    "group": "references",
+    "formula": "=SUBTOTAL(9,Inputs!A1:A5)"
+  },
+  {
+    "id": "references-0639",
+    "group": "references",
+    "formula": "=SUBTOTAL(1,Inputs!A1:A5)"
+  },
+  {
+    "id": "references-0640",
+    "group": "references",
+    "formula": "=SUBTOTAL(2,Inputs!A1:A5)"
+  },
+  {
+    "id": "references-0641",
+    "group": "references",
+    "formula": "=SUBTOTAL(10,{1,2,3})"
+  },
+  {
+    "id": "references-0642",
+    "group": "references",
+    "formula": "=ROW(Inputs!A2)"
+  },
+  {
+    "id": "references-0643",
+    "group": "references",
+    "formula": "=COLUMN(Inputs!A2)"
+  },
+  {
+    "id": "references-0644",
+    "group": "references",
+    "formula": "=SUM(OFFSET(Inputs!A1,0,0,2,1))"
+  },
+  {
+    "id": "references-0645",
+    "group": "references",
+    "formula": "=INDIRECT(\"A1\")"
   }
 ]

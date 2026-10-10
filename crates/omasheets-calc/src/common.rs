@@ -538,12 +538,13 @@ fn common_time(function: Function, values: &[Value]) -> Value {
     if n[0] < 0.0 {
         return Value::Error(CalcError::InvalidNumber);
     }
-    let seconds = (n[0].fract() * 86_400.0).round() as u64 % 86_400;
+    let seconds = n[0].fract() * 86_400.0;
+    // SECOND rounds its own component; that does not carry into MINUTE/HOUR.
     Value::Number(match function {
-        Function::Hour => seconds / 3600,
-        Function::Minute => seconds / 60 % 60,
-        _ => seconds % 60,
-    } as f64)
+        Function::Hour => (seconds / 3600.0).floor(),
+        Function::Minute => (seconds / 60.0).floor() % 60.0,
+        _ => seconds.round() % 60.0,
+    })
 }
 fn common_finance(function: Function, values: &[Value]) -> Value {
     if matches!(function, Function::Sln | Function::Syd) {

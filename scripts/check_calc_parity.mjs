@@ -102,12 +102,15 @@ const known = mismatch =>
   && ((mismatch.formula === 'ERROR.TYPE(SQRT(-1))' && mismatch.owned.value === 6)
   || (mismatch.formula === 'ERROR.TYPE(VALUE("bad"))' && mismatch.owned.value === 3));
 const targetPassed = suite === 'common'
-  ? formulas.length >= 400 && score.formula_cells_loaded === formulas.length
+  ? formulas.length >= 400 && score.formula_cells_observed === formulas.length && score.formula_cells_loaded === formulas.length
     && score.formula_cells_compared === formulas.length && score.unsupported_formulas === 0
     && score.stored_values_matched / formulas.length >= 0.99 && diagnostic.mismatches.every(known)
   : fullParityPassed;
 const evidence = {
-  schema: 1, referenceVersion, referenceSettings, fixtureSha256: createHash('sha256').update(fixtureBytes).digest('hex'),
+  schema: 1, referenceVersion, referenceSettings,
+  comparison: 'Typed text, boolean and error values must match; finite numbers use |owned-reference| <= 1e-9 * max(|reference|, 1), the existing XLSX scorer tolerance',
+  ownedCommit: run('git', ['rev-parse', 'HEAD']).trim(),
+  fixtureSha256: createHash('sha256').update(fixtureBytes).digest('hex'),
   sourceSha256: createHash('sha256').update(readFileSync(source)).digest('hex'),
   suite, cases, groups, passed: targetPassed, fullParityPassed, score, mismatches: diagnostic.mismatches, unsupported: diagnostic.unsupported,
   scope: suite === 'common' ? 'declared common-calculation suite: minimum 400 cases, >=99% match, no refusals; only issue #98 internal-error gaps permitted' : 'strict information function reference slice; not full Calc parity',

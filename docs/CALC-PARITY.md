@@ -112,9 +112,12 @@ the expansion: at least 400 scenarios, at least 99% fresh Calc agreement, zero
 unsupported formulas, and no unexplained mismatches. The only permitted known
 differences are the two typed internal-error inspection cases in issue #98;
 those continue to count as mismatches. Strict information mode still fails on
-them. Common mode reports both its target result and full exact agreement.
+them. Common mode reports both its target result and whether all cases match.
+Numeric comparisons use the existing XLSX scorer's tolerance:
+`|owned-reference| <= 1e-9 * max(|reference|, 1)`. Typed strings, booleans and
+errors must match. This is not a bit-for-bit floating-point equality claim.
 
-`tests/calc-parity/common.json` contains 595 deterministic scenarios
+`tests/calc-parity/common.json` contains 645 deterministic scenarios
 in information, mathematics, rounding, statistics, text, dates, finance and
 references/arrays. `scripts/generate_common_calc_cases.mjs` reproduces them.
 The denominator is this declared suite, not the percentage of real workbooks
@@ -132,7 +135,17 @@ with case-insensitive searches. `CALC_REFERENCE` selects this isolated binary;
 the exact binary version and settings are retained in the evidence. The first
 594-case pass used Ubuntu's older 24.2 reference and matched 579 cases, with
 14 differences and one refused modern `XLOOKUP` name. Those cases remain in
-the suite. A fractional `DAYS` regression adds the 595th case.
+the suite. A fractional `DAYS` regression adds the 595th case. The second pass
+with the pinned modern reference matched 592 of 595, with no refused formulas;
+one fractional-minute difference remained alongside the two known gaps. That
+boundary and additional hour-end cases are included in the next expansion.
+
+The 645-case expansion also checks text and escaped-wildcard criteria, mixed
+input ranges, database criteria, statistic aliases, dated cash flows, nonzero
+financial future values, lazy `CHOOSE`, `SUBTOTAL`, positions and bounded
+reference functions. The corpus reaches all 177 nonvolatile registered names;
+the three explicit-tick clock/random functions need a separate reference-clock
+contract and are not part of this suite.
 
 Calc-specific boundaries in this increment include `ATAN2(0,0) = 0`, flooring
 fractional `SMALL` ranks (while `LARGE` rounds up), preserving fractional
@@ -140,6 +153,7 @@ fractional `SMALL` ranks (while `LARGE` rounds up), preserving fractional
 and rejecting `COMBINA` when the selection exceeds the first argument. These
 must not be described as complete Excel dialect compatibility. Existing
 `SIGN(0)` and negative-divisor `MOD` results are also corrected.
+`SECOND` rounds fractional seconds without carrying into `MINUTE` or `HOUR`.
 
 An owned workbook session regression imports new common formulas, changes an
 input, checks dependent recalculation, saves with all nine formulas preserved,
