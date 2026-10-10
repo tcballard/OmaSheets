@@ -47,8 +47,9 @@ assert.equal(layout.subject.digest.sha256, artifact.subject.digest.sha256);
 const seeds = existsSync(split) ? ["libreofficekit_hook", "libreofficekit_hook_2"]
   : ["lok_doc_view_open_document", "lok_doc_view_get_document", "lok_doc_view_post_command"];
 const hooks = layout.normalized_result.symbols.filter((symbol) =>
-  seeds.some((seed) => JSON.stringify(symbol.name).includes(seed)));
-assert(hooks.length >= seeds.length, "reference must expose the used LOK entry points");
+  seeds.includes(symbol.name.display));
+assert(seeds.every((seed) => hooks.some((symbol) => symbol.name.display === seed)),
+  "reference must expose every used LOK entry point");
 
 const scenario = {
   executable: join(directory, "omasheets-lok-render"),

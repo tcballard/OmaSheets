@@ -37,6 +37,20 @@ Those include opening a native document with live WAL edits through the
 authenticated service and interrupting a supervisor while another window
 holds a lease. Standalone native probing remains a private-copy operation.
 
+The [successful hosted REA job](https://github.com/tcballard/OmaSheets/actions/runs/38040545993/job/114179749895)
+observed the three used GTK entry points and a real 800×500, one-sheet BGRA
+render. The process exited successfully, settled, preserved source bytes and
+completed verified cleanup without truncating Evidence. Its
+[complete unmodified artifact archive](evidence/native-kit/rea-reference.zip)
+is retained here (SHA-256
+`9da23279bafc5a4aeab81dbc6e4928c98a0cef793ce89b3d7cae99fceeeb8134`).
+The native bridge hash is
+`8280cadd59ed00859f42f649215d0ee4a5898f5f90c4dec395f5c2d09ae5a755`.
+The archive includes `artifact.json`, `layout.json`, `capture.json`, the exact
+scenario, generated workbook, rendered tile and compiled reference probe.
+Sampling may omit short-lived processes; capture does not observe syscalls,
+network traffic, inherited environment values or atomic OS image binding.
+
 ## Reconstruction choices
 
 The replacement uses the existing owned Rust calculation/core/store/service

@@ -28,7 +28,7 @@ jobs:
       - name: Install owned grid dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends qt6-base-dev qt6-declarative-dev qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-window qml6-module-qtqml-workerscript qml6-module-qtquick-dialogs
+          sudo apt-get install --yes --no-install-recommends xauth xvfb libgl1-mesa-dri qt6-base-dev qt6-declarative-dev qml6-module-qtqml qml6-module-qtqml-models qml6-module-qtqml-workerscript qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-templates qml6-module-qtquick-window qml6-module-qtquick-dialogs qml6-module-qtcore
           python3 -m pip install openpyxl==3.1.5
       - name: Validate Rust on the declared minimum toolchain
         run: |
@@ -63,7 +63,7 @@ jobs:
       - name: Open XLSX through the real owned Qt grid
         env:
           EVIDENCE: ${{ runner.temp }}/native-kit-owned
-          QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORM: xcb
           QT_QUICK_BACKEND: software
           OMASHEETS_UI_CAPTURE_PANEL: kit-grid
         run: |
@@ -71,12 +71,12 @@ jobs:
           export OMASHEETS_GRID="$PWD/spikes/qt-grid/target/debug/omasheets-grid"
           export OMASHEETS_UI_CAPTURE="$EVIDENCE/grid.png"
           mkdir -m 700 "$EVIDENCE/runtime"
-          timeout 20 target/debug/omasheets-kit open "$EVIDENCE/reference.xlsx" --working "$EVIDENCE/grid.omasheets" --runtime-dir "$EVIDENCE/runtime" > "$EVIDENCE/grid-launch.json"
+          xvfb-run -a timeout 20 target/debug/omasheets-kit open "$EVIDENCE/reference.xlsx" --working "$EVIDENCE/grid.omasheets" --runtime-dir "$EVIDENCE/runtime" > "$EVIDENCE/grid-launch.json"
           test -s "$EVIDENCE/grid.png"
           test -s "$EVIDENCE/grid.omasheets"
           test ! -e "$EVIDENCE/runtime/omasheets/native.sock"
           unset OMASHEETS_UI_CAPTURE
-          OMASHEETS_GRID_BENCHMARK=1 timeout 20 target/debug/omasheets-kit open "$EVIDENCE/grid.omasheets" --runtime-dir "$EVIDENCE/runtime" > "$EVIDENCE/grid-observation.log"
+          OMASHEETS_GRID_BENCHMARK=1 xvfb-run -a timeout 60 target/debug/omasheets-kit open "$EVIDENCE/grid.omasheets" --runtime-dir "$EVIDENCE/runtime" > "$EVIDENCE/grid-observation.log"
           python3 - <<'PY'
           import json
           import os
