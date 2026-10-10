@@ -1,0 +1,45 @@
+name: Calc parity reference
+
+on:
+  push:
+    branches: ["feat/calc-parity"]
+  pull_request:
+    paths:
+      - "crates/omasheets-calc/**"
+      - "crates/omasheets-xlsx/**"
+      - "scripts/check_calc_parity.mjs"
+      - "tests/calc-parity/**"
+      - ".github/workflows/calc-parity.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calc-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  information:
+    name: Calc information function differential
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install test reference only
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libreoffice-calc
+      - name: Build independent owned scorer
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --component clippy,rustfmt --no-self-update
+          cargo +1.88.0 fmt --all --check
+          cargo +1.88.0 test --locked -p omasheets-calc -p omasheets-xlsx
+          cargo +1.88.0 build --locked -p omasheets-xlsx --bin omasheets-xlsx-score
+      - name: Generate fresh Calc results and compare every formula
+        run: node scripts/check_calc_parity.mjs "$RUNNER_TEMP/calc-parity" target/debug/omasheets-xlsx-score
+      - name: Retain differential evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: calc-parity-information
+          path: ${{ runner.temp }}/calc-parity

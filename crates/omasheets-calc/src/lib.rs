@@ -405,6 +405,9 @@ enum Function {
     IsText,
     IsLogical,
     IsError,
+    IsErr,
+    IsNonText,
+    ErrorType,
     N,
     T,
     SumProduct,
@@ -1742,6 +1745,9 @@ impl Workbook {
                 | Function::IsText
                 | Function::IsLogical
                 | Function::IsError
+                | Function::IsErr
+                | Function::IsNonText
+                | Function::ErrorType
                 | Function::IsNa
                 | Function::N
                 | Function::T
@@ -1965,6 +1971,9 @@ impl Workbook {
             | Function::IsText
             | Function::IsLogical
             | Function::IsError
+            | Function::IsErr
+            | Function::IsNonText
+            | Function::ErrorType
             | Function::N
             | Function::T
             | Function::SumProduct
@@ -2194,6 +2203,7 @@ impl Workbook {
 
     /// Type inspection takes exactly one scalar argument and never propagates
     /// an error from it: `ISERROR(1/0)` is `TRUE`, `ISBLANK(1/0)` is `FALSE`.
+    /// `ERROR.TYPE` maps standard errors to 1–7, otherwise returns `#N/A`.
     /// `N` and `T` do propagate errors, matching Excel.
     fn evaluate_inspection_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
         if arguments.len() != 1 || matches!(arguments[0], Expr::RangeNode { .. }) {
@@ -2206,6 +2216,23 @@ impl Workbook {
             Function::IsText => Value::Boolean(matches!(value, Value::Text(_))),
             Function::IsLogical => Value::Boolean(matches!(value, Value::Boolean(_))),
             Function::IsError => Value::Boolean(matches!(value, Value::Error(_))),
+            Function::IsErr => Value::Boolean(
+                matches!(value, Value::Error(ref error) if *error != CalcError::NotAvailable),
+            ),
+            Function::IsNonText => Value::Boolean(!matches!(value, Value::Text(_))),
+            Function::ErrorType => match value {
+                Value::Error(error) => match error {
+                    CalcError::NullIntersection => Value::Number(1.0),
+                    CalcError::DivisionByZero => Value::Number(2.0),
+                    CalcError::InvalidValue => Value::Number(3.0),
+                    CalcError::InvalidReference => Value::Number(4.0),
+                    CalcError::InvalidName => Value::Number(5.0),
+                    CalcError::InvalidNumber => Value::Number(6.0),
+                    CalcError::NotAvailable => Value::Number(7.0),
+                    CalcError::InvalidArguments => Value::Error(CalcError::NotAvailable),
+                },
+                _ => Value::Error(CalcError::NotAvailable),
+            },
             Function::IsNa => {
                 Value::Boolean(matches!(value, Value::Error(CalcError::NotAvailable)))
             }
@@ -3300,6 +3327,9 @@ fn is_elementwise(function: Function) -> bool {
             | Function::IsText
             | Function::IsLogical
             | Function::IsError
+            | Function::IsErr
+            | Function::IsNonText
+            | Function::ErrorType
             | Function::IsNa
             | Function::N
             | Function::T
@@ -5976,6 +6006,9 @@ const FUNCTION_REGISTRY: &[(&str, Function)] = &[
     ("ISTEXT", Function::IsText),
     ("ISLOGICAL", Function::IsLogical),
     ("ISERROR", Function::IsError),
+    ("ISERR", Function::IsErr),
+    ("ISNONTEXT", Function::IsNonText),
+    ("ERROR.TYPE", Function::ErrorType),
     ("N", Function::N),
     ("T", Function::T),
     ("SUMPRODUCT", Function::SumProduct),
@@ -8774,5 +8807,53 @@ mod tests {
             workbook.set_formula(cell(0, 0), "=SUM(A1:XFD999999)"),
             Err(FormulaError::RangeTooLarge)
         );
+    }
+}
+
+#[cfg(test)]
+mod information_parity_tests {
+    use super::*;
+
+    #[test]
+    fn information_functions_classify_errors_without_propagating_them() {
+        let errors = [
+            (CalcError::NullIntersection, 1.0),
+            (CalcError::DivisionByZero, 2.0),
+            (CalcError::InvalidValue, 3.0),
+            (CalcError::InvalidReference, 4.0),
+            (CalcError::InvalidName, 5.0),
+            (CalcError::InvalidNumber, 6.0),
+            (CalcError::NotAvailable, 7.0),
+        ];
+        for (error, code) in errors {
+            let mut book = Workbook::default();
+            let input = CellId::new(0, 0, 0);
+            let output = CellId::new(0, 0, 1);
+            book.set_error(input, error.clone());
+            for (formula, expected) in [
+                ("=ERROR.TYPE(A1)", Value::Number(code)),
+                (
+                    "=ISERR(A1)",
+                    Value::Boolean(error != CalcError::NotAvailable),
+                ),
+                ("=ISNONTEXT(A1)", Value::Boolean(true)),
+            ] {
+                book.set_formula(output, formula).unwrap();
+                assert_eq!(book.value(output), expected, "{formula}: {error:?}");
+            }
+        }
+        let mut book = Workbook::default();
+        let output = CellId::new(0, 0, 1);
+        for (formula, expected) in [
+            ("=ISNONTEXT(A1)", Value::Boolean(true)),
+            ("=ISNONTEXT(\"\")", Value::Boolean(false)),
+            ("=ISNONTEXT(TRUE)", Value::Boolean(true)),
+            ("=ISERR(42)", Value::Boolean(false)),
+            ("=ERROR.TYPE(42)", Value::Error(CalcError::NotAvailable)),
+            ("=SUMPRODUCT(ISERR({1,#DIV/0!,#N/A})*1)", Value::Number(1.0)),
+        ] {
+            book.set_formula(output, formula).unwrap();
+            assert_eq!(book.value(output), expected, "{formula}");
+        }
     }
 }
