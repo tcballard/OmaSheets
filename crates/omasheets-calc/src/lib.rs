@@ -7,6 +7,7 @@
 //! Dates are Excel 1900-system serial numbers; see [`serial_date`] for the
 //! boundary rules and the deliberately unsupported cases.
 
+mod common;
 mod database;
 mod matrix;
 mod reference;
@@ -345,6 +346,9 @@ enum Function {
     Or,
     Not,
     IfError,
+    IfNa,
+    True,
+    False,
     Sign,
     Ceiling,
     Floor,
@@ -405,6 +409,9 @@ enum Function {
     IsText,
     IsLogical,
     IsError,
+    IsErr,
+    IsNonText,
+    ErrorType,
     N,
     T,
     SumProduct,
@@ -426,6 +433,59 @@ enum Function {
     Rank,
     Text,
     Rri,
+    Sin,
+    Cos,
+    Tan,
+    Asin,
+    Acos,
+    Atan,
+    Atan2,
+    Sinh,
+    Cosh,
+    Tanh,
+    Asinh,
+    Acosh,
+    Atanh,
+    Degrees,
+    Radians,
+    Quotient,
+    MRound,
+    Even,
+    Odd,
+    Fact,
+    FactDouble,
+    Combin,
+    Combina,
+    IsEven,
+    IsOdd,
+    Search,
+    Substitute,
+    Replace,
+    Clean,
+    Proper,
+    Time,
+    Hour,
+    Minute,
+    Second,
+    Days,
+    Fv,
+    Nper,
+    Ipmt,
+    Ppmt,
+    Sln,
+    Syd,
+    SumSq,
+    CountBlank,
+    Gcd,
+    Lcm,
+    Xor,
+    Large,
+    Small,
+    PercentileInc,
+    PercentileExc,
+    QuartileInc,
+    QuartileExc,
+    RankAvg,
 }
 
 /// A parsed formula whose cell references can be enumerated and rebound
@@ -1573,6 +1633,9 @@ impl Workbook {
     }
 
     fn evaluate_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+        if let Some(value) = self.evaluate_common_function(function, arguments) {
+            return value;
+        }
         if matches!(function, Function::Today | Function::Now | Function::Rand) {
             if !arguments.is_empty() {
                 return Value::Error(CalcError::InvalidArguments);
@@ -1691,12 +1754,13 @@ impl Workbook {
         if matches!(function, Function::Row | Function::Column) {
             return self.evaluate_position_function(function, arguments);
         }
-        if function == Function::IfError {
+        if matches!(function, Function::IfError | Function::IfNa) {
             if arguments.len() != 2 {
                 return Value::Error(CalcError::InvalidArguments);
             }
             let value = self.evaluate(&arguments[0]);
-            return if matches!(value, Value::Error(_)) {
+            return if matches!(&value, Value::Error(error) if function == Function::IfError || *error == CalcError::NotAvailable)
+            {
                 self.evaluate(&arguments[1])
             } else {
                 value
@@ -1742,6 +1806,9 @@ impl Workbook {
                 | Function::IsText
                 | Function::IsLogical
                 | Function::IsError
+                | Function::IsErr
+                | Function::IsNonText
+                | Function::ErrorType
                 | Function::IsNa
                 | Function::N
                 | Function::T
@@ -1810,6 +1877,13 @@ impl Workbook {
             return self.evaluate_rri(arguments);
         }
 
+        if matches!(function, Function::True | Function::False) {
+            return if arguments.is_empty() {
+                Value::Boolean(function == Function::True)
+            } else {
+                Value::Error(CalcError::InvalidArguments)
+            };
+        }
         let mut values = Vec::new();
         for argument in arguments {
             self.flatten_values(argument, &mut values);
@@ -1871,11 +1945,23 @@ impl Workbook {
                 if right == 0.0 {
                     None
                 } else {
-                    Some(left.rem_euclid(right))
+                    let remainder = left % right;
+                    Some(if remainder == 0.0 {
+                        0.0
+                    } else if remainder.signum() != right.signum() {
+                        remainder + right
+                    } else {
+                        remainder
+                    })
                 }
             }),
             Function::Power => binary_number(&values, |left, right| Some(left.powf(right))),
-            Function::Sign => unary_number(&values, |value| value.signum()),
+            Function::Sign => {
+                unary_number(
+                    &values,
+                    |value| if value == 0.0 { 0.0 } else { value.signum() },
+                )
+            }
             Function::Ceiling => binary_number(&values, |value, significance| {
                 (significance != 0.0).then(|| (value / significance).ceil() * significance)
             }),
@@ -1928,7 +2014,10 @@ impl Workbook {
             | Function::Not
             | Function::If
             | Function::IfError
+            | Function::IfNa
             | Function::Pi
+            | Function::True
+            | Function::False
             | Function::CountIf
             | Function::SumIf
             | Function::CountIfs
@@ -1965,6 +2054,9 @@ impl Workbook {
             | Function::IsText
             | Function::IsLogical
             | Function::IsError
+            | Function::IsErr
+            | Function::IsNonText
+            | Function::ErrorType
             | Function::N
             | Function::T
             | Function::SumProduct
@@ -1992,6 +2084,59 @@ impl Workbook {
             | Function::Hyperlink
             | Function::Rank
             | Function::Text
+            | Function::Sin
+            | Function::Cos
+            | Function::Tan
+            | Function::Asin
+            | Function::Acos
+            | Function::Atan
+            | Function::Atan2
+            | Function::Sinh
+            | Function::Cosh
+            | Function::Tanh
+            | Function::Asinh
+            | Function::Acosh
+            | Function::Atanh
+            | Function::Degrees
+            | Function::Radians
+            | Function::Quotient
+            | Function::MRound
+            | Function::Even
+            | Function::Odd
+            | Function::Fact
+            | Function::FactDouble
+            | Function::Combin
+            | Function::Combina
+            | Function::IsEven
+            | Function::IsOdd
+            | Function::Search
+            | Function::Substitute
+            | Function::Replace
+            | Function::Clean
+            | Function::Proper
+            | Function::Time
+            | Function::Hour
+            | Function::Minute
+            | Function::Second
+            | Function::Days
+            | Function::Fv
+            | Function::Nper
+            | Function::Ipmt
+            | Function::Ppmt
+            | Function::Sln
+            | Function::Syd
+            | Function::SumSq
+            | Function::CountBlank
+            | Function::Gcd
+            | Function::Lcm
+            | Function::Xor
+            | Function::Large
+            | Function::Small
+            | Function::PercentileInc
+            | Function::PercentileExc
+            | Function::QuartileInc
+            | Function::QuartileExc
+            | Function::RankAvg
             | Function::Rri => Value::Error(CalcError::InvalidArguments),
         }
     }
@@ -2099,8 +2244,9 @@ impl Workbook {
     }
 
     /// `SUBTOTAL(code, ref, ...)`: codes 1-11 and 101-111 select the
-    /// aggregate; cells that themselves hold a `SUBTOTAL` formula are skipped
-    /// as in Excel. Hidden-row semantics (101-111) are not modelled: the
+    /// aggregate; range members that themselves hold a `SUBTOTAL` formula are
+    /// skipped. Calc includes a directly referenced subtotal cell. Hidden-row
+    /// semantics (101-111) are not modelled: the
     /// engine has no row visibility, so both ranges behave like 1-11.
     fn evaluate_subtotal(&self, arguments: &[Expr<usize>]) -> Value {
         if arguments.len() < 2 {
@@ -2161,16 +2307,8 @@ impl Workbook {
                     }
                 }
             }
-            Expr::Reference(index) => {
-                if let Input::Formula(Expr::Function(Function::SubTotal, _)) =
-                    &self.cells[*index].input
-                {
-                    return;
-                }
-                output.push(self.cells[*index].value.clone());
-            }
             Expr::Empty => {}
-            other => output.push(self.evaluate(other)),
+            other => self.flatten_values(other, output),
         }
     }
 
@@ -2194,6 +2332,7 @@ impl Workbook {
 
     /// Type inspection takes exactly one scalar argument and never propagates
     /// an error from it: `ISERROR(1/0)` is `TRUE`, `ISBLANK(1/0)` is `FALSE`.
+    /// `ERROR.TYPE` maps standard errors to 1–7, otherwise returns `#N/A`.
     /// `N` and `T` do propagate errors, matching Excel.
     fn evaluate_inspection_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
         if arguments.len() != 1 || matches!(arguments[0], Expr::RangeNode { .. }) {
@@ -2206,6 +2345,23 @@ impl Workbook {
             Function::IsText => Value::Boolean(matches!(value, Value::Text(_))),
             Function::IsLogical => Value::Boolean(matches!(value, Value::Boolean(_))),
             Function::IsError => Value::Boolean(matches!(value, Value::Error(_))),
+            Function::IsErr => Value::Boolean(
+                matches!(value, Value::Error(ref error) if *error != CalcError::NotAvailable),
+            ),
+            Function::IsNonText => Value::Boolean(!matches!(value, Value::Text(_))),
+            Function::ErrorType => match value {
+                Value::Error(error) => match error {
+                    CalcError::NullIntersection => Value::Number(1.0),
+                    CalcError::DivisionByZero => Value::Number(2.0),
+                    CalcError::InvalidValue => Value::Number(3.0),
+                    CalcError::InvalidReference => Value::Number(4.0),
+                    CalcError::InvalidName => Value::Number(5.0),
+                    CalcError::InvalidNumber => Value::Number(6.0),
+                    CalcError::NotAvailable => Value::Number(7.0),
+                    CalcError::InvalidArguments => Value::Error(CalcError::NotAvailable),
+                },
+                _ => Value::Error(CalcError::NotAvailable),
+            },
             Function::IsNa => {
                 Value::Boolean(matches!(value, Value::Error(CalcError::NotAvailable)))
             }
@@ -3251,64 +3407,69 @@ fn contains_array_operand(expression: &Expr<usize>) -> bool {
 /// Functions of scalar arguments only, which an array argument maps over
 /// element by element; every other function takes its ranges whole.
 fn is_elementwise(function: Function) -> bool {
-    matches!(
-        function,
-        Function::Abs
-            | Function::Round
-            | Function::RoundUp
-            | Function::RoundDown
-            | Function::Int
-            | Function::Mod
-            | Function::Power
-            | Function::Sqrt
-            | Function::Not
-            | Function::IfError
-            | Function::Sign
-            | Function::Ceiling
-            | Function::Floor
-            | Function::Trunc
-            | Function::Exp
-            | Function::Ln
-            | Function::Log
-            | Function::Log10
-            | Function::Len
-            | Function::Left
-            | Function::Right
-            | Function::Mid
-            | Function::Trim
-            | Function::Upper
-            | Function::Lower
-            | Function::Concat
-            | Function::Value
-            | Function::Exact
-            | Function::Date
-            | Function::Year
-            | Function::Month
-            | Function::Day
-            | Function::EDate
-            | Function::EoMonth
-            | Function::Weekday
-            | Function::YearFrac
-            | Function::Days360
-            | Function::Pmt
-            | Function::Pv
-            | Function::NormDist
-            | Function::NormSDist
-            | Function::NormSDistLegacy
-            | Function::IsBlank
-            | Function::IsNumber
-            | Function::IsText
-            | Function::IsLogical
-            | Function::IsError
-            | Function::IsNa
-            | Function::N
-            | Function::T
-            | Function::Find
-            | Function::Rept
-            | Function::Text
-            | Function::Hyperlink
-            | Function::Rri
-    )
+    common::elementwise(function)
+        || matches!(
+            function,
+            Function::Abs
+                | Function::Round
+                | Function::RoundUp
+                | Function::RoundDown
+                | Function::Int
+                | Function::Mod
+                | Function::Power
+                | Function::Sqrt
+                | Function::Not
+                | Function::IfError
+                | Function::IfNa
+                | Function::Sign
+                | Function::Ceiling
+                | Function::Floor
+                | Function::Trunc
+                | Function::Exp
+                | Function::Ln
+                | Function::Log
+                | Function::Log10
+                | Function::Len
+                | Function::Left
+                | Function::Right
+                | Function::Mid
+                | Function::Trim
+                | Function::Upper
+                | Function::Lower
+                | Function::Concat
+                | Function::Value
+                | Function::Exact
+                | Function::Date
+                | Function::Year
+                | Function::Month
+                | Function::Day
+                | Function::EDate
+                | Function::EoMonth
+                | Function::Weekday
+                | Function::YearFrac
+                | Function::Days360
+                | Function::Pmt
+                | Function::Pv
+                | Function::NormDist
+                | Function::NormSDist
+                | Function::NormSDistLegacy
+                | Function::IsBlank
+                | Function::IsNumber
+                | Function::IsText
+                | Function::IsLogical
+                | Function::IsError
+                | Function::IsErr
+                | Function::IsNonText
+                | Function::ErrorType
+                | Function::IsNa
+                | Function::N
+                | Function::T
+                | Function::Find
+                | Function::Rept
+                | Function::Text
+                | Function::Hyperlink
+                | Function::Rri
+        )
 }
 
 /// A value as a literal expression, for evaluating a scalar function once
@@ -5879,6 +6040,61 @@ fn literal_offset(args: &[Expr]) -> Result<Expr, FormulaError> {
 }
 
 const FUNCTION_REGISTRY: &[(&str, Function)] = &[
+    ("SIN", Function::Sin),
+    ("COS", Function::Cos),
+    ("TAN", Function::Tan),
+    ("ASIN", Function::Asin),
+    ("ACOS", Function::Acos),
+    ("ATAN", Function::Atan),
+    ("ATAN2", Function::Atan2),
+    ("SINH", Function::Sinh),
+    ("COSH", Function::Cosh),
+    ("TANH", Function::Tanh),
+    ("ASINH", Function::Asinh),
+    ("ACOSH", Function::Acosh),
+    ("ATANH", Function::Atanh),
+    ("DEGREES", Function::Degrees),
+    ("RADIANS", Function::Radians),
+    ("QUOTIENT", Function::Quotient),
+    ("MROUND", Function::MRound),
+    ("EVEN", Function::Even),
+    ("ODD", Function::Odd),
+    ("FACT", Function::Fact),
+    ("FACTDOUBLE", Function::FactDouble),
+    ("COMBIN", Function::Combin),
+    ("COMBINA", Function::Combina),
+    ("ISEVEN", Function::IsEven),
+    ("ISODD", Function::IsOdd),
+    ("SEARCH", Function::Search),
+    ("SUBSTITUTE", Function::Substitute),
+    ("REPLACE", Function::Replace),
+    ("CLEAN", Function::Clean),
+    ("PROPER", Function::Proper),
+    ("TIME", Function::Time),
+    ("HOUR", Function::Hour),
+    ("MINUTE", Function::Minute),
+    ("SECOND", Function::Second),
+    ("DAYS", Function::Days),
+    ("FV", Function::Fv),
+    ("NPER", Function::Nper),
+    ("IPMT", Function::Ipmt),
+    ("PPMT", Function::Ppmt),
+    ("SLN", Function::Sln),
+    ("SYD", Function::Syd),
+    ("SUMSQ", Function::SumSq),
+    ("COUNTBLANK", Function::CountBlank),
+    ("GCD", Function::Gcd),
+    ("LCM", Function::Lcm),
+    ("XOR", Function::Xor),
+    ("LARGE", Function::Large),
+    ("SMALL", Function::Small),
+    ("PERCENTILE.INC", Function::PercentileInc),
+    ("PERCENTILE.EXC", Function::PercentileExc),
+    ("QUARTILE.INC", Function::QuartileInc),
+    ("QUARTILE.EXC", Function::QuartileExc),
+    ("RANK.AVG", Function::RankAvg),
+    ("PERCENTILE", Function::PercentileInc),
+    ("QUARTILE", Function::QuartileInc),
     ("TODAY", Function::Today),
     ("NOW", Function::Now),
     ("RAND", Function::Rand),
@@ -5910,6 +6126,9 @@ const FUNCTION_REGISTRY: &[(&str, Function)] = &[
     ("OR", Function::Or),
     ("NOT", Function::Not),
     ("IFERROR", Function::IfError),
+    ("IFNA", Function::IfNa),
+    ("TRUE", Function::True),
+    ("FALSE", Function::False),
     ("SIGN", Function::Sign),
     ("CEILING", Function::Ceiling),
     ("FLOOR", Function::Floor),
@@ -5976,6 +6195,9 @@ const FUNCTION_REGISTRY: &[(&str, Function)] = &[
     ("ISTEXT", Function::IsText),
     ("ISLOGICAL", Function::IsLogical),
     ("ISERROR", Function::IsError),
+    ("ISERR", Function::IsErr),
+    ("ISNONTEXT", Function::IsNonText),
+    ("ERROR.TYPE", Function::ErrorType),
     ("N", Function::N),
     ("T", Function::T),
     ("SUMPRODUCT", Function::SumProduct),
@@ -7960,10 +8182,17 @@ mod tests {
             (14, "=VAR.P(A1:A8)", Value::Number(4.0)),
             (15, "=STDEV(A1)", Value::Error(CalcError::DivisionByZero)),
             (16, "=ROUND(SUBTOTAL(7,A1:A9),5)", Value::Number(2.13809)),
+            (17, "=SUBTOTAL(10,{1,2,3})", Value::Number(1.0)),
+            (18, "=SUBTOTAL(9,{1,2;3,4})", Value::Number(10.0)),
+            (19, "=SUBTOTAL(11,{1,2,3})", Value::Number(2.0 / 3.0)),
         ] {
             workbook.set_formula(cell(0, column), formula).unwrap();
             assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
         }
+        workbook
+            .set_formula(cell(100, 1), "=SUBTOTAL(9,A9)")
+            .unwrap();
+        assert_eq!(workbook.value(cell(100, 1)), Value::Number(40.0));
     }
 
     #[test]
@@ -8774,5 +9003,59 @@ mod tests {
             workbook.set_formula(cell(0, 0), "=SUM(A1:XFD999999)"),
             Err(FormulaError::RangeTooLarge)
         );
+    }
+}
+
+#[cfg(test)]
+mod information_parity_tests {
+    use super::*;
+
+    #[test]
+    fn information_functions_classify_errors_without_propagating_them() {
+        let errors = [
+            (CalcError::NullIntersection, 1.0),
+            (CalcError::DivisionByZero, 2.0),
+            (CalcError::InvalidValue, 3.0),
+            (CalcError::InvalidReference, 4.0),
+            (CalcError::InvalidName, 5.0),
+            (CalcError::InvalidNumber, 6.0),
+            (CalcError::NotAvailable, 7.0),
+        ];
+        for (error, code) in errors {
+            let mut book = Workbook::default();
+            let input = CellId::new(0, 0, 0);
+            let output = CellId::new(0, 0, 1);
+            book.set_error(input, error.clone());
+            for (formula, expected) in [
+                ("=ERROR.TYPE(A1)", Value::Number(code)),
+                (
+                    "=ISERR(A1)",
+                    Value::Boolean(error != CalcError::NotAvailable),
+                ),
+                ("=ISNONTEXT(A1)", Value::Boolean(true)),
+            ] {
+                book.set_formula(output, formula).unwrap();
+                assert_eq!(book.value(output), expected, "{formula}: {error:?}");
+            }
+        }
+        let mut book = Workbook::default();
+        let output = CellId::new(0, 0, 1);
+        for (formula, expected) in [
+            ("=ISNONTEXT(A1)", Value::Boolean(true)),
+            ("=ISNONTEXT(\"\")", Value::Boolean(false)),
+            ("=ISNONTEXT(TRUE)", Value::Boolean(true)),
+            ("=ISERR(42)", Value::Boolean(false)),
+            ("=TRUE()", Value::Boolean(true)),
+            ("=FALSE()", Value::Boolean(false)),
+            ("=TRUE(1)", Value::Error(CalcError::InvalidArguments)),
+            ("=IFNA(NA(),42)", Value::Number(42.0)),
+            ("=IFNA(1/0,42)", Value::Error(CalcError::DivisionByZero)),
+            ("=IFNA(42,1/0)", Value::Number(42.0)),
+            ("=ERROR.TYPE(42)", Value::Error(CalcError::NotAvailable)),
+            ("=SUMPRODUCT(ISERR({1,#DIV/0!,#N/A})*1)", Value::Number(1.0)),
+        ] {
+            book.set_formula(output, formula).unwrap();
+            assert_eq!(book.value(output), expected, "{formula}");
+        }
     }
 }

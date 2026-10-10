@@ -1,7 +1,7 @@
 # Supported formula functions
 
 The owned M0 engine (`crates/omasheets-calc`) accepts exactly the
-119 function names listed below, grouped for reading.
+180 function names listed below, grouped for reading.
 A test in the calc crate fails when this file and the registry disagree, so
 the count here is never edited by hand: add the function to the registry and
 regenerate this list.
@@ -145,11 +145,17 @@ Formula criteria with nonmatching/blank headings are not implemented and return
 - `OR`
 - `NOT`
 - `IFERROR`
+- `IFNA`
+- `TRUE`
+- `FALSE`
 - `ISBLANK`
 - `ISNUMBER`
 - `ISTEXT`
 - `ISLOGICAL`
 - `ISERROR`
+- `ISERR`
+- `ISNONTEXT`
+- `ERROR.TYPE`
 - `N`
 - `T`
 - `CHOOSE`
@@ -249,3 +255,61 @@ omitted order ranks the largest first. An absent target returns `#N/A`.
 Native `.omasheets` documents do not yet persist external workbook inputs. Native import therefore retains the source cached value and reports the formula as cached-only; it does not install an external formula that would evaluate to `#REF!` or an empty-range zero. The owned XLSX scorer can resolve linked inputs separately.
 
 Owned XLSX import refuses external scalar formulas without a resolved cell input, and external ranges without any resolved input for their sheet. It retains their source cached values and counts them as unsupported; dependent formulas can still use those caches. Missing cells within an otherwise resolved external range remain blank. This prevents absent workbooks from manufacturing zero or error values and is reflected in the raw coverage denominator.
+
+### Common calculation expansion
+
+- `SIN`
+- `COS`
+- `TAN`
+- `ASIN`
+- `ACOS`
+- `ATAN`
+- `ATAN2`
+- `SINH`
+- `COSH`
+- `TANH`
+- `ASINH`
+- `ACOSH`
+- `ATANH`
+- `DEGREES`
+- `RADIANS`
+- `QUOTIENT`
+- `MROUND`
+- `EVEN`
+- `ODD`
+- `FACT`
+- `FACTDOUBLE`
+- `COMBIN`
+- `COMBINA`
+- `ISEVEN`
+- `ISODD`
+- `SEARCH`
+- `SUBSTITUTE`
+- `REPLACE`
+- `CLEAN`
+- `PROPER`
+- `TIME`
+- `HOUR`
+- `MINUTE`
+- `SECOND`
+- `DAYS`
+- `FV`
+- `NPER`
+- `IPMT`
+- `PPMT`
+- `SLN`
+- `SYD`
+- `SUMSQ`
+- `COUNTBLANK`
+- `GCD`
+- `LCM`
+- `XOR`
+- `LARGE`
+- `SMALL`
+- `PERCENTILE.INC`
+- `PERCENTILE.EXC`
+- `QUARTILE.INC`
+- `QUARTILE.EXC`
+- `RANK.AVG`
+- `PERCENTILE`
+- `QUARTILE`

@@ -1,0 +1,55 @@
+name: Calc parity reference
+
+on:
+  push:
+    branches: ["feat/calc-parity"]
+  pull_request:
+    paths:
+      - "crates/omasheets-calc/**"
+      - "crates/omasheets-xlsx/**"
+      - "scripts/check_calc_parity.mjs"
+      - "scripts/generate_common_calc_cases.mjs"
+      - "tests/calc-parity/**"
+      - ".github/workflows/calc-parity.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: calc-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  information:
+    name: Common calculations against Calc
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install test reference only
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libreoffice-calc
+          reference_dir="$RUNNER_TEMP/calc-reference"
+          mkdir -p "$reference_dir/packages" "$reference_dir/root"
+          curl --fail --location --retry 3 --output "$reference_dir/reference.tar.gz" https://download.documentfoundation.org/libreoffice/stable/26.8.1/deb/x86_64/LibreOffice_26.8.1_Linux_x86-64_deb.tar.gz
+          echo '30903df3b9f61360d9660cd707de48cd2831469114492a5008ed58a0ac77d044' "$reference_dir/reference.tar.gz" | sha256sum --check --strict
+          tar -xzf "$reference_dir/reference.tar.gz" -C "$reference_dir/packages"
+          for package in "$reference_dir"/packages/*/DEBS/*.deb; do
+            dpkg-deb -x "$package" "$reference_dir/root"
+          done
+          echo "CALC_REFERENCE=$reference_dir/root/opt/libreoffice26.8/program/soffice" >> "$GITHUB_ENV"
+      - name: Build independent owned scorer
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --component clippy,rustfmt --no-self-update
+          cargo +1.88.0 fmt --all --check
+          cargo +1.88.0 test --locked -p omasheets-calc -p omasheets-xlsx
+          cargo +1.88.0 build --locked -p omasheets-xlsx --example calc_parity
+      - name: Generate fresh Calc results and compare every formula
+        run: node scripts/check_calc_parity.mjs "$RUNNER_TEMP/calc-parity" target/debug/examples/calc_parity common
+      - name: Retain differential evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: calc-parity-common
+          path: ${{ runner.temp }}/calc-parity
