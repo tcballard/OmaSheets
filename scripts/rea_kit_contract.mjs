@@ -35,7 +35,11 @@ function investigate(command, arguments_, name) {
 // which exceeds the bounded ELF adapter's 32 MiB input budget. In that case
 // inspect the GTK LOK bridge actually used by OmaSheets' compatibility window.
 const split = join(program, "libsofficeapp.so");
-const reference = realpathSync(existsSync(split) ? split : "/usr/lib/x86_64-linux-gnu/liblibreofficekitgtk.so");
+const candidates = [split, join(program, "liblibreofficekitgtk.so"),
+  "/usr/lib/liblibreofficekitgtk.so", "/usr/lib/x86_64-linux-gnu/liblibreofficekitgtk.so"];
+const selected = candidates.find(existsSync);
+assert(selected, "no installed LOK implementation or GTK bridge was found");
+const reference = realpathSync(selected);
 const artifact = investigate("inspect-artifact", [reference], "artifact.json");
 const layout = investigate("inspect-binary-layout", [reference], "layout.json");
 assert.equal(layout.operation, "inspect_binary_layout");
@@ -61,7 +65,10 @@ assert.equal(capture.operation, "capture_process_scenario");
 assert.equal(capture.normalized_result.exit.code, 0);
 assert.equal(capture.normalized_result.truncated, false);
 const text = capture.normalized_result.frames.map((frame) => frame.data).join("");
-const report = JSON.parse(text.trim());
+const reports = text.split(/\r?\n/u).filter((line) => line.trim().startsWith("{"))
+  .map((line) => JSON.parse(line.trim())).filter((value) => value.engine === "libreofficekit");
+assert.equal(reports.length, 1, "capture must contain exactly one renderer report");
+const report = reports[0];
 assert.equal(report.engine, "libreofficekit");
 assert.equal(report.parts, 1);
 assert.equal(report.width, 800);
