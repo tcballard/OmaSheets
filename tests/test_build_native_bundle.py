@@ -95,6 +95,27 @@ class ReproducibleArchiveTests(unittest.TestCase):
         for binary in NATIVE_EXECUTABLES:
             self.assertEqual((destination / "bin" / binary).stat().st_mode & 0o777, 0o755)
 
+    def test_native_kit_is_distributed_beside_the_compatibility_binaries(self):
+        _, members = self.stage("native-kit", "")
+        archive = self.root / "native-kit.tar.gz"
+        build_native_bundle.write_reproducible_archive(archive, members, 1_700_000_000)
+        destination = self.root / "native-kit-app"
+        manifest = install_native_bundle(archive, destination, version=__version__, source=source_identity(ROOT))
+        self.assertIn("bin/omasheets-kit", manifest["files"])
+        for binary in ("omasheets-kit", "omasheets-window", "omasheets-lok-render"):
+            self.assertTrue((destination / "bin" / binary).is_file())
+
+    def test_native_bundle_refuses_a_missing_native_kit_before_installing_anything(self):
+        _, members = self.stage("missing-kit", "")
+        archive = self.root / "missing-kit.tar.gz"
+        build_native_bundle.write_reproducible_archive(
+            archive, [member for member in members if member[0] != "bin/omasheets-kit"], 1,
+        )
+        destination = self.root / "missing-kit-app"
+        with self.assertRaisesRegex(RuntimeError, "unexpected file set"):
+            install_native_bundle(archive, destination, version=__version__, source=source_identity(ROOT))
+        self.assertFalse(destination.exists())
+
     def test_source_date_epoch_prefers_the_environment_then_the_commit_time(self):
         with patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "12345"}):
             self.assertEqual(build_native_bundle.source_date_epoch(), 12345)

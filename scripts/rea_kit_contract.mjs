@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const directory = resolve(process.argv[2] ?? "");
@@ -17,21 +17,34 @@ const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest(
 const before = sha256(source);
 function investigate(command, arguments_, name) {
   // No shell; complete bytes are retained before projecting a result.
-  const bytes = execFileSync(rea, [command, ...arguments_, "--format", "json"], {
-    maxBuffer: 64 * 1024 * 1024, timeout: 90_000,
-  });
+  let bytes;
+  try {
+    bytes = execFileSync(rea, [command, ...arguments_, "--format", "json"], {
+      maxBuffer: 64 * 1024 * 1024, timeout: 90_000,
+    });
+  } catch (error) {
+    if (error.stdout) writeFileSync(join(directory, name), error.stdout, { flag: "wx" });
+    throw new Error(`REA ${command} failed: ${error.stdout?.toString() ?? error.message}`);
+  }
   writeFileSync(join(directory, name), bytes, { flag: "wx" });
   const evidence = JSON.parse(bytes);
   assert(evidence.evidence_id && evidence.normalized_result, "REA did not produce Evidence");
   return evidence;
 }
-const artifact = investigate("inspect-artifact", [join(program, "libsofficeapp.so")], "artifact.json");
-const layout = investigate("inspect-binary-layout", [join(program, "libsofficeapp.so")], "layout.json");
+// Distribution builds merge the office implementation into libmergedlo.so,
+// which exceeds the bounded ELF adapter's 32 MiB input budget. In that case
+// inspect the GTK LOK bridge actually used by OmaSheets' compatibility window.
+const split = join(program, "libsofficeapp.so");
+const reference = realpathSync(existsSync(split) ? split : "/usr/lib/x86_64-linux-gnu/liblibreofficekitgtk.so");
+const artifact = investigate("inspect-artifact", [reference], "artifact.json");
+const layout = investigate("inspect-binary-layout", [reference], "layout.json");
 assert.equal(layout.operation, "inspect_binary_layout");
 assert.equal(layout.subject.digest.sha256, artifact.subject.digest.sha256);
+const seeds = existsSync(split) ? ["libreofficekit_hook", "libreofficekit_hook_2"]
+  : ["lok_doc_view_open_document", "lok_doc_view_get_document", "lok_doc_view_post_command"];
 const hooks = layout.normalized_result.symbols.filter((symbol) =>
-  JSON.stringify(symbol.name).includes("libreofficekit_hook"));
-assert(hooks.length >= 2, "reference must export both LibreOfficeKit entry points");
+  seeds.some((seed) => JSON.stringify(symbol.name).includes(seed)));
+assert(hooks.length >= seeds.length, "reference must expose the used LOK entry points");
 
 const scenario = {
   executable: join(directory, "omasheets-lok-render"),

@@ -38,6 +38,7 @@ bin_dir.mkdir(parents=True)
 (bin_dir / 'omasheets').write_bytes(_launcher(Path('/usr/lib/omasheets')))
 (bin_dir / 'omasheets').chmod(0o755)
 (bin_dir / 'omasheets-service').symlink_to('../lib/omasheets/bin/omasheets-service')
+(bin_dir / 'omasheets-kit').symlink_to('../lib/omasheets/bin/omasheets-kit')
 desktop = stage / 'usr/share/applications' / DESKTOP_ID
 desktop.parent.mkdir(parents=True)
 desktop.write_text(DESKTOP_ENTRY.replace('Exec=omasheets ', 'Exec=/usr/bin/omasheets '))

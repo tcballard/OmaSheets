@@ -24,6 +24,7 @@ NATIVE_EXECUTABLES = (
     "omasheets-window",
     "omasheets-lok-render",
     "omasheets-service",
+    "omasheets-kit",
     "omasheets-grid",
     "omasheets-setup",
 )

@@ -19,6 +19,87 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  owned-kit:
+    name: Owned workbook sessions and grid
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install owned grid dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends qt6-base-dev qt6-declarative-dev qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-window qml6-module-qtqml-workerscript qml6-module-qtquick-dialogs
+          python3 -m pip install openpyxl==3.1.5
+      - name: Validate Rust on the declared minimum toolchain
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --component clippy,rustfmt --no-self-update
+          cargo +1.88.0 fmt --all --check
+          cargo +1.88.0 clippy --workspace --all-targets --locked -- -D warnings
+          cargo +1.88.0 test --workspace --locked
+          cargo +1.88.0 build --locked -p omasheets-kit -p omasheets-service --examples --bins
+          cargo +1.88.0 build --locked --manifest-path spikes/qt-grid/Cargo.toml
+      - name: Edit, recalculate, save and independently reopen
+        env:
+          EVIDENCE: ${{ runner.temp }}/native-kit-owned
+        run: |
+          mkdir -p "$EVIDENCE"
+          python3 scripts/generate_m0_xlsx.py "$EVIDENCE/reference.xlsx" --rows 10 > "$EVIDENCE/fixture.json"
+          target/debug/omasheets-kit probe "$EVIDENCE/reference.xlsx" > "$EVIDENCE/admission.json"
+          target/debug/examples/round_trip "$EVIDENCE/reference.xlsx" "$EVIDENCE/round-trip" > "$EVIDENCE/round-trip.json"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import openpyxl
+          source = Path(os.environ['EVIDENCE']) / 'round-trip/edited.xlsx'
+          formulas = openpyxl.load_workbook(source, data_only=False)
+          values = openpyxl.load_workbook(source, data_only=True)
+          assert formulas.active['C2'].value == '=A2+B2'
+          assert values.active['A2'].value == 20
+          assert values.active['C2'].value == 22
+          assert len(formulas.sheetnames) == 1
+          formulas.close()
+          values.close()
+          PY
+      - name: Open XLSX through the real owned Qt grid
+        env:
+          EVIDENCE: ${{ runner.temp }}/native-kit-owned
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+          OMASHEETS_UI_CAPTURE_PANEL: kit-grid
+        run: |
+          export OMASHEETS_NATIVE_SERVICE="$PWD/target/debug/omasheets-service"
+          export OMASHEETS_GRID="$PWD/spikes/qt-grid/target/debug/omasheets-grid"
+          export OMASHEETS_UI_CAPTURE="$EVIDENCE/grid.png"
+          mkdir -m 700 "$EVIDENCE/runtime"
+          timeout 20 target/debug/omasheets-kit open "$EVIDENCE/reference.xlsx" --working "$EVIDENCE/grid.omasheets" --runtime-dir "$EVIDENCE/runtime" > "$EVIDENCE/grid-launch.json"
+          test -s "$EVIDENCE/grid.png"
+          test -s "$EVIDENCE/grid.omasheets"
+          test ! -e "$EVIDENCE/runtime/omasheets/native.sock"
+          unset OMASHEETS_UI_CAPTURE
+          OMASHEETS_GRID_BENCHMARK=1 timeout 20 target/debug/omasheets-kit open "$EVIDENCE/grid.omasheets" --runtime-dir "$EVIDENCE/runtime" > "$EVIDENCE/grid-observation.log"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ['EVIDENCE'])
+          reports = [json.loads(line.removeprefix('OMASHEETS_GRID_BENCHMARK '))
+                     for line in (root / 'grid-observation.log').read_text().splitlines()
+                     if line.startswith('OMASHEETS_GRID_BENCHMARK ')]
+          assert len(reports) == 1
+          report = reports[0]
+          assert report['source'] == 'native-document', report
+          assert report['sheet_count'] == 1, report
+          assert report['cell_reads'] > 0 and report['service_requests'] > 0, report
+          (root / 'grid-observation.json').write_text(json.dumps(report, indent=2) + '\n')
+          PY
+          test ! -e "$EVIDENCE/runtime/omasheets/native.sock"
+      - name: Retain replacement evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-kit-owned
+          path: ${{ runner.temp }}/native-kit-owned
+
   rea-reference:
     name: REA LibreOfficeKit reference
     runs-on: ubuntu-latest

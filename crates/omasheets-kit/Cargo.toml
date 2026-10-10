@@ -1,0 +1,17 @@
+[package]
+name = "omasheets-kit"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+libc = "0.2"
+omasheets-core = { path = "../omasheets-core" }
+omasheets-service = { path = "../omasheets-service" }
+quick-xml = "=0.41.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }

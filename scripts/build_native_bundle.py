@@ -103,7 +103,10 @@ def main(argv: list[str] | None = None) -> int:
             part for part in (rust_environment.get("RUSTFLAGS", ""), remaps) if part
         )
         subprocess.run(
-            ["cargo", "build", "--locked", "--release", "-p", "omasheets-service"],
+            [
+                "cargo", "build", "--locked", "--release",
+                "-p", "omasheets-service", "-p", "omasheets-kit",
+            ],
             cwd=ROOT,
             env=rust_environment,
             check=True,
@@ -133,6 +136,7 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.run(["cmake", "--build", str(build), "--parallel", "2"], check=True)
         subprocess.run(["cmake", "--install", str(build)], check=True)
         shutil.copy2(rust_target / "release/omasheets-service", stage / "bin/omasheets-service")
+        shutil.copy2(rust_target / "release/omasheets-kit", stage / "bin/omasheets-kit")
         shutil.copy2(grid_target / "release/omasheets-grid", stage / "bin/omasheets-grid")
         shutil.copy2(rust_target / "release/omasheets-setup", stage / "bin/omasheets-setup")
         files = {f"bin/{name}": sha256(stage / "bin" / name) for name in NATIVE_EXECUTABLES}
@@ -143,7 +147,10 @@ def main(argv: list[str] | None = None) -> int:
             "architecture": normalized_architecture(),
             "source": identity,
             "build_contract": "native/libreofficekit/CMakeLists.txt",
-            "rust_build_contract": ["Cargo.lock", "crates/omasheets-service/Cargo.toml"],
+            "rust_build_contract": [
+                "Cargo.lock", "crates/omasheets-service/Cargo.toml",
+                "crates/omasheets-kit/Cargo.toml",
+            ],
             "qt_build_contract": [
                 "spikes/qt-grid/Cargo.lock",
                 "spikes/qt-grid/Cargo.toml",

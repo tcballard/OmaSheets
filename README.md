@@ -148,6 +148,14 @@ only the transient service it owns after the last launched grid closes. Closing
 the window that originally started the service does not interrupt other open
 grids. Failed service startup is bounded and cleans up the attempted process.
 
+Development builds also provide [OmaSheets Kit](crates/omasheets-kit/README.md),
+an owned Rust replacement path for supported XLSX workbooks. Run
+`omasheets-kit probe FILE.xlsx` to see the admission report, then
+`omasheets-kit open FILE.xlsx` to edit a durable native working copy in the Qt
+grid. Unsupported formulas and package features are refused before conversion;
+the source workbook is preserved. This path has no LibreOffice/UNO runtime
+dependency and remains explicit while broader compatibility is developed.
+
 The native workbook window source is in
 [`native/libreofficekit/`](native/libreofficekit/). It embeds LibreOfficeKit's
 interactive tile engine in OmaSheets-owned GTK chrome with scrolling,

@@ -493,6 +493,7 @@ jobs:
           "$RUNNER_TEMP/native-smoke/bin/omasheets-service" --provenance
           "$RUNNER_TEMP/native-smoke/bin/omasheets-grid" --provenance
           "$RUNNER_TEMP/native-smoke/bin/omasheets-setup" --provenance
+          "$RUNNER_TEMP/native-smoke/bin/omasheets-kit" --provenance
           cargo fmt --manifest-path native/setup/Cargo.toml --check
           cargo clippy --manifest-path native/setup/Cargo.toml --locked -- -D warnings
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -559,7 +560,7 @@ jobs:
           expected = source_identity(plugin)
           receipt = json.loads((app / "provenance.json").read_text())
           assert receipt["source"] == expected
-          for binary in ("omasheets-window", "omasheets-lok-render", "omasheets-service", "omasheets-grid", "omasheets-setup"):
+          for binary in ("omasheets-window", "omasheets-lok-render", "omasheets-service", "omasheets-grid", "omasheets-setup", "omasheets-kit"):
               report = json.loads(subprocess.check_output([app / "bin" / binary, "--provenance"], text=True))
               assert report["source_commit"] == expected["commit"]
               assert report["source_sha256"] == expected["sha256"]

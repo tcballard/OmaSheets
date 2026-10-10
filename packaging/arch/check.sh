@@ -13,6 +13,8 @@ runuser -u builder -- /usr/bin/omasheets migrate-user-install
 test ! -e /home/builder/.local/bin/omasheets
 test ! -e /home/builder/.local/share/omasheets/app
 pacman -Qk omasheets-bin
+test -x /usr/bin/omasheets-kit
+/usr/bin/omasheets-kit --provenance
 desktop-file-validate /usr/share/applications/io.github.tcballard.OmaSheets.desktop
 test ! -e /usr/lib/omasheets/bin/omasheets-setup
 test ! -e /usr/lib/omasheets/bin/omasheets-update
@@ -39,6 +41,7 @@ pacman -U --noconfirm "${upgrades[0]}"
 pacman -Qk omasheets-bin
 pacman -R --noconfirm omasheets-bin
 test ! -e /usr/bin/omasheets
+test ! -e /usr/bin/omasheets-kit
 test ! -e /usr/share/applications/io.github.tcballard.OmaSheets.desktop
 test ! -e /usr/share/mime/packages/io.github.tcballard.OmaSheets.xml
 test ! -e /usr/lib/omasheets

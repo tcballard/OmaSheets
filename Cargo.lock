@@ -1008,6 +1008,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "omasheets-kit"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "omasheets-core",
+ "omasheets-service",
+ "quick-xml 0.41.0",
+ "serde",
+ "serde_json",
+ "sha2",
+ "zip 8.6.0",
+]
+
+[[package]]
 name = "omasheets-service"
 version = "0.0.0"
 dependencies = [

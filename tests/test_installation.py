@@ -83,6 +83,7 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(result["service_launcher"], str(self.paths.service_launcher))
         self.assertTrue(self.paths.launcher.is_file())
         self.assertTrue(self.paths.service_launcher.is_file())
+        self.assertTrue(self.paths.kit_launcher.is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-window").is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-service").is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-grid").is_file())
@@ -104,6 +105,7 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(json.loads(self.paths.codex_marketplace.read_text())["plugins"], [{"name": "keep-me"}])
         self.assertFalse(self.paths.launcher.exists())
         self.assertFalse(self.paths.service_launcher.exists())
+        self.assertFalse(self.paths.kit_launcher.exists())
         self.assertFalse(self.paths.codex_plugin.exists())
         self.assertFalse(self.paths.app.exists())
 
@@ -260,6 +262,36 @@ class InstallationTests(unittest.TestCase):
         identity = source_identity(ROOT)
         self.assertEqual(report["source_commit"], identity["commit"])
         self.assertEqual(report["source_sha256"], identity["sha256"])
+
+        kit_report = json.loads(subprocess.check_output(
+            [paths.kit_launcher, "--provenance"], text=True,
+        ))
+        self.assertEqual(kit_report, report)
+
+    def test_install_upgrades_journal_from_before_native_kit_launcher(self):
+        install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        journal = json.loads(self.paths.journal.read_text())
+        journal.pop("kit_launcher_sha256")
+        self.paths.journal.write_text(json.dumps(journal))
+        self.paths.kit_launcher.unlink()
+
+        result = install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+
+        self.assertTrue(result["changed"])
+        self.assertTrue(self.paths.kit_launcher.is_file())
+
+    def test_install_and_uninstall_preserve_unowned_or_changed_kit_launcher(self):
+        self.paths.kit_launcher.parent.mkdir(parents=True)
+        self.paths.kit_launcher.write_text("existing command")
+        with self.assertRaisesRegex(ConflictError, "unowned installation target"):
+            install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        self.assertEqual(self.paths.kit_launcher.read_text(), "existing command")
+        self.paths.kit_launcher.unlink()
+        install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        self.paths.kit_launcher.write_text("changed command")
+        result = uninstall(self.paths)
+        self.assertTrue(result["conflicts"])
+        self.assertEqual(self.paths.kit_launcher.read_text(), "changed command")
 
     def test_bundle_must_match_the_exact_plugin_source(self):
         wrong = self.bundle.with_name("wrong.tar.gz")
