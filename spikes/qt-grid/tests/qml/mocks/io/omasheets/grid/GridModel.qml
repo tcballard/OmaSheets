@@ -84,6 +84,6 @@ QtObject {
     function openUpdater() {return false;}
     function importDocument(source,output) {}
     function exportDocument(output,format) {}
-    function openCompatibility(url) {}
+    function openExcel(url) {}
     function captureWindow() {return false;}
 }

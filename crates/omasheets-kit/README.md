@@ -6,22 +6,27 @@ model, event store, workbook service and Qt grid. The kit has no LibreOffice or
 UNO runtime dependency. REA is used to investigate the reference boundary and
 record evidence; it is not required to run the replacement.
 
-This is a bounded XLSX/native replacement, not a binary-compatible implementation
-of LibreOfficeKit's general office-document ABI. The existing compatibility
-launcher remains available while wider format and desktop acceptance are pending.
+The development build uses this kit for its default launcher and selected-file
+agent jobs. The LibreOfficeKit and UNO product launchers are removed. Native
+documents and strictly admitted XLSX are supported; wider format and desktop
+acceptance remain release gates. The kit exposes OmaSheets' own API, with no
+implementation of LibreOfficeKit's general office-document ABI.
 
 ## Run
 
-The development native bundle installs an `omasheets-kit` command alongside
-the existing launcher. It must be built from this source revision; a previously
-published v0.0.2 bundle does not contain the kit.
+The development native bundle installs `omasheets-kit` and routes the normal
+`omasheets` launcher through the owned engine. It must be built from this source
+revision; the published v0.0.2 bundle still uses the older compatibility runtime.
 
 ```sh
+omasheets launch budget.xlsx
 omasheets-kit probe budget.xlsx
 omasheets-kit open budget.xlsx
 omasheets-kit open budget.xlsx --working budget.omasheets
 omasheets-kit import budget.xlsx budget.omasheets
 omasheets-kit open budget.omasheets
+omasheets-kit export budget.omasheets copy.xlsx
+omasheets-kit job request.json result.json
 ```
 
 `probe` returns JSON with `can_import`, source SHA-256, reasons and the actual
@@ -65,6 +70,24 @@ the session's export-dirty flag. Edits are durably stored immediately.
 The UI uses the existing service/grid interfaces, including native agent review.
 It does not emulate `.uno` commands, GTK signals or the legacy LOK live-snapshot
 socket. Callers of those interfaces must migrate to native document operations.
+
+## Isolated workbook jobs
+
+`job` reads a bounded JSON request and writes a structured result for describe,
+read, search, trace, query, audit, PDF cell preview or staged edits. The existing
+Python adapter supplies private source copies and the networkless Bubblewrap
+sandbox; parsing, calculation, editing and preview generation run in Rust.
+Selected-file jobs refuse active native WAL state; live native windows use the
+authenticated service instead.
+
+Staging supports cell/range values and formulas, clearing, supported formatting,
+sheet and row/column changes and single-key sorting across the full used row.
+Selected-file fill, chart and pivot operations are explicitly refused. XLSX
+stages export and reopen for preservation checks before a separate human review
+and publication. Each query batch preserves order under one evidence record.
+Trace reports immediate resolved inputs with an explicit depth limit. PDF
+previews disclose cropping and styling limitations; they show at most eight
+sheets, fifty rows and twelve columns per sheet.
 
 ## Admission and limits
 
