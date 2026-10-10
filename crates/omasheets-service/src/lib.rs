@@ -190,6 +190,14 @@ pub enum Request {
         branch: Option<String>,
         output: PathBuf,
     },
+    /// Export through the owned desktop path without flattening formulas.
+    /// Native history/checks remain native-only and are disclosed in the manifest.
+    ExportXlsxStrict {
+        path: PathBuf,
+        #[serde(default)]
+        branch: Option<String>,
+        output: PathBuf,
+    },
     /// Project one native sheet to typed nullable Parquet columns. Mixed
     /// columns are refused rather than silently coerced.
     ExportParquet {
@@ -295,6 +303,7 @@ impl Request {
             | Self::Merge { path, .. }
             | Self::ExportCsv { path, .. }
             | Self::ExportXlsx { path, .. }
+            | Self::ExportXlsxStrict { path, .. }
             | Self::ExportParquet { path, .. }
             | Self::Snapshot { path, .. } => path,
         };
@@ -1114,6 +1123,7 @@ fn start_xlsx_file(
 fn export_xlsx(
     document: &Document,
     output: &Path,
+    strict: bool,
 ) -> Result<(PathBuf, Vec<XlsxExportSheetManifest>, XlsxExportStats), ServiceError> {
     let output = canonical(output)?;
     if output.exists() {
@@ -1166,6 +1176,29 @@ fn export_xlsx(
             "export_too_large",
             format!("XLSX export may cover at most {MAX_XLSX_EXPORT_CELLS} cells"),
         ));
+    }
+
+    if strict {
+        for sheet in &sheets {
+            for row in document.rows(sheet.id).unwrap_or(&[]) {
+                for column in document.columns(sheet.id).unwrap_or(&[]) {
+                    let cell = omasheets_core::CellRef {
+                        sheet: sheet.id,
+                        row: *row,
+                        column: *column,
+                    };
+                    if let Some(CellInput::Formula { formula }) =
+                        document.cell(cell).map(|state| &state.input)
+                        && document.project_formula(cell, formula).is_none()
+                    {
+                        return Err(ServiceError::new(
+                            "unrepresentable_formula",
+                            "A formula's stable references cannot be preserved in XLSX; the copy was not written",
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     let mut styles = vec![omasheets_core::presentation::CellStyle::default()];
@@ -1909,6 +1942,7 @@ impl Service {
     /// append writes nothing, a refused merge replays nothing.
     pub fn handle(&mut self, request: Request) -> Result<Response, ServiceError> {
         let now = (self.clock)();
+        let strict_xlsx = matches!(&request, Request::ExportXlsxStrict { .. });
         match request {
             Request::Create { path, name, actor } => {
                 check_actor(&actor)?;
@@ -2446,12 +2480,17 @@ impl Service {
                 path,
                 branch,
                 output,
+            }
+            | Request::ExportXlsxStrict {
+                path,
+                branch,
+                output,
             } => {
                 let store = self.store(&path)?;
                 let (branch_name, branch) = Self::branch(store, branch.as_deref())?;
                 let document = store.document(branch)?;
                 let document_digest = document.digest();
-                let (output, sheets, stats) = export_xlsx(document, &output)?;
+                let (output, sheets, stats) = export_xlsx(document, &output, strict_xlsx)?;
                 Ok(Response::ExportedXlsx(XlsxExportManifest {
                     format: "xlsx-2007".into(),
                     output,

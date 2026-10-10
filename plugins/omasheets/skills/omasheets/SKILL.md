@@ -25,7 +25,7 @@ surface as MCP. It does not expose workbook publication.
    `evidence_id` returned by each inspection you rely on.
    When several independent describe, range, search, or formula-trace reads are
    known up front, prefer `query_workbook` so they share one exact snapshot and
-   Calc load. Do not put `session_id` inside its subqueries.
+   owned workbook load. Do not put `session_id` inside its subqueries.
    For workbook-wide audit or management-summary requests, run
    `analyze_workbook`; use its bounded table profiles, findings and summary
    opportunities as evidence before reading any supporting ranges.
@@ -48,10 +48,12 @@ Good first workflows are:
 - `summarise`: create a checked summary.
 - `format`: standardise presentation without changing values.
 - `analyse`: audit the whole workbook for structure, quality, formula errors,
-  anomalies, charts, pivots and summary opportunities.
-- `management`: create a reviewable summary sheet using typed pivot, chart,
+  formula errors and bounded summary statistics.
+- `management`: create a reviewable summary sheet using supported value, formula,
   value and formatting operations based on cited audit evidence.
 
 Never ask for or pass an arbitrary local path. Never claim a plan has been
-applied until a local commit receipt is present. `.xlsm` is read-only and `.xls`
-must be converted to a separate `.xlsx` through the local conversion workflow.
+applied until a local commit receipt is present. Only admitted `.xlsx` and native `.omasheets` are supported. XLS, XLSM and ODS
+are refused. Selected-file fill/chart/pivot operations are currently unsupported;
+use only the operations listed by the owned engine capabilities. Live native
+windows use the `native_*` tools and Qt human review, with no LibreOffice backend.

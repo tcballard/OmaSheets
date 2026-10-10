@@ -10,9 +10,63 @@ from unittest.mock import Mock, patch
 from omasheets.cli import main as cli_main
 from omasheets.errors import EngineError, PolicyError
 from omasheets.native_grid import open_grid, status
+from omasheets.bounded_process import BoundedResult
 
 
 class NativeGridTests(unittest.TestCase):
+    def test_refused_xlsx_never_starts_a_window_or_leaves_a_working_copy(self):
+        from omasheets.native_grid import open_workbook
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "workbook.xlsx"
+            source.write_bytes(b"source with unsupported features")
+            refusal = BoundedResult("ok", b'{"ok":false,"error":"Unsupported named ranges"}', 2)
+            with patch.dict(os.environ, {"XDG_DATA_HOME": str(root / "data")}), patch(
+                "omasheets.native_grid.kit_executable", return_value=Path("/kit"),
+            ), patch("omasheets.native_grid.run_bounded", return_value=refusal), patch(
+                "omasheets.native_grid._open_kit",
+            ) as launch, self.assertRaisesRegex(EngineError, "Unsupported named ranges"):
+                open_workbook(source)
+            launch.assert_not_called()
+            self.assertEqual(list((root / "data/omasheets/native-kit").iterdir()), [])
+            self.assertEqual(source.read_bytes(), b"source with unsupported features")
+
+    def test_xlsx_default_launcher_opens_the_durable_native_copy(self):
+        from omasheets.native_grid import open_workbook
+
+        def importer(argv, **_limits):
+            Path(argv[-1]).write_bytes(b"validated native document")
+            return BoundedResult("ok", b'{"ok":true}', 0)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "budget $(touch nope).xlsx"
+            source.write_bytes(b"unchanged source")
+            with patch.dict(os.environ, {"XDG_DATA_HOME": str(root / "data")}), patch(
+                "omasheets.native_grid.kit_executable", return_value=Path("/kit"),
+            ), patch("omasheets.native_grid.run_bounded", side_effect=importer) as admission, patch(
+                "omasheets.native_grid._open_kit", return_value=53,
+            ) as launch:
+                self.assertEqual(open_workbook(source), 53)
+            self.assertEqual(admission.call_args.args[0][:3], ["/kit", "import", str(source)])
+            native = launch.call_args.args[0]
+            self.assertEqual(native.suffix, ".omasheets")
+            self.assertTrue(native.is_file())
+            self.assertEqual(source.read_bytes(), b"unchanged source")
+            self.assertFalse((root / "nope").exists())
+
+    def test_cli_refuses_old_formats_without_a_fallback(self):
+        from contextlib import redirect_stderr
+
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "legacy.ods"
+            source.write_bytes(b"source")
+            with redirect_stderr(StringIO()) as error, patch("omasheets.native_grid._open_kit") as launch:
+                self.assertEqual(cli_main(["launch", str(source)]), 2)
+            self.assertIn("does not support .ods yet", error.getvalue())
+            launch.assert_not_called()
+
     def test_app_launcher_accepts_no_document(self):
         for arguments in ([], ["launch"]):
             with self.subTest(arguments=arguments), patch(
@@ -142,15 +196,12 @@ class NativeGridTests(unittest.TestCase):
                 "omasheets.native_grid.grid_executable", return_value=Path("/usr/bin/omasheets-grid"),
             ), patch(
                 "omasheets.native_grid.service_executable", return_value=Path("/usr/bin/omasheets-service"),
-            ), patch(
+            ), patch("omasheets.native_grid.kit_executable", return_value=Path("/usr/bin/omasheets-kit")), patch(
                 "omasheets.native_grid.subprocess.Popen", return_value=grid_process,
             ) as popen:
                 self.assertEqual(open_grid(document), 91)
-            self.assertEqual(popen.call_args.args[0][1:4], [
-                "-m", "omasheets.native_grid", "--host",
-            ])
-            self.assertEqual(popen.call_args.args[0][4], str(document.resolve()))
-            self.assertEqual(popen.call_args.kwargs["env"]["OMASHEETS_DOCUMENT"], str(document.resolve()))
+            self.assertEqual(popen.call_args.args[0], ["/usr/bin/omasheets-kit", "open", str(document.resolve())])
+            self.assertNotIn("OMASHEETS_DOCUMENT", popen.call_args.kwargs["env"])
             self.assertEqual(popen.call_args.kwargs["env"]["OMASHEETS_GRID"], "/usr/bin/omasheets-grid")
             self.assertEqual(
                 popen.call_args.kwargs["env"]["OMASHEETS_NATIVE_SERVICE"],
@@ -170,11 +221,11 @@ class NativeGridTests(unittest.TestCase):
     def test_cli_routes_native_documents_to_the_grid(self):
         output = StringIO()
         with patch(
-            "omasheets.native_grid.open_grid", return_value=93,
+            "omasheets.native_grid.open_workbook", return_value=93,
         ) as launch, redirect_stdout(output):
             self.assertEqual(cli_main(["launch", "book.omasheets"]), 0)
         launch.assert_called_once_with(Path("book.omasheets"))
-        self.assertEqual(output.getvalue(), '{"pid": 93, "window": "native-grid"}\n')
+        self.assertEqual(output.getvalue(), '{"engine": "omasheets-kit", "pid": 93, "window": "native-grid"}\n')
 
     def test_launcher_defers_runtime_validation_to_the_supervisor(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -184,7 +235,7 @@ class NativeGridTests(unittest.TestCase):
                 "omasheets.native_grid.grid_executable", return_value=Path("/usr/bin/omasheets-grid"),
             ), patch(
                 "omasheets.native_grid.service_executable", return_value=Path("/usr/bin/omasheets-service"),
-            ), patch(
+            ), patch("omasheets.native_grid.kit_executable", return_value=Path("/usr/bin/omasheets-kit")), patch(
                 "omasheets.native_grid.subprocess.Popen", return_value=Mock(pid=92),
             ):
                 pid = open_grid(document)
@@ -279,8 +330,8 @@ class NativeGridTests(unittest.TestCase):
             document.write_bytes(b"native")
             with patch(
                 "omasheets.native_grid.grid_executable", return_value=Path("/usr/bin/omasheets-grid"),
-            ), patch("omasheets.native_grid.service_executable", return_value=None), self.assertRaisesRegex(
-                EngineError, "omasheets-service",
+            ), patch("omasheets.native_grid.service_executable", return_value=None), patch("omasheets.native_grid.kit_executable", return_value=Path("/usr/bin/omasheets-kit")), self.assertRaisesRegex(
+                EngineError, "document service",
             ):
                 open_grid(document)
 

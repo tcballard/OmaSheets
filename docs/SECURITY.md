@@ -15,17 +15,20 @@ is not cryptographically isolated from OmaSheets state.
 - Agents may not supply raw paths, choose replacement mode, approve, commit,
   reject, or undo.
 - Local CLI and panel review may approve, reject, commit, and undo.
-- `.xlsm` is read-only; `.xls` can only produce a separate `.xlsx`.
+- Only native `.omasheets` and admitted `.xlsx` are supported. XLS, XLSM and ODS
+  are refused. Unsupported XLSX source features are refused before conversion.
 
 ## Installation and dependency authority
 
 The Omarchy plugin manager clones, validates and enables the repository but
 runs no OmaSheets hooks. The bar widget invokes only fixed argv rooted at the
 validated plugin source directory. Bootstrap never runs `sudo` or a package
-manager; missing LibreOffice, GTK3, Python UNO and Bubblewrap runtime components
+manager; missing Qt, GTK3 Setup, Python bootstrap/MCP or Bubblewrap components
 are reported with an explicit `omarchy pkg add` command for the user to approve.
-Compilers, CMake, `pkgconf`, and LibreOffice development headers remain confined
-to release CI and are not user dependencies.
+Compilers and Qt development tools remain confined to build CI. LibreOffice
+is used only by a separate REA reference investigation job. The product bundle
+and Arch package contain no LibreOfficeKit window, renderer or UNO worker.
+The bundle builder and Arch lifecycle check reject LibreOffice/UNO linkage.
 
 Product files are user-local. The installer refuses pre-existing unowned target
 paths, rewrites the installed Codex MCP command to an absolute owned launcher,
@@ -76,11 +79,11 @@ Production jobs require Bubblewrap and run with:
 - a new user, PID, IPC, UTS, cgroup, and network namespace;
 - a minimal read-only runtime filesystem;
 - read-only loader paths or equivalent merged-`/usr` compatibility symlinks;
-- read-only NSS identity, machine identity, timezone and fontconfig runtime
-  files required for headless LibreOffice bootstrap;
-- a private writable job directory and fresh Calc profile;
+- read-only NSS identity and timezone runtime files;
+- a private writable job directory and the read-only owned Rust kit binary;
 - no inherited home, SSH agent, cloud credentials, or arbitrary environment;
-- macro execution and automatic link/update behavior disabled;
+- strict source admission that refuses macros, external links and unsupported
+  content rather than depending on another office engine;
 - formula writes that request network-capable functions, URLs or external
   workbook references rejected before staging;
 - bounded time, output size, sheet count, cell count, and formula count.
@@ -112,9 +115,12 @@ closed. A clearly labelled development override may exist for tests only.
 
 ## Known limitations
 
-- LibreOffice and Excel can differ in formulas, layout, names, charts, external
-  links, pivot behavior, and unsupported features.
-- Full-workbook PDF preview is evidence, not a complete semantic proof.
+- OmaSheets supports a bounded subset of Excel semantics and source features.
+  Unsupported source content is refused. Native XLSX export discloses native-only
+  history/checks/metadata and refuses formulas whose stable references cannot
+  be represented faithfully.
+- Owned PDF previews show at most eight sheets, fifty rows and twelve columns
+  per sheet, disclose cropping and are not print-layout equivalence evidence.
 - Literal search is case-insensitive; it is not a query language.
 - Formula tracing is bounded and cannot resolve every dynamic reference.
 - No custom verification scripts run inside the sandbox.
@@ -124,7 +130,7 @@ closed. A clearly labelled development override may exist for tests only.
   fixed prompt to `omarchy agent prompt`, so Omarchy—not OmaSheets—selects the
   configured default agent. The prompt contains no workbook path or cell
   content; the selected agent still has the authority of the local user account
-  and is outside Calc's networkless worker sandbox.
+  and is outside the Rust workbook job's networkless sandbox.
 - The provider-neutral `agent-session` command bridge validates calls against
   the same allowlisted schemas as MCP. It exposes no approval, commit, replace,
   copy-publication or undo operation.

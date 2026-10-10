@@ -13,7 +13,7 @@ from omasheets import __version__
 from omasheets.errors import ConflictError
 from omasheets.installation import (
     ARCH_PACKAGES, InstallPaths, PLUGIN_ENTRY, dependency_report, install,
-    source_identity, uninstall,
+    source_identity, uninstall, _tree_sha,
 )
 from omasheets.integration import DESKTOP_ID, IntegrationPaths
 from omasheets.native_bundle import NATIVE_EXECUTABLES, normalized_architecture, platform_id
@@ -83,7 +83,10 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(result["service_launcher"], str(self.paths.service_launcher))
         self.assertTrue(self.paths.launcher.is_file())
         self.assertTrue(self.paths.service_launcher.is_file())
-        self.assertTrue((self.paths.app / "bin/omasheets-window").is_file())
+        self.assertTrue(self.paths.kit_launcher.is_file())
+        self.assertTrue((self.paths.app / "bin/omasheets-kit").is_file())
+        self.assertFalse((self.paths.app / "bin/omasheets-window").exists())
+        self.assertFalse((self.paths.app / "bin/omasheets-lok-render").exists())
         self.assertTrue((self.paths.app / "bin/omasheets-service").is_file())
         self.assertTrue((self.paths.app / "bin/omasheets-grid").is_file())
         self.assertEqual((self.paths.app / "bin/omasheets-update").read_bytes(), (ROOT / "bin/omasheets-install").read_bytes())
@@ -104,6 +107,7 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(json.loads(self.paths.codex_marketplace.read_text())["plugins"], [{"name": "keep-me"}])
         self.assertFalse(self.paths.launcher.exists())
         self.assertFalse(self.paths.service_launcher.exists())
+        self.assertFalse(self.paths.kit_launcher.exists())
         self.assertFalse(self.paths.codex_plugin.exists())
         self.assertFalse(self.paths.app.exists())
 
@@ -157,6 +161,32 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual((self.paths.app / "provenance.json").read_bytes(), provenance)
         self.assertFalse(install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)["changed"])
 
+    def test_update_retires_owned_office_binaries_and_preserves_workbooks(self):
+        previous_source = {**source_identity(ROOT), "commit": "0" * 40}
+        self.make_bundle(self.bundle, source=previous_source)
+        with patch("omasheets.installation.source_identity", return_value=previous_source):
+            install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        # Represent an intact installation from the older compatibility bundle.
+        for executable in ("omasheets-window", "omasheets-lok-render"):
+            (self.paths.app / "bin" / executable).write_bytes(b"previous owned office binary")
+        journal = json.loads(self.paths.journal.read_text())
+        journal["app_sha256"] = _tree_sha(self.paths.app)
+        self.paths.journal.write_text(json.dumps(journal))
+        workbook = self.paths.app.parent / "keep.omasheets"
+        workbook.write_bytes(b"user document")
+        self.make_bundle(self.bundle)
+
+        result = install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+
+        self.assertTrue(result["updated"])
+        for executable in NATIVE_EXECUTABLES:
+            self.assertTrue((self.paths.app / "bin" / executable).is_file())
+        for executable in ("omasheets-window", "omasheets-lok-render"):
+            self.assertFalse((self.paths.app / "bin" / executable).exists())
+        self.assertEqual(workbook.read_bytes(), b"user document")
+        self.assertEqual(uninstall(self.paths)["conflicts"], [])
+        self.assertEqual(workbook.read_bytes(), b"user document")
+
     def test_invalid_upgrade_bundle_leaves_current_app_untouched(self):
         install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
         journal = self.paths.journal.read_bytes()
@@ -178,18 +208,17 @@ class InstallationTests(unittest.TestCase):
 
     def test_user_dependencies_are_runtime_only(self):
         self.assertEqual(ARCH_PACKAGES, (
-            "gtk3", "libreoffice-fresh", "bubblewrap",
+            "python", "gtk3", "bubblewrap",
             "qt6-base", "qt6-declarative", "qt6-wayland",
         ))
         for build_tool in ("gcc", "make", "cmake", "pkgconf", "libreoffice-fresh-sdk"):
             self.assertNotIn(build_tool, ARCH_PACKAGES)
 
-    @patch("omasheets.installation._python_uno", return_value="importable")
     @patch("omasheets.installation._first_existing")
-    def test_current_arch_qt_wayland_plugin_is_recognized(self, first_existing, _uno):
+    @patch("omasheets.installation.subprocess.run")
+    def test_owned_runtime_is_ready_without_libreoffice_or_uno(self, run, first_existing):
         present = {
-            "/usr/lib/libgtk-3.so", "/usr/bin/soffice",
-            "/usr/lib/libreofficekitgtk.so", "/usr/bin/bwrap",
+            "/usr/lib/libgtk-3.so", "/usr/bin/bwrap",
             "/usr/lib/libQt6Quick.so", "/usr/lib/qt6/plugins/platforms/libqwayland.so",
             "/usr/bin/python",
         }
@@ -197,9 +226,22 @@ class InstallationTests(unittest.TestCase):
             (value for value in values if value in present), None,
         )
         report = dependency_report()
+        self.assertTrue(report["ready"])
+        self.assertFalse(any("LibreOffice" in check["name"] or "UNO" in check["name"] for check in report["checks"]))
+        self.assertNotIn("libreoffice", report["install_command"])
+        run.assert_not_called()
         wayland = next(check for check in report["checks"] if check["name"] == "Qt Wayland")
         self.assertTrue(wayland["ok"])
         self.assertEqual(wayland["detail"], "/usr/lib/qt6/plugins/platforms/libqwayland.so")
+
+    @patch("omasheets.installation._first_existing")
+    def test_package_runtime_does_not_require_the_omitted_gtk_setup(self, first_existing):
+        first_existing.side_effect = lambda *values: None if any("gtk" in value for value in values) else values[0]
+        self.assertFalse(dependency_report()["ready"])
+        report = dependency_report(include_setup=False)
+        self.assertTrue(report["ready"])
+        self.assertNotIn("GTK3", [check["name"] for check in report["checks"]])
+        self.assertNotIn("gtk3", report["install_command"])
 
     def test_uninstall_preserves_a_modified_owned_file(self):
         install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
@@ -260,6 +302,36 @@ class InstallationTests(unittest.TestCase):
         identity = source_identity(ROOT)
         self.assertEqual(report["source_commit"], identity["commit"])
         self.assertEqual(report["source_sha256"], identity["sha256"])
+
+        kit_report = json.loads(subprocess.check_output(
+            [paths.kit_launcher, "--provenance"], text=True,
+        ))
+        self.assertEqual(kit_report, report)
+
+    def test_install_upgrades_journal_from_before_native_kit_launcher(self):
+        install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        journal = json.loads(self.paths.journal.read_text())
+        journal.pop("kit_launcher_sha256")
+        self.paths.journal.write_text(json.dumps(journal))
+        self.paths.kit_launcher.unlink()
+
+        result = install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+
+        self.assertTrue(result["changed"])
+        self.assertTrue(self.paths.kit_launcher.is_file())
+
+    def test_install_and_uninstall_preserve_unowned_or_changed_kit_launcher(self):
+        self.paths.kit_launcher.parent.mkdir(parents=True)
+        self.paths.kit_launcher.write_text("existing command")
+        with self.assertRaisesRegex(ConflictError, "unowned installation target"):
+            install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        self.assertEqual(self.paths.kit_launcher.read_text(), "existing command")
+        self.paths.kit_launcher.unlink()
+        install(ROOT, self.paths, check_dependencies=False, bundle_path=self.bundle)
+        self.paths.kit_launcher.write_text("changed command")
+        result = uninstall(self.paths)
+        self.assertTrue(result["conflicts"])
+        self.assertEqual(self.paths.kit_launcher.read_text(), "changed command")
 
     def test_bundle_must_match_the_exact_plugin_source(self):
         wrong = self.bundle.with_name("wrong.tar.gz")

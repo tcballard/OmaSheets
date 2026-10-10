@@ -15,8 +15,8 @@ AGENT_SESSION_PROMPT = (
     "`omasheets agent-session call` bridge. Use query_workbook when several independent "
     "bounded reads can share one snapshot. Inspect the evidence you need, clarify material "
     "ambiguity, and propose a verified plan. For workbook-wide analysis or a management "
-    "summary, run analyze_workbook first, cite its findings, and use typed chart and pivot "
-    "operations where useful. Never publish workbook bytes."
+    "summary, run analyze_workbook first, cite its findings, and use supported typed "
+    "operations. Native windows use native_* tools and human review. Never publish workbook bytes."
 )
 
 

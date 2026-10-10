@@ -35,6 +35,15 @@ writes the archive with fixed member order, ownership, permissions and
 timestamps and a nameless, zero-mtime gzip header. Two builds of identical
 executables therefore produce byte-identical archives with one SHA-256.
 
+The product bundle contains exactly `omasheets-kit`, `omasheets-service`,
+`omasheets-grid` and `omasheets-setup`. The first three provide the owned Rust
+spreadsheet engine and Qt interface; Setup uses GTK. The build verifies that
+each executable is ELF, all its runtime libraries resolve, and no LibreOffice
+or UNO library is linked. Installers reject bundles containing the old window
+or LOK renderer. LibreOffice headers and binaries are available only to the
+separate REA reference investigation job and are absent from product builds,
+dependencies and runtime checks.
+
 The workflow holds no signing secret. `scripts/check_release.py` fails the
 release gate if any of these pins is missing or if `secrets.` appears in the
 workflow.

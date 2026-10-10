@@ -17,8 +17,7 @@ from . import __version__
 from .diff_overlay import decode_overlay, overlay_path, publish_overlay
 from .errors import ConflictError, EngineError
 from .identity import FileIdentity, identify_regular_file
-from .live_bridge import request_live_snapshot
-from .operations import SUPPORTED_OPERATIONS, destructive_operations, validate_operations
+from .operations import destructive_operations, validate_operations
 from .paths import AppPaths
 from .policy import Actor, require_agent_readable, require_stageable, workbook_format
 from .store import read_json, write_json_atomic
@@ -37,7 +36,6 @@ class Engine(Protocol):
     def analyze(self, source: Path, **arguments: Any) -> dict[str, Any]: ...
     def render(self, source: Path, *, output: Path) -> dict[str, Any]: ...
     def stage(self, source: Path, operations: list[dict[str, Any]], *, output: Path, preview: Path) -> dict[str, Any]: ...
-    def convert_legacy(self, source: Path, *, destination: Path | None = None, preview: Path) -> dict[str, Any]: ...
 
 
 def _now() -> str:
@@ -128,33 +126,39 @@ class OmaSheetsService:
             "product": "OmaSheets",
             "version": __version__,
             "product_model": "native_omarchy_shell_with_replaceable_document_engine",
-            "libreoffice_fork": False,
             "document_engine": {
-                "name": "LibreOffice Calc",
-                "adapter": "isolated_uno_worker",
-                "interactive_adapter": "libreofficekitgtk",
+                "name": "OmaSheets",
+                "adapter": "isolated_rust_kit",
+                "interactive_adapter": "owned_document_service_qt_grid",
                 "network_access": False,
                 "macro_execution": False,
             },
             "live_window_context": {
                 "resource": "omasheets://window",
                 "agent_control": False,
-                "selection_and_viewport_visible": True,
+                "selection_visible": True,
+                "viewport_visible": False,
             },
-            "live_document_bridge": {
+            "live_document_access": {
                 "transport": "private_same_user_unix_socket",
-                "source": "libreofficekit_save_copy",
-                "unsaved_state_visible": True,
-                "agent_mutates_open_document": False,
+                "source": "owned_native_document_service",
+                "committed_edits_visible": True,
+                "pending_editor_text_visible": False,
+                "tools": "native_*",
+                "agent_mutates_document_without_review": False,
             },
-            "agent_diff_overlay": {
+            "native_review": {
                 "native": True,
                 "verified_before_after_values": True,
                 "cited_audit_findings": True,
                 "maximum_visible_changes": 200,
                 "mutates_open_document": False,
+                "selected_file_review": "local_cli",
             },
-            "agent_operations": list(SUPPORTED_OPERATIONS),
+            "agent_operations": ["set_value", "set_formula", "set_range_values", "set_range_formulas", "clear_range", "format_cells", "add_sheet", "delete_sheet", "rename_sheet", "insert_rows", "delete_rows", "insert_columns", "delete_columns", "sort_range"],
+            "formats": ["omasheets", "xlsx"],
+            "unsupported_formats": ["xls", "xlsm", "ods"],
+            "unsupported_source_features": "Refused before import; never silently converted to cached values",
             "agent_publish_authority": False,
             "local_review_required": True,
         }
@@ -170,23 +174,14 @@ class OmaSheetsService:
                 "agent_publish_authority": False,
             }
         window = self.window_context_resource()
-        focus = None
-        if window.get("active"):
-            focus = {
-                "sheet_index": window["sheet"],
-                "address": window["address"],
-                "formula": window["formula"],
-                "visible": window["visible"],
-                "dirty": window["dirty"],
-                "live_document_bridge": window["live_document_bridge"],
-            }
+        focus = window.get("selection") if window.get("active") else None
         return {
             "ready": True,
             "workbook": current,
             "focus": focus,
             "suggested_workflows": [
                 {"id": "analyse", "label": "Audit the whole workbook"},
-                {"id": "management", "label": "Build a management summary with pivots and charts"},
+                {"id": "management", "label": "Build a checked management summary"},
                 {"id": "explain", "label": "Explain this selection or formula"},
                 {"id": "clean", "label": "Clean and standardise a data range"},
                 {"id": "variance", "label": "Build or explain a variance analysis"},
@@ -204,81 +199,20 @@ class OmaSheetsService:
             },
         }
 
-    @property
-    def window_context_path(self) -> Path:
-        return self.paths.runtime / "window-context.json"
-
-    def prepare_window_context(self, session_id: str) -> Path:
-        """Create the private, path-free handoff consumed by the native window."""
-
-        session = self._session(session_id)
-        overlay_path(self.paths.runtime).unlink(missing_ok=True)
-        write_json_atomic(self.window_context_path, {
-            "version": 1,
-            "active": False,
-            "session_id": session_id,
-            "revision": session["revision"],
-            "sheet": 0,
-            "address": "",
-            "formula": "",
-            "live_document_bridge": False,
-            "zoom": 1.0,
-            "dirty": False,
-            "visible": {"x": 0, "y": 0, "width": 0, "height": 0},
-            "updated_at_ms": 0,
-        })
-        return self.window_context_path
-
     def window_context_resource(self) -> dict[str, Any]:
-        """Return bounded live UI context without granting UI or write control."""
+        """Read the path-free selection published by the owned Qt grid."""
 
-        current = self.current_resource()
-        if not current.get("selected"):
-            return {"active": False, "selected": False}
-        if not self.window_context_path.exists():
-            return {"active": False, "selected": True, "session_id": current["session_id"]}
-        try:
-            context = read_json(self.window_context_path)
-            if context.get("session_id") != current["session_id"] or context.get("version") != 1:
-                raise ValueError("stale context")
-            visible = context.get("visible")
-            if not isinstance(visible, dict) or set(visible) != {"x", "y", "width", "height"}:
-                raise ValueError("invalid visible area")
-            if not all(isinstance(visible[name], int) and 0 <= visible[name] <= 2_147_483_647 for name in visible):
-                raise ValueError("invalid visible coordinate")
-            address = context.get("address")
-            formula = context.get("formula")
-            if not isinstance(address, str) or len(address) > 64 or not isinstance(formula, str) or len(formula) > 8192:
-                raise ValueError("invalid selection")
-            sheet = context.get("sheet")
-            zoom = context.get("zoom")
-            updated_at_ms = context.get("updated_at_ms")
-            live_document_bridge = context.get("live_document_bridge", False)
-            if not isinstance(sheet, int) or isinstance(sheet, bool) or not 0 <= sheet <= 1024:
-                raise ValueError("invalid sheet")
-            if not isinstance(zoom, (int, float)) or isinstance(zoom, bool) or not 0.25 <= zoom <= 5.0:
-                raise ValueError("invalid zoom")
-            if not isinstance(updated_at_ms, int) or isinstance(updated_at_ms, bool) or updated_at_ms < 0:
-                raise ValueError("invalid timestamp")
-            if not isinstance(live_document_bridge, bool):
-                raise ValueError("invalid bridge status")
-            return {
-                "active": context.get("active") is True,
-                "selected": True,
-                "session_id": current["session_id"],
-                "revision": current["revision"],
-                "sheet": sheet,
-                "address": address,
-                "formula": formula,
-                "zoom": float(zoom),
-                "dirty": context.get("dirty") is True,
-                "visible": visible,
-                "updated_at_ms": updated_at_ms,
-                "agent_control": False,
-                "live_document_bridge": live_document_bridge,
-            }
-        except (OSError, ValueError, TypeError):
-            return {"active": False, "selected": True, "session_id": current["session_id"], "unavailable": True}
+        from .native_agent import context
+
+        selected = context()
+        if selected is None:
+            return {"active": False, "selected": self.current_resource().get("selected", False)}
+        return {
+            "active": True, "selected": True,
+            "session_id": selected["session_id"],
+            "selection": selected["selection"],
+            "source": "owned_native_document_service", "agent_control": False,
+        }
 
     def pending_resource(self) -> dict[str, Any]:
         if not self.current_path.exists():
@@ -338,25 +272,8 @@ class OmaSheetsService:
 
     @contextmanager
     def _agent_source(self, session: dict[str, Any]):
-        """Yield the exact live or on-disk bytes agents are allowed to inspect."""
+        """Yield the selected file; live native windows use the native_* tools."""
 
-        window = self.window_context_resource()
-        if window.get("active") and window.get("session_id") == session["session_id"]:
-            if not window.get("live_document_bridge"):
-                raise EngineError("native window is active but its live document bridge is unavailable")
-            # A fresh save-copy is deliberate. `updated_at_ms` also changes for
-            # selection/viewport updates and `dirty` remains true across many
-            # edits, so neither is a trustworthy document generation for safe
-            # snapshot reuse. The bridge must expose an edit generation before
-            # live-unsaved snapshots can be cached without stale agent reads.
-            snapshot = request_live_snapshot(
-                self.paths, session["session_id"], Path(session["source"]).suffix,
-            )
-            try:
-                yield snapshot.path, {"kind": "live_window", "sha256": snapshot.semantic_sha256}
-            finally:
-                snapshot.path.unlink(missing_ok=True)
-            return
         yield Path(session["source"]), {
             "kind": "selected_file",
             "sha256": session["source_identity"]["sha256"],
@@ -369,37 +286,6 @@ class OmaSheetsService:
         with self._agent_source(session) as (_, current):
             if current != base:
                 raise ConflictError("workbook state changed after the agent plan was verified")
-
-    def convert_legacy_local(self, source: Path) -> dict[str, Any]:
-        """Convert an explicitly chosen `.xls` to an adjacent, new `.xlsx`."""
-
-        from .policy import conversion_destination
-
-        resolved = source.expanduser().resolve(strict=True)
-        source_identity = identify_regular_file(resolved)
-        destination = conversion_destination(resolved)
-        receipt_id = secrets.token_hex(16)
-        preview = self.paths.cache / "conversions" / f"{receipt_id}.pdf"
-        preview.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        result = self.engine.convert_legacy(resolved, destination=destination, preview=preview)
-        destination_identity = identify_regular_file(destination)
-        preview_identity = identify_regular_file(preview)
-        receipt = self.publisher.receipts.record({
-            "receipt_id": receipt_id,
-            "kind": "conversion",
-            "source": str(resolved),
-            "source_sha256": source_identity.sha256,
-            "target": str(destination),
-            "result_sha256": destination_identity.sha256,
-            "preview": str(preview),
-            "preview_sha256": preview_identity.sha256,
-            "manual_review_required": True,
-            "excel_equivalence_claimed": False,
-            "engine": result.get("engine", {}),
-            "comparison": result.get("comparison", {}),
-            "warnings": result.get("warnings", []),
-        })
-        return receipt
 
     def describe_workbook(self, session_id: str, include_formulas: bool = False) -> dict[str, Any]:
         session = self._session(session_id)
@@ -799,30 +685,6 @@ class OmaSheetsService:
             self._save_plan(plan)
             overlay_path(self.paths.runtime).unlink(missing_ok=True)
             return receipt
-
-    def commit_native_overlay(self, plan_id: str, expected_revision: int, destination: Path) -> dict[str, Any]:
-        """Publish only when the active native window presents this exact plan."""
-
-        window = self.window_context_resource()
-        path = overlay_path(self.paths.runtime)
-        try:
-            details = path.stat()
-            if details.st_uid != os.getuid() or details.st_mode & 0o077 or details.st_size > 256 * 1024:
-                raise ValueError("unsafe overlay file")
-            overlay = decode_overlay(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, ValueError) as exc:
-            raise ConflictError("native review overlay is unavailable") from exc
-        if (
-            not window.get("active")
-            or window.get("session_id") != overlay["session_id"]
-            or overlay["plan_id"] != plan_id
-            or overlay["revision"] != expected_revision
-        ):
-            raise ConflictError("native review overlay is stale")
-        review = self.prepare_local_review(
-            plan_id, expected_revision, mode="copy", destination=destination,
-        )
-        return self.commit_local_review(plan_id, expected_revision, review["approval_token"])
 
     def undo_receipt(self, receipt_id: str, token: str) -> dict[str, Any]:
         """Local-only undo entry point; never exposed through AgentService."""

@@ -1,0 +1,242 @@
+{
+  "evidence_id": "ev_2d05db8f2cccf23feb665eb1b4f550386f85dd4301f87e1fac1394bcc05f9d6c",
+  "subject": {
+    "name": "libsofficeapp.so",
+    "digest": {
+      "sha256": "1a26a77a054c57e2fef3db9b22d16a328563fe0e37f8d2127d57bb1513a540e5"
+    },
+    "format": "elf",
+    "architecture": null,
+    "local_path": "/opt/codex/runtimes/codex-primary-runtime/dependencies/native/libreoffice-headless/libreoffice/program/libsofficeapp.so"
+  },
+  "provider": {
+    "id": "rea-artifact-graph",
+    "name": "REA safe artifact graph provider",
+    "version": "1"
+  },
+  "analysis_profile": null,
+  "predicate_type": "rea.analysis",
+  "operation": "inspect_artifact",
+  "parameters": {
+    "integrity_policy": "fail"
+  },
+  "raw_result": null,
+  "normalized_result": {
+    "inspection_id": "ai_7d889d5f6607f158580c58beb4ce7fbe07151a7cb661418c3e1545d5b1bffb85",
+    "subject": {
+      "manifest_id": "agm_62cc084081ca81f8ca26f6e2520c010b9fc811c3679eac331c780d09fec08b2f",
+      "root_artifact_id": "art_638438d258f9a17a94123c9f24319dd89e79b2454ac3858f220d7a08fc90ba43",
+      "root_sha256": "1a26a77a054c57e2fef3db9b22d16a328563fe0e37f8d2127d57bb1513a540e5",
+      "root_format": "elf"
+    },
+    "substeps": [
+      {
+        "substep_id": "ais_3347716838cfd88825773c1f7d0f2904adf30279f8802b79a379f7a90b5d7f14",
+        "operation": "inventory_artifact",
+        "status": "completed",
+        "evidence_id": "ev_6fd36b80fd2dffeb99497229402c30fe139923c1dc6f229c43e76d2bbb04aee6",
+        "evidence": {
+          "evidence_id": "ev_6fd36b80fd2dffeb99497229402c30fe139923c1dc6f229c43e76d2bbb04aee6",
+          "subject": {
+            "name": "libsofficeapp.so",
+            "digest": {
+              "sha256": "1a26a77a054c57e2fef3db9b22d16a328563fe0e37f8d2127d57bb1513a540e5"
+            },
+            "format": "elf",
+            "architecture": null,
+            "local_path": "/opt/codex/runtimes/codex-primary-runtime/dependencies/native/libreoffice-headless/libreoffice/program/libsofficeapp.so"
+          },
+          "provider": {
+            "id": "rea-artifact-graph",
+            "name": "REA safe artifact graph provider",
+            "version": "1"
+          },
+          "analysis_profile": null,
+          "predicate_type": "rea.analysis",
+          "operation": "inventory_artifact",
+          "parameters": {
+            "integrity_policy": "fail"
+          },
+          "raw_result": null,
+          "normalized_result": {
+            "manifest": {
+              "manifest_id": "agm_62cc084081ca81f8ca26f6e2520c010b9fc811c3679eac331c780d09fec08b2f",
+              "root_artifact_id": "art_638438d258f9a17a94123c9f24319dd89e79b2454ac3858f220d7a08fc90ba43",
+              "root_sha256": "1a26a77a054c57e2fef3db9b22d16a328563fe0e37f8d2127d57bb1513a540e5",
+              "root_format": "elf",
+              "graph_sha256": "12fad3c201ef26a8a8cca886ae7c113224f729ea3e2e563805d1a82423caec83",
+              "node_count": 1,
+              "occurrence_count": 1,
+              "edge_count": 0
+            },
+            "nodes": [
+              {
+                "artifact_id": "art_638438d258f9a17a94123c9f24319dd89e79b2454ac3858f220d7a08fc90ba43",
+                "format": "elf",
+                "sha256": "1a26a77a054c57e2fef3db9b22d16a328563fe0e37f8d2127d57bb1513a540e5",
+                "size": 1528376,
+                "media_type": null,
+                "architecture": null,
+                "content_state": "materialized",
+                "limitations": []
+              }
+            ],
+            "occurrences": [
+              {
+                "occurrence_id": "occ_bc713e8798b2a18538b1ef48567168c23254d8645677a55f4f14a8bac3fa6816",
+                "artifact_id": "art_638438d258f9a17a94123c9f24319dd89e79b2454ac3858f220d7a08fc90ba43",
+                "parent_occurrence_id": null,
+                "logical_path": ".",
+                "entry_kind": "file",
+                "artifact_kind": "dynamic-library",
+                "artifact_format": "elf",
+                "declared_size": 1528376,
+                "compressed_size": null,
+                "executable": true,
+                "encrypted": false,
+                "hash_status": "verified",
+                "source_location": null,
+                "limitations": []
+              }
+            ],
+            "edges": [],
+            "provenance": [],
+            "integrity_contradictions": [],
+            "limitations": [
+              "Artifact has no child container entries."
+            ]
+          },
+          "confidence": "observed",
+          "authority": "shipped-artifact",
+          "environment": null,
+          "limitations": [
+            "Artifact has no child container entries."
+          ],
+          "locations": [
+            {
+              "kind": "artifact-path",
+              "path": "."
+            }
+          ],
+          "evidence_links": []
+        }
+      }
+    ],
+    "observations": [
+      {
+        "observation_id": "aio_dbc49b17424ff2af54fe73c020836aea42c7b40a50d4325f475104520efde420",
+        "kind": "root-manifest",
+        "subject": "art_638438d258f9a17a94123c9f24319dd89e79b2454ac3858f220d7a08fc90ba43",
+        "value": {
+          "manifest_id": "agm_62cc084081ca81f8ca26f6e2520c010b9fc811c3679eac331c780d09fec08b2f",
+          "root_artifact_id": "art_638438d258f9a17a94123c9f24319dd89e79b2454ac3858f220d7a08fc90ba43",
+          "root_sha256": "1a26a77a054c57e2fef3db9b22d16a328563fe0e37f8d2127d57bb1513a540e5",
+          "root_format": "elf",
+          "graph_sha256": "12fad3c201ef26a8a8cca886ae7c113224f729ea3e2e563805d1a82423caec83",
+          "node_count": 1,
+          "occurrence_count": 1,
+          "edge_count": 0
+        },
+        "evidence_id": "ev_6fd36b80fd2dffeb99497229402c30fe139923c1dc6f229c43e76d2bbb04aee6"
+      },
+      {
+        "observation_id": "aio_a0b83d20681de11560ed2a8a4bfbfc635a0d034cf1fd24b0bef33a0205a327d9",
+        "kind": "artifact",
+        "subject": "art_638438d258f9a17a94123c9f24319dd89e79b2454ac3858f220d7a08fc90ba43",
+        "value": {
+          "artifact_id": "art_638438d258f9a17a94123c9f24319dd89e79b2454ac3858f220d7a08fc90ba43",
+          "format": "elf",
+          "sha256": "1a26a77a054c57e2fef3db9b22d16a328563fe0e37f8d2127d57bb1513a540e5",
+          "size": 1528376,
+          "media_type": null,
+          "architecture": null,
+          "content_state": "materialized",
+          "limitations": []
+        },
+        "evidence_id": "ev_6fd36b80fd2dffeb99497229402c30fe139923c1dc6f229c43e76d2bbb04aee6"
+      },
+      {
+        "observation_id": "aio_8d0f95c9284b7b07567df8c951d3bfe3dda01fdca2f8cd5f0ecb857ec7ecd727",
+        "kind": "occurrence",
+        "subject": "occ_bc713e8798b2a18538b1ef48567168c23254d8645677a55f4f14a8bac3fa6816",
+        "value": {
+          "occurrence_id": "occ_bc713e8798b2a18538b1ef48567168c23254d8645677a55f4f14a8bac3fa6816",
+          "artifact_id": "art_638438d258f9a17a94123c9f24319dd89e79b2454ac3858f220d7a08fc90ba43",
+          "parent_occurrence_id": null,
+          "logical_path": ".",
+          "entry_kind": "file",
+          "artifact_kind": "dynamic-library",
+          "artifact_format": "elf",
+          "declared_size": 1528376,
+          "compressed_size": null,
+          "executable": true,
+          "encrypted": false,
+          "hash_status": "verified",
+          "source_location": null,
+          "limitations": []
+        },
+        "evidence_id": "ev_6fd36b80fd2dffeb99497229402c30fe139923c1dc6f229c43e76d2bbb04aee6"
+      }
+    ],
+    "derived_relationships": [],
+    "hypotheses": [],
+    "contradictions": [],
+    "unexplored_branches": [
+      {
+        "branch_id": "aib_c03e5c764cd185fc81039e4cbe28aa24de1a948e731c121600b740b98674d3ce",
+        "reason": "format-specific-analysis-required",
+        "detail": "open_binary was not run by provider-neutral artifact inspection.",
+        "next_probe": {
+          "operation": "open_binary",
+          "rationale": "Bind one deep native provider before function-level analysis.",
+          "authority": "native-analysis-provider"
+        },
+        "evidence_id": "ev_6fd36b80fd2dffeb99497229402c30fe139923c1dc6f229c43e76d2bbb04aee6"
+      }
+    ],
+    "next_probes": [
+      {
+        "operation": "open_binary",
+        "rationale": "Bind one deep native provider before function-level analysis.",
+        "authority": "native-analysis-provider"
+      }
+    ],
+    "coverage": {
+      "status": "complete-within-substeps",
+      "substeps_completed": 1,
+      "observations_retained": 3,
+      "observations_omitted": 0,
+      "relationships_retained": 0,
+      "relationships_omitted": 0,
+      "hypotheses_retained": 0,
+      "hypotheses_omitted": 0,
+      "unexplored_branches_retained": 1,
+      "unexplored_branches_omitted": 0,
+      "next_probes_retained": 1,
+      "next_probes_omitted": 0
+    },
+    "evidence_links": [
+      "ev_6fd36b80fd2dffeb99497229402c30fe139923c1dc6f229c43e76d2bbb04aee6"
+    ],
+    "limitations": [
+      "Artifact has no child container entries.",
+      "Inspection derives bounded static hypotheses and next probes; it does not execute the artifact or claim format-specific semantics."
+    ]
+  },
+  "confidence": "observed",
+  "authority": "shipped-artifact",
+  "environment": null,
+  "limitations": [
+    "Artifact has no child container entries.",
+    "Inspection derives bounded static hypotheses and next probes; it does not execute the artifact or claim format-specific semantics."
+  ],
+  "locations": [
+    {
+      "kind": "artifact-path",
+      "path": "."
+    }
+  ],
+  "evidence_links": [
+    "ev_6fd36b80fd2dffeb99497229402c30fe139923c1dc6f229c43e76d2bbb04aee6"
+  ]
+}

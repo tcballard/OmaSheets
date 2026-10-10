@@ -460,6 +460,14 @@ fn literal_reference_functions_preserve_binding_after_sort_and_export() {
     assert_eq!(f.cell("C6")["value"]["value"], 10.0);
     f.reopen();
     assert_eq!(f.cell("C5")["value"]["value"], 10.0);
+    let strict_copy = f.path.with_extension("strict.xlsx");
+    let strict: Request = serde_json::from_value(
+        json!({"kind":"export_xlsx_strict","path":f.path,"output":strict_copy}),
+    )
+    .unwrap();
+    let refused = f.service.handle(strict).unwrap_err();
+    assert_eq!(refused.code, "unrepresentable_formula");
+    assert!(!strict_copy.exists());
     let exported = f.path.with_extension("references.xlsx");
     let manifest = f.call(json!({"kind":"export_xlsx","output":exported}));
     // INDIRECT's fixed text cannot be rewritten after movement: disclose flattening.

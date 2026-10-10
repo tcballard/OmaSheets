@@ -19,8 +19,10 @@ from .transactions import exclusive_lock
 DESKTOP_ID = "io.github.tcballard.OmaSheets.desktop"
 MIME_TYPES = (
     "application/x-omasheets",
-    "application/vnd.ms-excel",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
+_LEGACY_MIME_TYPES = (*MIME_TYPES,
+    "application/vnd.ms-excel",
     "application/vnd.ms-excel.sheet.macroEnabled.12",
     "application/vnd.oasis.opendocument.spreadsheet",
 )
@@ -28,14 +30,14 @@ MIME_TYPES = (
 DESKTOP_ENTRY = """[Desktop Entry]
 Type=Application
 Name=OmaSheets
-Comment=Open compatibility and native OmaSheets documents
+Comment=Open native OmaSheets and supported Excel workbooks
 Exec=omasheets launch %f
 Icon=x-office-spreadsheet
 Terminal=false
 StartupNotify=true
 Categories=Office;Spreadsheet;
-MimeType=application/x-omasheets;application/vnd.ms-excel;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/vnd.ms-excel.sheet.macroEnabled.12;application/vnd.oasis.opendocument.spreadsheet;
-Keywords=spreadsheet;omasheets;xls;xlsx;ods;calc;
+MimeType=application/x-omasheets;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;
+Keywords=spreadsheet;omasheets;xlsx;
 """
 
 MIME_PACKAGE = b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -193,7 +195,21 @@ def _install_locked(paths: IntegrationPaths, executable: Path | None = None) -> 
             and _sha(paths.mime_package.read_bytes()) == journal.get("mime_package_after_sha256")
         )
         if desktop_ok and mime_ok and package_ok:
-            return {"installed": True, "changed": False, "desktop_id": DESKTOP_ID}
+            before = base64.b64decode(journal["mimeapps_before"]) if journal.get("mimeapps_before") else b""
+            desired_mime = _integrated_mimeapps(before)
+            if paths.desktop.read_bytes() == desired_desktop and paths.mimeapps.read_bytes() == desired_mime:
+                return {"installed": True, "changed": False, "desktop_id": DESKTOP_ID}
+            # Rebuild only an unchanged owned integration from its original
+            # bytes. This restores legacy format defaults during migration.
+            _atomic_bytes(paths.desktop, desired_desktop, 0o644)
+            _atomic_bytes(paths.mimeapps, desired_mime)
+            journal.update({"desktop_after_sha256": _sha(desired_desktop),
+                            "mimeapps_after_sha256": _sha(desired_mime),
+                            "mime_types": list(MIME_TYPES)})
+            write_json_atomic(paths.journal, journal)
+            _refresh_desktop_database(paths.desktop)
+            _refresh_mime_database(paths.mime_package)
+            return {"installed": True, "changed": True, "desktop_id": DESKTOP_ID}
         raise ConflictError("desktop integration changed since installation; uninstall or resolve it first")
     if paths.desktop.exists() and paths.desktop.read_bytes() != desired_desktop:
         raise ConflictError(f"refusing to overwrite existing desktop entry: {paths.desktop}")
@@ -219,6 +235,7 @@ def _install_locked(paths: IntegrationPaths, executable: Path | None = None) -> 
     journal = {
         "schema": 1,
         "desktop_id": DESKTOP_ID,
+        "mime_types": list(MIME_TYPES),
         "desktop_before": base64.b64encode(desktop_before).decode() if desktop_before is not None else None,
         "desktop_after_sha256": _sha(desired_desktop),
         "mimeapps_before": base64.b64encode(mime_before).decode() if mime_before is not None else None,
@@ -267,7 +284,7 @@ def _uninstall_locked(paths: IntegrationPaths) -> dict[str, Any]:
             previous_bytes = base64.b64decode(journal["mimeapps_before"]) if journal.get("mimeapps_before") else b""
             previous_text = previous_bytes.decode("utf-8")
             for section in ("Default Applications", "Added Associations"):
-                for mime in MIME_TYPES:
+                for mime in journal.get("mime_types", _LEGACY_MIME_TYPES):
                     values = _mime_values(text, section, mime)
                     previous_values = _mime_values(previous_text, section, mime) or []
                     if values is not None and DESKTOP_ID in values and DESKTOP_ID not in previous_values:

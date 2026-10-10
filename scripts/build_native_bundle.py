@@ -10,6 +10,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,26 @@ sys.path.insert(0, str(ROOT / "src"))
 from omasheets import __version__  # noqa: E402
 from omasheets.installation import source_identity  # noqa: E402
 from omasheets.native_bundle import NATIVE_EXECUTABLES, asset_name, normalized_architecture, platform_id  # noqa: E402
+
+_OFFICE_LIBRARY = re.compile(r"libreoffice|lib(?:mergedlo|soffice|uno[_-])", re.IGNORECASE)
+
+
+def verify_owned_runtime(directory: Path, executables: tuple[str, ...] = NATIVE_EXECUTABLES) -> None:
+    """Reject foreign office libraries or unresolved dependencies in built ELF files."""
+    for name in executables:
+        path = directory / name
+        with path.open("rb") as handle:
+            if handle.read(4) != b"\x7fELF":
+                raise RuntimeError(f"native release executable is not ELF: {name}")
+        completed = subprocess.run(
+            ["ldd", str(path)], text=True, capture_output=True, check=False, timeout=15,
+        )
+        detail = completed.stdout + completed.stderr
+        if _OFFICE_LIBRARY.search(detail):
+            raise RuntimeError(f"native executable depends on LibreOffice/UNO: {name}")
+        static = "statically linked" in detail or "not a dynamic executable" in detail
+        if "not found" in detail or (completed.returncode != 0 and not static):
+            raise RuntimeError(f"native executable has unresolved runtime libraries: {name}: {detail.strip()}")
 
 
 def sha256(path: Path) -> str:
@@ -103,7 +124,10 @@ def main(argv: list[str] | None = None) -> int:
             part for part in (rust_environment.get("RUSTFLAGS", ""), remaps) if part
         )
         subprocess.run(
-            ["cargo", "build", "--locked", "--release", "-p", "omasheets-service"],
+            [
+                "cargo", "build", "--locked", "--release",
+                "-p", "omasheets-service", "-p", "omasheets-kit",
+            ],
             cwd=ROOT,
             env=rust_environment,
             check=True,
@@ -124,17 +148,12 @@ def main(argv: list[str] | None = None) -> int:
             env=grid_environment,
             check=True,
         )
-        subprocess.run([
-            "cmake", "-S", str(ROOT / "native/libreofficekit"), "-B", str(build),
-            "-DCMAKE_BUILD_TYPE=Release", f"-DCMAKE_INSTALL_PREFIX={stage}",
-            f"-DOMASHEETS_SOURCE_SHA256={identity['sha256']}",
-            f"-DOMASHEETS_SOURCE_COMMIT={identity['commit']}",
-        ], check=True)
-        subprocess.run(["cmake", "--build", str(build), "--parallel", "2"], check=True)
-        subprocess.run(["cmake", "--install", str(build)], check=True)
+        (stage / "bin").mkdir()
         shutil.copy2(rust_target / "release/omasheets-service", stage / "bin/omasheets-service")
+        shutil.copy2(rust_target / "release/omasheets-kit", stage / "bin/omasheets-kit")
         shutil.copy2(grid_target / "release/omasheets-grid", stage / "bin/omasheets-grid")
         shutil.copy2(rust_target / "release/omasheets-setup", stage / "bin/omasheets-setup")
+        verify_owned_runtime(stage / "bin")
         files = {f"bin/{name}": sha256(stage / "bin" / name) for name in NATIVE_EXECUTABLES}
         manifest = {
             "schema": 1,
@@ -142,8 +161,12 @@ def main(argv: list[str] | None = None) -> int:
             "platform": platform_id(),
             "architecture": normalized_architecture(),
             "source": identity,
-            "build_contract": "native/libreofficekit/CMakeLists.txt",
-            "rust_build_contract": ["Cargo.lock", "crates/omasheets-service/Cargo.toml"],
+            "build_contract": "Cargo.toml",
+            "rust_build_contract": [
+                "Cargo.lock", "crates/omasheets-service/Cargo.toml",
+                "crates/omasheets-kit/Cargo.toml",
+                "native/setup/Cargo.toml", "native/setup/Cargo.lock",
+            ],
             "qt_build_contract": [
                 "spikes/qt-grid/Cargo.lock",
                 "spikes/qt-grid/Cargo.toml",

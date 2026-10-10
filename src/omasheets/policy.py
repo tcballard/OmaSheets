@@ -14,6 +14,7 @@ from .errors import PolicyError
 
 
 class WorkbookFormat(str, Enum):
+    NATIVE = "omasheets"
     XLS = "xls"
     XLSX = "xlsx"
     XLSM = "xlsm"
@@ -40,10 +41,11 @@ class FormatPolicy:
 
 
 POLICIES: dict[WorkbookFormat, FormatPolicy] = {
-    WorkbookFormat.XLS: FormatPolicy(True, True, False, False, True),
+    WorkbookFormat.NATIVE: FormatPolicy(True, True, True, True),
+    WorkbookFormat.XLS: FormatPolicy(False, False, False, False),
     WorkbookFormat.XLSX: FormatPolicy(True, True, True, True),
-    WorkbookFormat.XLSM: FormatPolicy(True, True, False, False),
-    WorkbookFormat.ODS: FormatPolicy(True, True, True, True),
+    WorkbookFormat.XLSM: FormatPolicy(False, False, False, False),
+    WorkbookFormat.ODS: FormatPolicy(False, False, False, False),
 }
 
 
@@ -60,7 +62,7 @@ def workbook_format(path: Path) -> WorkbookFormat:
 def require_agent_readable(path: Path) -> WorkbookFormat:
     fmt = workbook_format(path)
     if not POLICIES[fmt].agent_read:
-        raise PolicyError(f"{fmt.value} is not agent-readable")
+        raise PolicyError(f"The OmaSheets engine does not support .{fmt.value} yet; choose .omasheets or a supported .xlsx workbook")
     return fmt
 
 

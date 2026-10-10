@@ -3,11 +3,9 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-import zipfile
 
 from omasheets.errors import ConflictError, EngineError
 from omasheets.diff_overlay import decode_overlay, overlay_path
-from omasheets.live_bridge import LiveSnapshot
 from omasheets.paths import AppPaths
 from omasheets.service import OmaSheetsService
 
@@ -96,21 +94,6 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(status["agent_commit_authority"])
         self.assertNotIn(str(self.source.parent), str(status))
 
-    def test_capabilities_do_not_misrepresent_libreoffice_as_a_fork(self):
-        capabilities = self.service.capabilities_resource()
-        self.assertFalse(capabilities["libreoffice_fork"])
-        self.assertEqual(capabilities["document_engine"]["adapter"], "isolated_uno_worker")
-        self.assertIn("set_range_values", capabilities["agent_operations"])
-        self.assertIn("format_cells", capabilities["agent_operations"])
-        self.assertEqual(capabilities["live_window_context"]["resource"], "omasheets://window")
-        self.assertFalse(capabilities["live_window_context"]["agent_control"])
-        self.assertTrue(capabilities["live_document_bridge"]["unsaved_state_visible"])
-        self.assertFalse(capabilities["live_document_bridge"]["agent_mutates_open_document"])
-        self.assertTrue(capabilities["agent_diff_overlay"]["native"])
-        self.assertFalse(capabilities["agent_diff_overlay"]["mutates_open_document"])
-        self.assertIn("upsert_chart", capabilities["agent_operations"])
-        self.assertIn("upsert_pivot", capabilities["agent_operations"])
-
     def test_workbook_audit_is_sealed_as_reviewable_evidence(self):
         session = self.service.select_workbook(self.source)
         audit = self.service.analyze_workbook(session["session_id"], focus="all", max_findings=10)
@@ -124,154 +107,41 @@ class ServiceTests(unittest.TestCase):
         )
         self.assertEqual(plan["workflow"]["evidence"][0]["result"]["findings"][0]["id"], "F001")
 
-    def test_live_window_context_is_path_free_and_session_bound(self):
-        session = self.service.select_workbook(self.source)
-        path = self.service.prepare_window_context(session["session_id"])
-        context = self.service.window_context_resource()
-        self.assertFalse(context["active"])
-        self.assertEqual(context["session_id"], session["session_id"])
-        self.assertNotIn(str(self.source), str(context))
-        payload = json.loads(path.read_text())
-        payload.update({"active": True, "address": "C9", "formula": "=SUM(A1:A8)", "updated_at_ms": 4})
-        path.write_text(json.dumps(payload))
-        context = self.service.window_context_resource()
+    def test_capabilities_identify_the_owned_engine_and_supported_formats(self):
+        capabilities = self.service.capabilities_resource()
+        self.assertEqual(capabilities["document_engine"]["name"], "OmaSheets")
+        self.assertEqual(capabilities["document_engine"]["adapter"], "isolated_rust_kit")
+        self.assertEqual(capabilities["document_engine"]["interactive_adapter"], "owned_document_service_qt_grid")
+        self.assertEqual(capabilities["formats"], ["omasheets", "xlsx"])
+        self.assertEqual(capabilities["unsupported_formats"], ["xls", "xlsm", "ods"])
+        self.assertNotIn("upsert_pivot", capabilities["agent_operations"])
+        self.assertFalse(capabilities["agent_publish_authority"])
+
+    def test_window_context_reads_the_owned_path_free_selection(self):
+        selection = {"sheet": "sheet-id", "row": 2, "column": 3, "rows": 1, "columns": 1}
+        private = {"session_id": "a" * 32, "path": "/private/workbook.omasheets", "selection": selection}
+        with patch("omasheets.native_agent.context", return_value=private):
+            context = self.service.window_context_resource()
         self.assertTrue(context["active"])
-        self.assertEqual(context["address"], "C9")
+        self.assertEqual(context["selection"], selection)
+        self.assertEqual(context["source"], "owned_native_document_service")
+        self.assertNotIn("/private", str(context))
         self.assertFalse(context["agent_control"])
 
-        agent = self.service.agent_session_resource()
-        self.assertTrue(agent["ready"])
-        self.assertEqual(agent["focus"]["address"], "C9")
-        self.assertFalse(agent["workflow_contract"]["agent_publish_authority"])
-        self.assertNotIn(str(self.source), str(agent))
-
-    def test_agent_staging_uses_dirty_live_window_snapshot(self):
+    def test_selected_file_query_uses_one_engine_call_and_one_evidence_record(self):
         session = self.service.select_workbook(self.source)
-        path = self.service.prepare_window_context(session["session_id"])
-        payload = json.loads(path.read_text())
-        payload.update({
-            "active": True, "dirty": True, "live_document_bridge": True,
-            "updated_at_ms": 4,
-        })
-        path.write_text(json.dumps(payload))
-        snapshot = self.source.with_name("live.xlsx")
-        with zipfile.ZipFile(snapshot, "w") as archive:
-            archive.writestr("xl/workbook.xml", "<workbook><sheets/></workbook>")
-            archive.writestr("xl/worksheets/sheet1.xml", "<worksheet><sheetData><v>2</v></sheetData></worksheet>")
-        live = LiveSnapshot(snapshot, "xlsx", "c" * 64)
-        with patch("omasheets.service.request_live_snapshot", return_value=live):
-            plan = self.service.plan_changes(
-                session["session_id"], 1,
-                [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}],
-            )
-        self.assertEqual(plan["base_source"], {"kind": "live_window", "sha256": live.semantic_sha256})
-        overlay = decode_overlay(overlay_path(self.paths.runtime).read_text())
-        self.assertEqual(overlay["plan_id"], plan["plan_id"])
-        self.assertEqual(overlay["items"][0]["range"], "A1")
-        self.assertFalse(snapshot.exists())
-
-    def test_live_plan_conflicts_when_in_memory_workbook_changes(self):
-        session = self.service.select_workbook(self.source)
-        context_path = self.service.prepare_window_context(session["session_id"])
-        context = json.loads(context_path.read_text())
-        context.update({"active": True, "live_document_bridge": True, "updated_at_ms": 4})
-        context_path.write_text(json.dumps(context))
-        snapshots = []
-        for index, semantic_hash in enumerate(("c" * 64, "d" * 64)):
-            snapshot = self.source.with_name(f"live-{index}.xlsx")
-            with zipfile.ZipFile(snapshot, "w") as archive:
-                archive.writestr("xl/workbook.xml", "<workbook><sheets/></workbook>")
-                archive.writestr("xl/worksheets/sheet1.xml", f"<worksheet><sheetData><v>{index}</v></sheetData></worksheet>")
-            snapshots.append(LiveSnapshot(snapshot, "xlsx", semantic_hash))
-        with patch("omasheets.service.request_live_snapshot", side_effect=snapshots):
-            plan = self.service.plan_changes(
-                session["session_id"], 1,
-                [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}],
-            )
-            with self.assertRaisesRegex(ConflictError, "workbook state changed"):
-                self.service.apply_plan_handoff(plan["plan_id"], 1)
-
-    def test_live_reads_do_not_reuse_snapshot_without_an_edit_generation(self):
-        session = self.service.select_workbook(self.source)
-        context_path = self.service.prepare_window_context(session["session_id"])
-        context = json.loads(context_path.read_text())
-        context.update({
-            "active": True,
-            "dirty": True,
-            "live_document_bridge": True,
-            "updated_at_ms": 4,
-        })
-        context_path.write_text(json.dumps(context))
-        snapshots = []
-        for index in range(2):
-            snapshot = self.source.with_name(f"fresh-live-{index}.xlsx")
-            snapshot.write_bytes(f"live-{index}".encode())
-            snapshots.append(LiveSnapshot(snapshot, "xlsx", f"{index + 1:064x}"))
-        with patch("omasheets.service.request_live_snapshot", side_effect=snapshots) as request:
-            self.service.describe_workbook(session["session_id"])
-            self.service.describe_workbook(session["session_id"])
-        self.assertEqual(request.call_count, 2)
-        self.assertFalse(any(snapshot.path.exists() for snapshot in snapshots))
-
-    def test_read_query_batch_uses_one_live_snapshot_one_engine_call_and_one_evidence_record(self):
-        session = self.service.select_workbook(self.source)
-        context_path = self.service.prepare_window_context(session["session_id"])
-        context = json.loads(context_path.read_text())
-        context.update({
-            "active": True,
-            "dirty": True,
-            "live_document_bridge": True,
-            "updated_at_ms": 4,
-        })
-        context_path.write_text(json.dumps(context))
-        snapshot = self.source.with_name("batch-live.xlsx")
-        snapshot.write_bytes(b"live-workbook")
-        live = LiveSnapshot(snapshot, "xlsx", "c" * 64)
         queries = [
             {"id": "structure", "tool": "describe_workbook", "arguments": {"include_formulas": False}},
-            {
-                "id": "cells", "tool": "read_range",
-                "arguments": {
-                    "sheet": "Sheet1", "range": "A1:B2",
-                    "include_formulas": True, "include_styles": False,
-                },
-            },
+            {"id": "cells", "tool": "read_range", "arguments": {"sheet": "Sheet1", "range": "A1:B2", "include_formulas": True, "include_styles": False}},
         ]
-
-        with patch("omasheets.service.request_live_snapshot", return_value=live) as request:
-            result = self.service.query_workbook(session["session_id"], queries)
-
-        request.assert_called_once()
-        self.assertEqual(len(self.engine.query_calls), 1)
-        self.assertEqual(self.engine.query_calls[0], (snapshot, queries))
+        result = self.service.query_workbook(session["session_id"], queries)
+        self.assertEqual(self.engine.query_calls, [(self.source, queries)])
         self.assertEqual([item["id"] for item in result["items"]], ["structure", "cells"])
-        self.assertFalse(result["items"][0]["result"]["formula_records_included"])
-        self.assertEqual(result["document_source"], "live_window")
-        records = list(self.service.evidence.glob("*.json"))
-        self.assertEqual(len(records), 1)
+        self.assertEqual(result["document_source"], "selected_file")
+        self.assertEqual(len(list(self.service.evidence.glob("*.json"))), 1)
         record = self.service._load_evidence(result["evidence_id"])
         self.assertEqual(record["tool"], "query_workbook")
         self.assertEqual(record["arguments"], {"queries": queries})
-        self.assertFalse(snapshot.exists())
-
-        plan_snapshot = self.source.with_name("batch-plan-live.xlsx")
-        plan_snapshot.write_bytes(b"same-semantic-live-workbook")
-        plan_live = LiveSnapshot(plan_snapshot, "xlsx", live.semantic_sha256)
-        with patch("omasheets.service.request_live_snapshot", return_value=plan_live):
-            plan = self.service.plan_changes(
-                session["session_id"], 1,
-                [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}],
-                {
-                    "goal": "Use the batch observation",
-                    "summary": "Make one reviewed change from the batched reads.",
-                    "evidence_ids": [result["evidence_id"]],
-                    "groups": [{
-                        "title": "Update cell", "purpose": "Use the sealed batch evidence.",
-                        "operation_indexes": [0],
-                    }],
-                },
-            )
-        self.assertEqual(plan["workflow"]["evidence"][0]["tool"], "query_workbook")
 
     def test_failed_read_query_batch_creates_no_evidence_or_plan(self):
         session = self.service.select_workbook(self.source)
@@ -302,41 +172,6 @@ class ServiceTests(unittest.TestCase):
             with self.assertRaisesRegex(EngineError, "mismatched query batch"):
                 self.service.query_workbook(session["session_id"], queries)
         self.assertEqual(list(self.service.evidence.glob("*.json")), [])
-
-    def test_native_overlay_confirmation_publishes_only_a_new_copy(self):
-        session = self.service.select_workbook(self.source)
-        context_path = self.service.prepare_window_context(session["session_id"])
-        context = json.loads(context_path.read_text())
-        context.update({"active": True, "live_document_bridge": True, "updated_at_ms": 4})
-        context_path.write_text(json.dumps(context))
-        snapshots = []
-        for index in range(3):
-            snapshot = self.source.with_name(f"native-review-{index}.xlsx")
-            with zipfile.ZipFile(snapshot, "w") as archive:
-                archive.writestr("xl/workbook.xml", "<workbook><sheets/></workbook>")
-                archive.writestr("xl/worksheets/sheet1.xml", "<worksheet><sheetData><v>1</v></sheetData></worksheet>")
-            snapshots.append(LiveSnapshot(snapshot, "xlsx", "c" * 64))
-        destination = self.source.with_name("approved-copy.xlsx")
-        with patch("omasheets.service.request_live_snapshot", side_effect=snapshots):
-            plan = self.service.plan_changes(
-                session["session_id"], 1,
-                [{"type": "set_value", "sheet": "Sheet1", "range": "A1", "value": 2}],
-            )
-            receipt = self.service.commit_native_overlay(plan["plan_id"], 1, destination)
-        self.assertTrue(destination.exists())
-        self.assertEqual(self.source.read_bytes(), b"workbook")
-        self.assertEqual(receipt["target"], str(destination.resolve()))
-        self.assertFalse(overlay_path(self.paths.runtime).exists())
-
-    def test_legacy_conversion_creates_a_receipt_and_preserves_source(self):
-        legacy = self.source.with_name("legacy.xls")
-        legacy.write_bytes(b"legacy-source")
-        receipt = self.service.convert_legacy_local(legacy)
-        self.assertEqual(legacy.read_bytes(), b"legacy-source")
-        self.assertEqual(legacy.with_suffix(".xlsx").read_bytes(), b"xlsx-converted")
-        self.assertEqual(receipt["kind"], "conversion")
-        self.assertTrue(receipt["manual_review_required"])
-        self.assertFalse(receipt["excel_equivalence_claimed"])
 
     def test_plan_is_sealed_and_handoff_is_non_mutating(self):
         session = self.service.select_workbook(self.source)

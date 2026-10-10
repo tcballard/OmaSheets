@@ -21,8 +21,7 @@ REPOSITORY = "tcballard/OmaSheets"
 MAX_BUNDLE_BYTES = 64 * 1024 * 1024
 MAX_SIDECAR_BYTES = 8 * 1024
 NATIVE_EXECUTABLES = (
-    "omasheets-window",
-    "omasheets-lok-render",
+    "omasheets-kit",
     "omasheets-service",
     "omasheets-grid",
     "omasheets-setup",

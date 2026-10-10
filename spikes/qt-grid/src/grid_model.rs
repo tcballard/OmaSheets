@@ -126,8 +126,8 @@ pub mod qobject {
         fn export_document(self: Pin<&mut Self>, output: &QUrl, format: &QString);
 
         #[qinvokable]
-        #[cxx_name = "openCompatibility"]
-        fn open_compatibility(self: Pin<&mut Self>, url: &QUrl);
+        #[cxx_name = "openExcel"]
+        fn open_excel(self: Pin<&mut Self>, url: &QUrl);
 
         #[qinvokable]
         #[cxx_name = "cellText"]
@@ -864,8 +864,7 @@ impl qobject::GridModel {
         }
         let destination = output.clone();
         self.load_workbook(output, move || {
-            crate::service_client::desktop_call(&serde_json::json!({"kind": "import_xlsx",
-                "source": source, "output": destination, "actor": {"kind": "human", "id": "omasheets-desktop"}}))
+            crate::service_client::import_workbook(&source, &destination)
                 .map(|manifest| Some(crate::service_client::transfer_summary(&manifest)))
         });
     }
@@ -907,7 +906,7 @@ impl qobject::GridModel {
         });
     }
 
-    pub fn open_compatibility(mut self: Pin<&mut Self>, url: &QUrl) {
+    pub fn open_excel(mut self: Pin<&mut Self>, url: &QUrl) {
         let path = PathBuf::from(url.to_local_file().unwrap_or_default().to_string());
         if !path.is_absolute() {
             return;

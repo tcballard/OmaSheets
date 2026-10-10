@@ -48,7 +48,7 @@ Item {
         command("file.new", "New workbook…", "Ctrl+N", available, () => files.newAction.trigger()),
         command("file.open", "Open workbook…", "Ctrl+O", available, () => files.openAction.trigger()),
         command("file.import", "Import Excel workbook…", "", available, () => files.importAction.trigger()),
-        command("file.compatibility", "Open Excel or OpenDocument…", "", available, () => files.compatibilityAction.trigger(), "Compatibility window for XLS, XLSX, XLSM and ODS"),
+        command("file.open_excel", "Open Excel workbook…", "", available, () => files.excelAction.trigger(), "Open supported XLSX as a native working copy"),
         command("file.save", "Save cell draft", "Ctrl+S", sheetAvailable, () => grid.commitEdit(), "Edits are saved on this computer"),
         group("file.export", "Export a copy"),
         command("file.export.xlsx", "Excel workbook…", "", sheetAvailable, () => files.xlsxAction.trigger(), "XLSX"),

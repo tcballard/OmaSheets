@@ -23,18 +23,23 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaises(PolicyError):
             workbook_format(Path("book.csv"))
 
-    def test_agents_can_read_all_supported_formats(self) -> None:
-        for suffix in ("xls", "xlsx", "xlsm", "ods"):
+    def test_agents_can_read_owned_supported_formats(self) -> None:
+        for suffix in ("omasheets", "xlsx"):
             require_agent_readable(Path(f"book.{suffix}"))
 
     def test_agents_cannot_stage_legacy_or_macro_workbooks(self) -> None:
-        for suffix in ("xls", "xlsm"):
+        for suffix in ("xls", "xlsm", "ods"):
             with self.assertRaises(PolicyError):
                 require_stageable(Path(f"book.{suffix}"), actor=Actor.AGENT)
 
     def test_stageable_formats(self) -> None:
-        for suffix in ("xlsx", "ods"):
+        for suffix in ("omasheets", "xlsx"):
             require_stageable(Path(f"book.{suffix}"), actor=Actor.AGENT)
+
+    def test_legacy_formats_are_refused_at_selection(self) -> None:
+        for suffix in ("xls", "xlsm", "ods"):
+            with self.assertRaisesRegex(PolicyError, "does not support"):
+                require_agent_readable(Path(f"book.{suffix}"))
 
     def test_agents_never_publish(self) -> None:
         for mode in PublishMode:

@@ -435,7 +435,7 @@ jobs:
     container:
       image: archlinux:base-devel
     steps:
-      - run: pacman -Syu --noconfirm --needed git python gtk3 libreoffice-fresh bubblewrap qt6-base qt6-declarative qt6-wayland desktop-file-utils shared-mime-info xorg-server-xvfb ttf-dejavu
+      - run: pacman -Syu --noconfirm --needed git python gtk3 bubblewrap qt6-base qt6-declarative qt6-wayland desktop-file-utils shared-mime-info xorg-server-xvfb ttf-dejavu
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -468,7 +468,7 @@ jobs:
     container:
       image: archlinux:base-devel
     steps:
-      - run: pacman -Syu --noconfirm --needed git cmake rust gtk3 libreoffice-fresh libreoffice-fresh-sdk qt6-base qt6-declarative qt6-wayland
+      - run: pacman -Syu --noconfirm --needed git python rust gtk3 qt6-base qt6-declarative qt6-wayland
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Verify the release gate in Arch
         run: |
@@ -488,11 +488,10 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP/native-smoke"
           checksum=$(basename "$archive").sha256
           (cd dist-native && sha256sum --check "$checksum")
-          "$RUNNER_TEMP/native-smoke/bin/omasheets-window" --provenance
-          "$RUNNER_TEMP/native-smoke/bin/omasheets-lok-render" --provenance
           "$RUNNER_TEMP/native-smoke/bin/omasheets-service" --provenance
           "$RUNNER_TEMP/native-smoke/bin/omasheets-grid" --provenance
           "$RUNNER_TEMP/native-smoke/bin/omasheets-setup" --provenance
+          "$RUNNER_TEMP/native-smoke/bin/omasheets-kit" --provenance
           cargo fmt --manifest-path native/setup/Cargo.toml --check
           cargo clippy --manifest-path native/setup/Cargo.toml --locked -- -D warnings
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -509,7 +508,7 @@ jobs:
       image: archlinux:base
       # The production worker still uses Bubblewrap with --unshare-all. The
       # outer hosted container needs namespace authority so that inner sandbox
-      # can be created instead of failing closed before Calc starts.
+      # can be created instead of failing closed before Rust jobs start.
       options: --privileged
     env:
       HOME: /tmp/omasheets-home
@@ -519,7 +518,7 @@ jobs:
       XDG_CACHE_HOME: /tmp/omasheets-home/.cache
       XDG_RUNTIME_DIR: /tmp/omasheets-runtime
     steps:
-      - run: pacman -Syu --noconfirm --needed git gtk3 libreoffice-fresh bubblewrap jq ttf-dejavu xorg-server-xvfb qt6-base qt6-declarative qt6-wayland
+      - run: pacman -Syu --noconfirm --needed git python gtk3 bubblewrap jq ttf-dejavu xorg-server-xvfb qt6-base qt6-declarative qt6-wayland
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -559,7 +558,7 @@ jobs:
           expected = source_identity(plugin)
           receipt = json.loads((app / "provenance.json").read_text())
           assert receipt["source"] == expected
-          for binary in ("omasheets-window", "omasheets-lok-render", "omasheets-service", "omasheets-grid", "omasheets-setup"):
+          for binary in ("omasheets-kit", "omasheets-service", "omasheets-grid", "omasheets-setup"):
               report = json.loads(subprocess.check_output([app / "bin" / binary, "--provenance"], text=True))
               assert report["source_commit"] == expected["commit"]
               assert report["source_sha256"] == expected["sha256"]
@@ -600,368 +599,65 @@ jobs:
           test ! -S "$XDG_RUNTIME_DIR/omasheets/native.sock"
           python scripts/check_qt_grid_spike.py \
             --report "$report" --require-native-document --require-multi-sheet
-      - name: Create an Excel 97 fixture
+      - name: Verify installed owned workbook jobs without LibreOffice
         run: |
-          mkdir -p "$RUNNER_TEMP/lok-input"
-          libreoffice --headless --convert-to 'xls:MS Excel 97' \
-            --outdir "$RUNNER_TEMP/lok-input" spikes/libreofficekit/fixtures/smoke.fods
-          libreoffice --headless --convert-to xlsx \
-            --outdir "$RUNNER_TEMP/lok-input" spikes/libreofficekit/fixtures/smoke.fods
-          libreoffice --headless --convert-to xlsx \
-            --outdir "$RUNNER_TEMP/lok-input" spikes/libreofficekit/fixtures/large.fods
-          test -s "$RUNNER_TEMP/lok-input/smoke.xls"
-          test -s "$RUNNER_TEMP/lok-input/smoke.xlsx"
-          test -s "$RUNNER_TEMP/lok-input/large.xlsx"
-      - name: Generate bounded agent-performance fixtures
+          ! command -v libreoffice
+          ! command -v soffice
+          ! pacman -Qq | grep -E '^(libreoffice|libreoffice-fresh|libreoffice-still)($|-)'
+          evidence="$RUNNER_TEMP/owned-runtime"
+          mkdir -p "$evidence"
+          python scripts/generate_m0_xlsx.py "$evidence/source.xlsx" --rows 10 > "$evidence/fixture.json"
+          python scripts/check_owned_runtime_install.py \
+            --launcher "$HOME/.local/bin/omasheets" --source "$evidence/source.xlsx" \
+            --workdir "$evidence" > "$evidence/report.json"
+      - name: Open XLSX through the default owned launcher
         run: |
-          performance_root="$GITHUB_WORKSPACE/.ci-performance"
-          mkdir -p "$performance_root/source" "$performance_root/xlsx"
-          python scripts/performance.py fixtures \
-            --profile ci --directory "$performance_root/source"
-          for source in "$performance_root/source/"*.fods; do
-            libreoffice --headless --convert-to xlsx \
-              --outdir "$performance_root/xlsx" "$source"
+          evidence="$RUNNER_TEMP/owned-runtime"
+          report="$evidence/xlsx-grid-report.txt"
+          env QT_QUICK_BACKEND=software OMASHEETS_GRID_BENCHMARK=1 \
+            xvfb-run -a sh -ec '
+              "$HOME/.local/bin/omasheets" launch "$1" > "$2"
+              for _ in $(seq 1 400); do
+                if grep -q "^OMASHEETS_GRID_BENCHMARK " "$2"; then
+                  for _ in $(seq 1 100); do
+                    test -S "$XDG_RUNTIME_DIR/omasheets/native.sock" || exit 0
+                    sleep 0.05
+                  done
+                  exit 1
+                fi
+                sleep 0.05
+              done
+              exit 1
+            ' sh "$evidence/source.xlsx" "$report"
+          python scripts/check_qt_grid_spike.py --report "$report" --require-native-document
+      - name: Verify native agent proposals and human review without LibreOffice
+        run: |
+          evidence="$RUNNER_TEMP/owned-runtime"
+          service="$HOME/.local/bin/omasheets-service"
+          "$service" serve --runtime-dir "$XDG_RUNTIME_DIR" > "$evidence/service.log" 2>&1 &
+          owned_service=$!
+          trap 'kill "$owned_service" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 100); do
+            test -f "$XDG_RUNTIME_DIR/omasheets/native.token" && break
+            sleep 0.05
           done
-          test -s "$performance_root/xlsx/dense-ci.xlsx"
-          test -s "$performance_root/xlsx/sparse-ci.xlsx"
-          test -s "$performance_root/xlsx/formula-ci.xlsx"
-          PERFORMANCE_ROOT="$performance_root" PYTHONPATH=src python - <<'PY'
-          import hashlib
-          import json
-          import os
-          import subprocess
-          from pathlib import Path
-          from omasheets.performance import write_bounded_json
-
-          root = Path(os.environ["PERFORMANCE_ROOT"])
-          source = json.loads((root / "source" / "ci-manifest.json").read_text())
-          converted = []
-          for fixture in source["fixtures"]:
-              workbook = root / "xlsx" / f"{Path(fixture['file']).stem}.xlsx"
-              converted.append({
-                  "source_file": fixture["file"],
-                  "source_sha256": fixture["sha256"],
-                  "file": workbook.name,
-                  "bytes": workbook.stat().st_size,
-                  "sha256": hashlib.sha256(workbook.read_bytes()).hexdigest(),
-              })
-          write_bounded_json(root / "fixture-manifest.json", {
-              "schema": "OMASHEETS_PERFORMANCE_CI_FIXTURES_V1",
-              "profile": "ci",
-              "source_manifest": source,
-              "converted_format": "xlsx",
-              "conversion_tool": subprocess.check_output(
-                  ["libreoffice", "--version"], text=True,
-              ).strip(),
-              "converted_fixtures": converted,
-              "notes": [
-                  "The FODS sources are deterministic; converted XLSX bytes are observed CI artifacts.",
-                  "The analyzed XLSX identity is its recorded byte size and SHA-256, not an assumed reproducible conversion.",
-              ],
-          })
-          PY
-      - name: Exercise the installed agentic workbook loop
-        run: |
-          original_sha=$(sha256sum "$RUNNER_TEMP/lok-input/smoke.xlsx" | cut -d' ' -f1)
-          "$HOME/.local/bin/omasheets" select "$RUNNER_TEMP/lok-input/smoke.xlsx" > "$RUNNER_TEMP/session.json"
-          python - <<'PY'
-          import json
-          import os
-          import subprocess
-          from pathlib import Path
-
-          launcher = Path(os.environ["HOME"], ".local/bin/omasheets")
-          session = json.loads(Path(os.environ["RUNNER_TEMP"], "session.json").read_text())
-          agent_resource = json.loads(subprocess.run(
-              [launcher, "agent-session", "resource"], text=True, capture_output=True, check=True,
-          ).stdout)
-          agent_tools = json.loads(subprocess.run(
-              [launcher, "agent-session", "tools"], text=True, capture_output=True, check=True,
-          ).stdout)["tools"]
-          assert agent_resource["ready"] is True
-          assert not ({"approve", "commit", "publish", "replace", "undo"} & {tool["name"] for tool in agent_tools})
-          observed = json.loads(subprocess.run([
-              launcher, "agent-session", "call", "query_workbook", "--arguments",
-              json.dumps({
-                  "session_id": session["session_id"],
-                  "queries": [
-                      {
-                          "id": "structure", "tool": "describe_workbook",
-                          "arguments": {"include_formulas": True},
-                      },
-                      {
-                          "id": "inputs", "tool": "read_range",
-                          "arguments": {"sheet": "Revenue", "range": "A1:C2"},
-                      },
-                  ],
-              }),
-          ], text=True, capture_output=True, check=True).stdout)
-          assert [item["id"] for item in observed["items"]] == ["structure", "inputs"]
-          assert observed["items"][0]["result"]["formula_records_included"] is True
-          audit = json.loads(subprocess.run([
-              launcher, "agent-session", "call", "analyze_workbook", "--arguments",
-              json.dumps({"session_id": session["session_id"], "focus": "all", "max_findings": 20}),
-          ], text=True, capture_output=True, check=True).stdout)
-          assert audit["summary"]["sheet_count"] == 1
-          assert audit["method"] == "deterministic_bounded_profile_v1"
-          process = subprocess.Popen(
-              [launcher, "mcp", "serve"], text=True,
-              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-          )
-          meta = {
-              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-              "io.modelcontextprotocol/clientCapabilities": {},
-          }
-
-          def call(request_id, name, arguments):
-              request = {
-                  "jsonrpc": "2.0", "id": request_id, "method": "tools/call",
-                  "params": {"name": name, "arguments": arguments, "_meta": meta},
-              }
-              process.stdin.write(json.dumps(request) + "\n")
-              process.stdin.flush()
-              response = json.loads(process.stdout.readline())
-              assert "error" not in response, response
-              return response["result"]["structuredContent"]
-
-          operations = [
-              {"type": "insert_rows", "sheet": "Revenue", "row": 3, "count": 2},
-              {"type": "set_range_values", "sheet": "Revenue", "range": "A3:B4", "values": [[10, 12], [15, 18]]},
-              {"type": "set_formula", "sheet": "Revenue", "range": "C3", "formula": "=SUM(A3:B3)"},
-              {"type": "fill_down", "sheet": "Revenue", "range": "C3:C4", "source_rows": 1},
-              {"type": "sort_range", "sheet": "Revenue", "range": "A2:C4", "key_column": 1, "ascending": False, "has_header": False},
-              {"type": "add_sheet", "sheet": "Summary"},
-              {"type": "set_range_values", "sheet": "Revenue", "range": "D1:F4", "values": [["Region", "Revenue", "Period"], ["North", 20, "Q1"], ["South", 30, "Q1"], ["North", 25, "Q2"]]},
-              {"type": "upsert_pivot", "sheet": "Summary", "name": "RevenuePivot", "source_sheet": "Revenue", "source_range": "D1:F4", "output_cell": "A2", "rows": ["Region"], "columns": [], "filters": ["Period"], "values": [{"field": "Revenue", "function": "sum", "label": "Total revenue"}]},
-              {"type": "upsert_chart", "sheet": "Summary", "name": "RevenueChart", "source_sheet": "Revenue", "source_range": "D1:E4", "anchor_range": "H2:P18", "chart_type": "column", "title": "Revenue by region", "has_column_headers": True, "has_row_headers": True, "legend": True},
-          ]
-          workflow = {
-              "goal": "Create a checked descending revenue variance input",
-              "summary": "Insert two data rows, calculate totals, fill the formula, and order the inspected range.",
-              "assumptions": ["The source figures are comparable."],
-              "evidence_ids": [observed["evidence_id"], audit["evidence_id"]],
-              "groups": [
-                  {"title": "Add inputs", "purpose": "Add the requested revenue observations.", "operation_indexes": [0, 1]},
-                  {"title": "Calculate totals", "purpose": "Use reference-aware formula filling.", "operation_indexes": [2, 3]},
-                  {"title": "Order results", "purpose": "Present the largest revenue first.", "operation_indexes": [4]},
-                  {"title": "Build management summary", "purpose": "Create a reviewable pivot and chart from explicit source data.", "operation_indexes": [5, 6, 7, 8]},
-              ],
-          }
-          first = call(1, "plan_changes", {
-              "session_id": session["session_id"], "expected_revision": 1,
-              "operations": operations, "workflow": workflow,
-          })
-          assert first["workflow"]["evidence"][0]["tool"] == "query_workbook"
-          assert first["workflow"]["evidence"][1]["tool"] == "analyze_workbook"
-          assert first["verification"]["comparison"]["workbook_objects_match"] is True
-          assert len(first["semantic_diff"]["object_changes"]["after"]["charts"]) == 1
-          assert len(first["semantic_diff"]["object_changes"]["after"]["pivots"]) == 1
-          workflow["goal"] = "Create the corrected checked revenue input"
-          workflow["summary"] = "Revise the proposal while retaining evidence and exact operation groups."
-          revised = call(2, "revise_plan", {
-              "plan_id": first["plan_id"], "expected_revision": 1,
-              "operations": operations, "workflow": workflow,
-          })
-          assert revised["supersedes_plan_id"] == first["plan_id"]
-          handoff = call(3, "apply_plan", {"plan_id": revised["plan_id"], "expected_revision": 1})
-          assert handoff["status"] == "local_review_required"
-          process.stdin.close()
-          assert process.wait(timeout=10) == 0, process.stderr.read()
-          PY
-          test "$(sha256sum "$RUNNER_TEMP/lok-input/smoke.xlsx" | cut -d' ' -f1)" = "$original_sha"
-      - name: Measure installed agent-analysis corpus
-        run: |
-          performance_root="$GITHUB_WORKSPACE/.ci-performance"
-          plugin="$HOME/.config/omarchy/plugins/io.github.tcballard.omasheets"
-          for fixture in dense-ci sparse-ci formula-ci; do
-            session=$(
-              "$HOME/.local/bin/omasheets" select \
-                "$performance_root/xlsx/$fixture.xlsx" | jq -r .session_id
-            )
-            test -n "$session"
-            arguments=$(jq -cn --arg session "$session" \
-              '{session_id: $session, focus: "all", max_findings: 20}')
-            python "$plugin/scripts/performance.py" run \
-              --name "agent-analyze-$fixture" \
-              --interval 0.05 \
-              --timeout 120 \
-              --max-samples 1024 \
-              --output "$performance_root/agent-analyze-$fixture.json" \
-              -- "$HOME/.local/bin/omasheets" agent-session call \
-                analyze_workbook --arguments "$arguments"
-          done
-      - name: Verify agent-performance evidence
-        run: |
-          PERFORMANCE_ROOT="$GITHUB_WORKSPACE/.ci-performance" python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          root = Path(os.environ["PERFORMANCE_ROOT"])
-          manifest = json.loads((root / "fixture-manifest.json").read_text())
-          fixtures = manifest["source_manifest"]["fixtures"]
-          converted = manifest["converted_fixtures"]
-          for name in ("dense-ci", "sparse-ci", "formula-ci"):
-              report = json.loads((root / f"agent-analyze-{name}.json").read_text())
-              assert report["schema"] == "OMASHEETS_PERFORMANCE_V1"
-              assert report["name"] == f"agent-analyze-{name}"
-              assert report["exit_code"] == 0
-              assert report["timed_out"] is False
-              assert report["termination_complete"] is None
-              assert report["wall_seconds"] > 0
-              assert report["sampling"]["observed_samples"] >= 1
-              memory = report["memory"]
-              assert memory["available"] is True
-              for key in ("peak_rss_bytes", "peak_pss_bytes", "peak_uss_bytes"):
-                  assert isinstance(memory[key], int) and memory[key] > 0, (name, key, memory)
-              assert isinstance(memory["peak_process_count"], int)
-              assert memory["peak_process_count"] >= 2, (name, memory)
-              source = next(item for item in fixtures if item["name"] == name)
-              assert source["used_range_cells"] <= 250_000
-              workbook = next(item for item in converted if item["file"] == f"{name}.xlsx")
-              assert workbook["bytes"] > 0 and len(workbook["sha256"]) == 64
-          formula = next(item for item in fixtures if item["name"] == "formula-ci")
-          assert formula["formula_cells"] == 16_000
-          sparse = next(item for item in fixtures if item["name"] == "sparse-ci")
-          assert sparse["data_density"] < 0.01
-          PY
+          PYTHONPATH=src python scripts/check_native_agent_install.py \
+            --service "$service" --document "$evidence/agent.omasheets" > "$evidence/agent-report.json"
+          review_branch=$(python -c 'import json,sys; print(json.load(sys.stdin)["review_branch"])' < "$evidence/agent-report.json")
+          env QT_QUICK_BACKEND=software OMASHEETS_DOCUMENT="$evidence/agent.omasheets" \
+            OMASHEETS_UI_CAPTURE="$evidence/review.png" OMASHEETS_UI_CAPTURE_REVIEW="$review_branch" \
+            xvfb-run -a timeout 30 "$XDG_DATA_HOME/omasheets/app/bin/omasheets-grid"
+          test -s "$evidence/review.png"
+          kill "$owned_service"
+          wait "$owned_service" || true
+          trap - EXIT
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: omasheets-agent-performance-linux-x86_64
-          path: |
-            .ci-performance/agent-analyze-*-ci.json
-            .ci-performance/fixture-manifest.json
-          if-no-files-found: error
-          include-hidden-files: true
-          retention-days: 14
-      - name: Render the workbook through LibreOfficeKit
-        run: |
-          "$XDG_DATA_HOME/omasheets/app/bin/omasheets-lok-render" \
-            "$RUNNER_TEMP/lok-input/smoke.xls" "$RUNNER_TEMP/lok-tile.ppm" 320 200 \
-            | tee "$RUNNER_TEMP/lok-report.json"
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
+          name: omasheets-owned-installed-runtime
+          path: ${{ runner.temp }}/owned-runtime/
+          if-no-files-found: warn
 
-          report = json.loads(Path(os.environ["RUNNER_TEMP"], "lok-report.json").read_text())
-          tile = Path(os.environ["RUNNER_TEMP"], "lok-tile.ppm").read_bytes()
-          assert report["engine"] == "libreofficekit"
-          assert report["width"] == 320 and report["height"] == 200
-          assert report["parts"] == 1
-          assert tile.startswith(b"P6\n320 200\n255\n")
-          assert len(tile) == len(b"P6\n320 200\n255\n") + 320 * 200 * 3
-          PY
-      - name: Open the OmaSheets-owned interactive window
-        run: |
-          mkdir -p "$RUNNER_TEMP/window-runtime"
-          session=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-          xvfb-run -a "$XDG_DATA_HOME/omasheets/app/bin/omasheets-window" \
-            --smoke-test "$RUNNER_TEMP/omasheets-window.png" \
-            --context "$RUNNER_TEMP/window-runtime/context.json" \
-            --bridge "$RUNNER_TEMP/window-runtime/window-bridge.sock" \
-            --diff "$RUNNER_TEMP/window-runtime/window-diff.overlay" \
-            --cli /usr/bin/true \
-            --session "$session" --revision 1 \
-            "$RUNNER_TEMP/lok-input/large.xlsx" > "$RUNNER_TEMP/window-report.json" &
-          window_pid=$!
-          for attempt in $(seq 1 100); do
-            test ! -S "$RUNNER_TEMP/window-runtime/window-bridge.sock" || break
-            sleep 0.05
-          done
-          test -S "$RUNNER_TEMP/window-runtime/window-bridge.sock"
-          PYTHONPATH="$XDG_DATA_HOME/omasheets/app/lib" python - <<'PY'
-          import os
-          from pathlib import Path
-          import time
-          from omasheets.diff_overlay import publish_overlay
-
-          overlay = Path(os.environ["RUNNER_TEMP"], "window-runtime/window-diff.overlay")
-
-          def plan(plan_id, changes):
-              return {
-                  "plan_id": plan_id * 32,
-                  "session_id": "a" * 32,
-                  "revision": 1,
-                  "status": "verified",
-                  "operations": [
-                      {"type": "set_value", "sheet": "Sheet1", "range": address, "value": after}
-                      for address, _before, after in changes
-                  ],
-                  "destructive_operations": [],
-                  "warnings": [],
-                  "semantic_diff": {"target_changes": [
-                      {
-                          "sheet": "Sheet1", "range": address,
-                          "before": {"values": [[before]], "formulas": [[""]]},
-                          "after": {"values": [[after]], "formulas": [[""]]},
-                      }
-                      for address, before, after in changes
-                  ]},
-              }
-
-          # Publish only after the window and directory monitor are live, then
-          # atomically replace and delete/recreate the same path. The final
-          # smoke report must reflect the replacement rather than initial load.
-          publish_overlay(overlay, plan("b", [("B2", 41, 42)]))
-          time.sleep(0.2)
-          publish_overlay(overlay, plan("c", [("B2", 41, 42), ("C2", 5, 6)]))
-          time.sleep(0.2)
-          overlay.unlink()
-          time.sleep(0.2)
-          publish_overlay(overlay, plan("d", [("B2", 41, 42), ("C2", 5, 6)]))
-          time.sleep(0.2)
-          PY
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          import stat
-          import sys
-          import zipfile
-
-          sys.path.insert(0, str(Path(os.environ["XDG_DATA_HOME"], "omasheets/app/lib")))
-          from omasheets.live_bridge import request_live_snapshot
-          from omasheets.paths import AppPaths
-
-          runtime = Path(os.environ["RUNNER_TEMP"], "window-runtime")
-          session = "a" * 32
-          bridge = runtime / "window-bridge.sock"
-          assert stat.S_IMODE(bridge.stat().st_mode) == 0o600
-          paths = AppPaths(runtime / "state", runtime / "cache", runtime)
-          snapshot = request_live_snapshot(paths, session, ".xlsx")
-          assert snapshot.format == "xlsx" and len(snapshot.semantic_sha256) == 64
-          assert stat.S_IMODE(snapshot.path.stat().st_mode) == 0o600
-          with zipfile.ZipFile(snapshot.path) as archive:
-              content = b"".join(archive.read(name) for name in archive.namelist() if name.endswith(".xml"))
-          assert b"OmaSheets unsaved live bridge" in content
-          snapshot.path.unlink()
-          PY
-          wait "$window_pid"
-          cat "$RUNNER_TEMP/window-report.json"
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          report = json.loads(Path(os.environ["RUNNER_TEMP"], "window-report.json").read_text())
-          screenshot = Path(os.environ["RUNNER_TEMP"], "omasheets-window.png").read_bytes()
-          assert report["editable"] is True
-          assert report["engine"] == "libreofficekitgtk"
-          assert report["loaded"] is True and report["parts"] == 1
-          assert report["scrolling"] is True and report["selection"] is True
-          assert report["window_owned_by"] == "omasheets"
-          assert report["diff_overlay"] is True and report["diff_change_count"] == 2
-          performance = report["performance"]
-          assert performance["load_ms"] <= 15_000
-          assert performance["first_paint_observed"] is True
-          assert 0 <= performance["first_paint_ms"] <= 5_000
-          assert performance["rss_mib"] <= 1024
-          assert performance["scroll_events"] >= 2
-          assert performance["visible_area_updates"] < performance["visible_area_requests"]
-          assert screenshot.startswith(b"\x89PNG\r\n\x1a\n")
-          assert len(screenshot) > 10_000
-          PY
       - name: Uninstall without touching unrelated user state
         run: |
           mkdir -p "$HOME/.codex/plugins/keep-me"

@@ -159,7 +159,6 @@ fn install(events: &Sender<Event>) -> Result<(), String> {
         "git",
         "python",
         "gtk3",
-        "libreoffice-fresh",
         "bubblewrap",
         "qt6-base",
         "qt6-declarative",

@@ -28,7 +28,7 @@ followed through their parent links even when they change process group; a
 daemon which outlives and detaches from the measured parent tree remains
 outside the report. Run the native executable directly rather than a launcher
 which exits immediately. PSS also depends on what else shares each page during
-the sample, so record the machine, kernel, installed LibreOffice build, and
+the sample, so record the machine, kernel, owned engine build, and
 whether the run was cold or warm beside any published result.
 
 ```bash
@@ -36,11 +36,11 @@ python3 scripts/performance.py run \
   --name native-idle-small \
   --timeout 15 \
   --output /tmp/native-idle-small.json \
-  -- ~/.local/share/omasheets/app/bin/omasheets-window \
-    --smoke-test /tmp/native-idle-small.png /tmp/small.fods
+  -- ~/.local/share/omasheets/app/bin/omasheets-kit open /tmp/small.omasheets
 ```
 
-The smoke window exits after capturing its first useful render; run it from a
+Set `OMASHEETS_UI_CAPTURE=/tmp/native-idle-small.png` to capture and exit after
+the first useful render; run from a
 graphical session (or under Xvfb in CI). The timeout terminates only the
 isolated command tree observed by the sampler, including descendants that
 create another process group or session. The report records whether termination

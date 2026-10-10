@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -95,6 +96,46 @@ class ReproducibleArchiveTests(unittest.TestCase):
         for binary in NATIVE_EXECUTABLES:
             self.assertEqual((destination / "bin" / binary).stat().st_mode & 0o777, 0o755)
 
+    def test_bundle_distributes_only_owned_runtime_executables(self):
+        _, members = self.stage("native-kit", "")
+        archive = self.root / "native-kit.tar.gz"
+        build_native_bundle.write_reproducible_archive(archive, members, 1_700_000_000)
+        destination = self.root / "native-kit-app"
+        manifest = install_native_bundle(archive, destination, version=__version__, source=source_identity(ROOT))
+        self.assertIn("bin/omasheets-kit", manifest["files"])
+        self.assertEqual(set(NATIVE_EXECUTABLES), {
+            "omasheets-kit", "omasheets-service", "omasheets-grid", "omasheets-setup",
+        })
+        for binary in NATIVE_EXECUTABLES:
+            self.assertTrue((destination / "bin" / binary).is_file())
+        for binary in ("omasheets-window", "omasheets-lok-render"):
+            self.assertFalse((destination / "bin" / binary).exists())
+
+    def test_legacy_office_payload_is_rejected_before_publishing_files(self):
+        _, members = self.stage("legacy-payload", "")
+        legacy = self.root / "omasheets-window"
+        legacy.write_bytes(b"legacy office window")
+        for binary in ("omasheets-window", "omasheets-lok-render"):
+            archive = self.root / f"{binary}.tar.gz"
+            build_native_bundle.write_reproducible_archive(
+                archive, members + [(f"bin/{binary}", legacy, 0o755)], 1,
+            )
+            destination = self.root / f"{binary}-app"
+            with self.assertRaisesRegex(RuntimeError, "unexpected file set"):
+                install_native_bundle(archive, destination, version=__version__, source=source_identity(ROOT))
+            self.assertFalse(destination.exists())
+
+    def test_native_bundle_refuses_a_missing_native_kit_before_installing_anything(self):
+        _, members = self.stage("missing-kit", "")
+        archive = self.root / "missing-kit.tar.gz"
+        build_native_bundle.write_reproducible_archive(
+            archive, [member for member in members if member[0] != "bin/omasheets-kit"], 1,
+        )
+        destination = self.root / "missing-kit-app"
+        with self.assertRaisesRegex(RuntimeError, "unexpected file set"):
+            install_native_bundle(archive, destination, version=__version__, source=source_identity(ROOT))
+        self.assertFalse(destination.exists())
+
     def test_source_date_epoch_prefers_the_environment_then_the_commit_time(self):
         with patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "12345"}):
             self.assertEqual(build_native_bundle.source_date_epoch(), 12345)
@@ -104,6 +145,11 @@ class ReproducibleArchiveTests(unittest.TestCase):
 
 
 class BuildInputsTests(unittest.TestCase):
+    def test_default_build_packages_do_not_require_foreign_office_components(self):
+        self.assertIn("rust", build_inputs.DEFAULT_PACKAGES)
+        self.assertIn("qt6-declarative", build_inputs.DEFAULT_PACKAGES)
+        self.assertFalse(any("libreoffice" in name or "uno" in name for name in build_inputs.DEFAULT_PACKAGES))
+
     def test_record_names_every_pinned_input(self):
         with tempfile.TemporaryDirectory() as temporary, patch.object(
             build_inputs, "installed_versions", return_value={"gcc": "15.2.1+r1-1", "cmake": "4.1.1-1"},
@@ -139,6 +185,83 @@ class BuildInputsTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "not installed: cmake"):
                 build_inputs.installed_versions(("gcc", "cmake"))
             self.assertEqual(build_inputs.installed_versions(("gcc",)), {"gcc": "15.2.1-1"})
+
+
+class NativeBuildTests(unittest.TestCase):
+    def test_bundle_build_uses_only_owned_rust_build_targets(self):
+        identity = {"commit": "a" * 40, "sha256": "b" * 64}
+        commands = []
+
+        def cargo_build(command, **kwargs):
+            commands.append(command)
+            self.assertEqual(command[0], "cargo")
+            target = Path(kwargs["env"]["CARGO_TARGET_DIR"]) / "release"
+            target.mkdir(parents=True, exist_ok=True)
+            if "--manifest-path" not in command:
+                binaries = ("omasheets-service", "omasheets-kit")
+            elif "qt-grid" in command[-1]:
+                binaries = ("omasheets-grid",)
+            else:
+                binaries = ("omasheets-setup",)
+            for binary in binaries:
+                (target / binary).write_bytes(b"owned executable")
+
+        with tempfile.TemporaryDirectory() as temporary, patch.object(
+            build_native_bundle, "source_identity", return_value=identity,
+        ), patch.object(build_native_bundle, "source_date_epoch", return_value=1), patch.object(
+            build_native_bundle.subprocess, "run", side_effect=cargo_build,
+        ), patch.object(build_native_bundle, "verify_owned_runtime") as audit:
+            directory = Path(temporary)
+            output = directory / "output"
+            self.assertEqual(build_native_bundle.main([
+                "--output", str(output), "--build-dir", str(directory / "build"),
+            ]), 0)
+            audit.assert_called_once()
+            archive = output / build_native_bundle.asset_name(__version__)
+            with tarfile.open(archive) as bundle:
+                self.assertEqual(set(bundle.getnames()), {
+                    "manifest.json", *(f"bin/{name}" for name in NATIVE_EXECUTABLES),
+                })
+                manifest = json.load(bundle.extractfile("manifest.json"))
+            self.assertEqual(manifest["source"], identity)
+            self.assertEqual(manifest["build_contract"], "Cargo.toml")
+            self.assertIn("crates/omasheets-kit/Cargo.toml", manifest["rust_build_contract"])
+            self.assertIn("native/setup/Cargo.toml", manifest["rust_build_contract"])
+        self.assertEqual(len(commands), 3)
+        self.assertFalse(any("libreoffice" in str(command).lower() or "cmake" in command for command in commands))
+
+    def test_linkage_audit_rejects_office_and_missing_libraries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            (directory / "omasheets-kit").write_bytes(b"\x7fELFowned")
+            for output in (
+                "libmergedlo.so => /usr/lib/libreoffice/program/libmergedlo.so\n",
+                "libuno_sal.so.3 => /usr/lib/libuno_sal.so.3\n",
+                "libQt6Quick.so.6 => not found\n",
+            ):
+                with self.subTest(output=output), patch.object(
+                    build_native_bundle.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], 0, output, ""),
+                ), self.assertRaisesRegex(RuntimeError, "depends on LibreOffice/UNO|unresolved runtime libraries"):
+                    build_native_bundle.verify_owned_runtime(directory, ("omasheets-kit",))
+
+    def test_linkage_audit_accepts_resolved_owned_runtime_and_static_elf(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            executable = directory / "omasheets-kit"
+            executable.write_bytes(b"\x7fELFowned")
+            for code, output in (
+                (0, "libQt6Quick.so.6 => /usr/lib/libQt6Quick.so.6\nlibc.so.6 => /usr/lib/libc.so.6\n"),
+                (1, "not a dynamic executable\n"),
+            ):
+                with patch.object(
+                    build_native_bundle.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], code, output, ""),
+                ):
+                    build_native_bundle.verify_owned_runtime(directory, ("omasheets-kit",))
+            executable.write_bytes(b"#!/bin/sh\nexit 0\n")
+            with self.assertRaisesRegex(RuntimeError, "not ELF"):
+                build_native_bundle.verify_owned_runtime(directory, ("omasheets-kit",))
 
 
 if __name__ == "__main__":

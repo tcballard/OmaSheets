@@ -31,7 +31,7 @@ PLUGIN_ENTRY = {
     "category": "Productivity",
 }
 ARCH_PACKAGES = (
-    "gtk3", "libreoffice-fresh", "bubblewrap",
+    "python", "gtk3", "bubblewrap",
     "qt6-base", "qt6-declarative", "qt6-wayland",
 )
 
@@ -47,6 +47,10 @@ class InstallPaths:
     journal: Path
     integration: IntegrationPaths
     user_service: UserServicePaths
+
+    @property
+    def kit_launcher(self) -> Path:
+        return self.service_launcher.with_name("omasheets-kit")
 
     @classmethod
     def discover(cls) -> "InstallPaths":
@@ -126,15 +130,8 @@ def source_identity(root: Path) -> dict[str, str]:
     return {"commit": commit, "sha256": digest.hexdigest()}
 
 
-def dependency_report() -> dict[str, Any]:
+def dependency_report(*, include_setup: bool = True) -> dict[str, Any]:
     checks = [
-        ("GTK3", _first_existing("/usr/lib/libgtk-3.so", "/usr/lib/libgtk-3.so.0")),
-        ("LibreOffice", _first_existing("/usr/bin/soffice", "/usr/bin/libreoffice")),
-        ("LibreOfficeKitGTK", _first_existing(
-            "/usr/lib/libreofficekitgtk.so",
-            "/usr/lib/liblibreofficekitgtk.so",
-            "/usr/lib/libreoffice/program/liblibreofficekitgtk.so",
-        )),
         ("Bubblewrap", _first_existing("/usr/bin/bwrap")),
         ("Qt Quick", _first_existing("/usr/lib/libQt6Quick.so", "/usr/lib/libQt6Quick.so.6")),
         ("Qt Wayland", _first_existing(
@@ -143,25 +140,19 @@ def dependency_report() -> dict[str, Any]:
             "/usr/lib/qt6/plugins/platforms/libqwayland-generic.so",
         )),
         ("system Python", _first_existing("/usr/bin/python")),
-        ("Python UNO", _python_uno()),
     ]
+    if include_setup:
+        checks.insert(0, ("GTK3", _first_existing("/usr/lib/libgtk-3.so", "/usr/lib/libgtk-3.so.0")))
+    packages = ARCH_PACKAGES if include_setup else tuple(name for name in ARCH_PACKAGES if name != "gtk3")
     return {
         "ready": all(detail is not None for _, detail in checks),
         "checks": [{"name": name, "ok": detail is not None, "detail": detail or "missing"} for name, detail in checks],
-        "install_command": "omarchy pkg add " + " ".join(ARCH_PACKAGES),
+        "install_command": "omarchy pkg add " + " ".join(packages),
     }
 
 
 def _first_existing(*values: str) -> str | None:
     return next((value for value in values if Path(value).is_file()), None)
-
-
-def _python_uno() -> str | None:
-    python = _first_existing("/usr/bin/python")
-    if not python:
-        return None
-    result = subprocess.run([python, "-c", "import uno"], capture_output=True)
-    return "importable" if result.returncode == 0 else None
 
 
 def _launcher(app: Path) -> bytes:
@@ -178,6 +169,14 @@ def _launcher(app: Path) -> bytes:
 
 def _service_launcher(app: Path) -> bytes:
     executable = app / "bin/omasheets-service"
+    return (
+        "#!/bin/bash\nset -euo pipefail\n"
+        f"exec {shlex.quote(str(executable))} \"$@\"\n"
+    ).encode()
+
+
+def _kit_launcher(app: Path) -> bytes:
+    executable = app / "bin/omasheets-kit"
     return (
         "#!/bin/bash\nset -euo pipefail\n"
         f"exec {shlex.quote(str(executable))} \"$@\"\n"
@@ -245,6 +244,13 @@ def _install_locked(source_root: Path, paths: InstallPaths, *, check_dependencie
         intact = intact and paths.service_launcher.is_file()
         if intact:
             intact = _sha_file(paths.service_launcher) == service_launcher_sha256
+        kit_launcher_sha256 = journal.get("kit_launcher_sha256")
+        if kit_launcher_sha256 is not None:
+            intact = intact and paths.kit_launcher.is_file()
+            if intact:
+                intact = _sha_file(paths.kit_launcher) == kit_launcher_sha256
+        elif paths.kit_launcher.exists() or paths.kit_launcher.is_symlink():
+            raise ConflictError(f"refusing to overwrite unowned installation target: {paths.kit_launcher}")
         intact = intact and paths.app.is_dir() and _tree_sha(paths.app) == journal["app_sha256"]
         intact = intact and paths.codex_plugin.is_dir()
         intact = intact and _tree_sha(paths.codex_plugin) == journal["codex_plugin_sha256"]
@@ -255,15 +261,15 @@ def _install_locked(source_root: Path, paths: InstallPaths, *, check_dependencie
         intact = intact and paths.integration.desktop.is_file() and paths.integration.journal.is_file()
         if not intact:
             raise ConflictError("installed OmaSheets files changed; resolve them before updating")
-        if journal["source"] == identity:
+        if journal["source"] == identity and kit_launcher_sha256 is not None:
             return {"installed": True, "changed": False, "source": journal["source"]}
         previous_journal = journal
     report = dependency_report()
     if check_dependencies and not report["ready"]:
         missing = ", ".join(check["name"] for check in report["checks"] if not check["ok"])
         raise RuntimeError(f"missing dependencies: {missing}\nInstall them explicitly with: {report['install_command']}")
-    for target in (paths.app, paths.launcher, paths.service_launcher, paths.codex_plugin):
-        if target.exists() and previous_journal is None:
+    for target in (paths.app, paths.launcher, paths.service_launcher, paths.kit_launcher, paths.codex_plugin):
+        if (target.exists() or target.is_symlink()) and previous_journal is None:
             raise ConflictError(f"refusing to overwrite unowned installation target: {target}")
     paths.app.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=".app.", dir=paths.app.parent))
@@ -273,7 +279,7 @@ def _install_locked(source_root: Path, paths: InstallPaths, *, check_dependencie
     published: set[Path] = set()
     launcher_before = {
         path: path.read_bytes() if path.is_file() else None
-        for path in (paths.launcher, paths.service_launcher)
+        for path in (paths.launcher, paths.service_launcher, paths.kit_launcher)
     }
     lease = None
     try:
@@ -319,6 +325,7 @@ def _install_locked(source_root: Path, paths: InstallPaths, *, check_dependencie
         published.add(paths.app)
         _write_bytes(paths.launcher, _launcher(paths.app), 0o755)
         _write_bytes(paths.service_launcher, _service_launcher(paths.app), 0o755)
+        _write_bytes(paths.kit_launcher, _kit_launcher(paths.app), 0o755)
         paths.codex_plugin.parent.mkdir(parents=True, exist_ok=True)
         published.add(paths.codex_plugin)
         shutil.copytree(source_root / "plugins/omasheets", paths.codex_plugin)
@@ -333,6 +340,7 @@ def _install_locked(source_root: Path, paths: InstallPaths, *, check_dependencie
             "app_sha256": _tree_sha(paths.app),
             "launcher_sha256": _sha_file(paths.launcher),
             "service_launcher_sha256": _sha_file(paths.service_launcher),
+            "kit_launcher_sha256": _sha_file(paths.kit_launcher),
             "codex_plugin_sha256": _tree_sha(paths.codex_plugin),
             "marketplace_before": previous_journal["marketplace_before"] if previous_journal is not None else (
                 base64.b64encode(marketplace_before).decode() if marketplace_before is not None else None
@@ -349,6 +357,7 @@ def _install_locked(source_root: Path, paths: InstallPaths, *, check_dependencie
             "source": identity,
             "launcher": str(paths.launcher),
             "service_launcher": str(paths.service_launcher),
+            "kit_launcher": str(paths.kit_launcher),
         }
     except Exception:
         for target in published:
@@ -421,6 +430,8 @@ def uninstall(paths: InstallPaths | None = None) -> dict[str, Any]:
     ]
     if service_launcher_sha256 := journal.get("service_launcher_sha256"):
         owned.insert(1, (paths.service_launcher, service_launcher_sha256, _sha_file))
+    if kit_launcher_sha256 := journal.get("kit_launcher_sha256"):
+        owned.insert(1, (paths.kit_launcher, kit_launcher_sha256, _sha_file))
     for target, expected, hasher in owned:
         if not target.exists():
             continue

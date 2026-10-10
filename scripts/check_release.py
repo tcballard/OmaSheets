@@ -13,10 +13,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from omasheets.native_bundle import RELEASE_SIGNING_KEY, require_exact_version_tag  # noqa: E402
+from omasheets.native_bundle import NATIVE_EXECUTABLES, RELEASE_SIGNING_KEY, require_exact_version_tag  # noqa: E402
 from omasheets.release_signing import SignatureError, load_public_key  # noqa: E402
 
 _ACTION_PIN = re.compile(r"^\s*(?:-\s+)?uses:\s*([^@\s]+)@([0-9a-f]{40})\s*#\s*v\S+\s*$")
+
+
+def check_owned_packages(text: str) -> None:
+    """Product build/install jobs cannot install a foreign office engine."""
+    for line in text.splitlines():
+        if re.search(r"\bpacman\s+-\w*S", line):
+            assert not re.search(r"\b(?:libreoffice|libreofficekit)[\w-]*\b", line, re.IGNORECASE), (
+                "product workflow cannot depend on LibreOffice/LibreOfficeKit packages"
+            )
 
 
 def check_release_workflow(text: str) -> None:
@@ -38,6 +47,7 @@ def check_release_workflow(text: str) -> None:
     assert "SOURCE_DATE_EPOCH=" in text and "-ffile-prefix-map=" in text, "build is not reproducible"
     assert "actions/attest-build-provenance@" in text, "bundle provenance is not attested"
     assert "secrets." not in text, "the release workflow must hold no signing secret"
+    check_owned_packages(text)
 
 
 def check_pinned_release_key(require: bool) -> None:
@@ -83,8 +93,11 @@ def main(argv: list[str] | None = None) -> int:
         "src/omasheets/release_signing.py", "src/omasheets/bounded_process.py",
         "scripts/panel_status.py", "scripts/build_inputs.py",
         "scripts/check_native_service_install.py",
+        "scripts/check_owned_runtime_install.py",
         "scripts/verify_release_signature.py", "docs/RELEASE.md",
-        "native/libreofficekit/CMakeLists.txt", "plugins/omasheets/.codex-plugin/plugin.json",
+        "Cargo.toml", "Cargo.lock", "crates/omasheets-kit/src/lib.rs",
+        "native/setup/Cargo.toml", "native/setup/Cargo.lock",
+        "plugins/omasheets/.codex-plugin/plugin.json",
         "spikes/qt-grid/Cargo.toml", "spikes/qt-grid/Cargo.lock",
         "src/omasheets/native_grid.py",
     ):
@@ -96,16 +109,27 @@ def main(argv: list[str] | None = None) -> int:
             assert _ACTION_PIN.match(line), f"CI action is not pinned to a full commit SHA: {line.strip()}"
     assert "Compiler-free Arch install and native acceptance" in workflow
     assert "archlinux:base\n" in workflow
-    assert "libreoffice-fresh-sdk" in workflow
-    install_job = workflow.split("  production-install:", 1)[1]
+    assert set(NATIVE_EXECUTABLES) == {
+        "omasheets-kit", "omasheets-service", "omasheets-grid", "omasheets-setup",
+    }, "the product bundle must contain only the owned engine, grid and Setup"
+    builder = (ROOT / "scripts/build_native_bundle.py").read_text()
+    assert "native/libreofficekit" not in builder, "the product bundle cannot build the reference engine"
+    assert 'verify_owned_runtime(stage / "bin")' in builder, "release executable linkage is not checked"
+    for job in ("native-package", "arch-package", "production-install"):
+        content = workflow.split(f"  {job}:\n", 1)[1]
+        check_owned_packages(re.split(r"\n  [\w-]+:\n", content, maxsplit=1)[0])
+    install_job = re.split(
+        r"\n  [\w-]+:\n", workflow.split("  production-install:\n", 1)[1], maxsplit=1,
+    )[0]
     assert "cmake" not in install_job.split("      - name: Install through", 1)[0]
     assert "OMASHEETS_NATIVE_BUNDLE_PATH" in install_job
-    assert "Exercise the installed agentic workbook loop" in workflow
+    assert "Verify installed owned workbook jobs without LibreOffice" in workflow
+    assert "Open XLSX through the default owned launcher" in workflow
     assert "Exercise the installed native service workflow" in workflow
     assert "Open a native document through the installed production grid" in workflow
     assert '"omasheets-grid"' in (ROOT / "src/omasheets/native_bundle.py").read_text()
     assert "qt6-base qt6-declarative qt6-wayland" in workflow
-    assert '"agent-session", "call", "query_workbook"' in workflow
+    assert "scripts/check_owned_runtime_install.py" in install_job
     assert "omasheets://session" in (ROOT / "README.md").read_text()
     assert "Ask Agent" in (ROOT / "README.md").read_text()
     assert "omarchy agent prompt" in (ROOT / "README.md").read_text()
