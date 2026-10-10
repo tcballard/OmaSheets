@@ -2244,8 +2244,9 @@ impl Workbook {
     }
 
     /// `SUBTOTAL(code, ref, ...)`: codes 1-11 and 101-111 select the
-    /// aggregate; cells that themselves hold a `SUBTOTAL` formula are skipped
-    /// as in Excel. Hidden-row semantics (101-111) are not modelled: the
+    /// aggregate; range members that themselves hold a `SUBTOTAL` formula are
+    /// skipped. Calc includes a directly referenced subtotal cell. Hidden-row
+    /// semantics (101-111) are not modelled: the
     /// engine has no row visibility, so both ranges behave like 1-11.
     fn evaluate_subtotal(&self, arguments: &[Expr<usize>]) -> Value {
         if arguments.len() < 2 {
@@ -2305,14 +2306,6 @@ impl Workbook {
                         None => output.push(Value::Blank),
                     }
                 }
-            }
-            Expr::Reference(index) => {
-                if let Input::Formula(Expr::Function(Function::SubTotal, _)) =
-                    &self.cells[*index].input
-                {
-                    return;
-                }
-                output.push(self.cells[*index].value.clone());
             }
             Expr::Empty => {}
             other => self.flatten_values(other, output),
@@ -8196,6 +8189,10 @@ mod tests {
             workbook.set_formula(cell(0, column), formula).unwrap();
             assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
         }
+        workbook
+            .set_formula(cell(100, 1), "=SUBTOTAL(9,A9)")
+            .unwrap();
+        assert_eq!(workbook.value(cell(100, 1)), Value::Number(40.0));
     }
 
     #[test]

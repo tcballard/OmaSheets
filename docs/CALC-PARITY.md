@@ -150,6 +150,10 @@ That pass matched 642 of 645 with no refusals. One existing `SUBTOTAL` array
 flattening bug remained, alongside the two known inspection gaps. The next
 eight cases cover array subtotals and live dependent formulas that distinguish
 excluding nested subtotal cells from including ordinary formula cells.
+That 653-case pass matched 650 with no refusals; its remaining unexpected
+difference was direct single-cell subtotal inclusion. Calc excludes nested
+subtotal cells in ranges, but includes a directly referenced subtotal cell.
+The owned engine now makes that distinction, and the original case remains.
 
 Calc-specific boundaries in this increment include `ATAN2(0,0) = 0`, flooring
 fractional `SMALL` ranks (while `LARGE` rounds up), preserving fractional
