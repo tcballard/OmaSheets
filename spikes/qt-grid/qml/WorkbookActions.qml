@@ -12,7 +12,7 @@ Item {
     property alias newAction: newAction
     property alias openAction: openAction
     property alias importAction: importAction
-    property alias compatibilityAction: compatibilityAction
+    property alias excelAction: excelAction
     property alias exampleAction: exampleAction
     signal exampleRequested()
     signal finished()
@@ -21,7 +21,7 @@ Item {
     property alias parquetAction: parquetAction
     readonly property bool available: !blocked && !gridModel.busy && !report.visible
         && !openFile.visible && !newFile.visible && !importFile.visible
-        && !importDestination.visible && !exportFile.visible && !compatibilityFile.visible
+        && !importDestination.visible && !exportFile.visible && !excelFile.visible
         && !importNotice.visible && !exampleFile.visible
     property url importSource
     property string exportFormat: "xlsx"
@@ -68,10 +68,10 @@ Item {
         onTriggered: { if (controls.prepare()) importNotice.open(); }
     }
     Action {
-        id: compatibilityAction
-        text: "Open Excel or OpenDocument…"
+        id: excelAction
+        text: "Open Excel workbook…"
         enabled: controls.available
-        onTriggered: { if (controls.prepare()) compatibilityFile.open(); }
+        onTriggered: { if (controls.prepare()) excelFile.open(); }
     }
     Action {
         id: xlsxAction
@@ -111,12 +111,12 @@ Item {
         onAccepted: gridModel.openDocument(selectedFile, false)
     }
     FileDialog {
-        id: compatibilityFile
+        id: excelFile
         onVisibleChanged: {if(!visible)controls.finished();}
-        title: "Open in the compatibility window"
-        nameFilters: ["Excel and OpenDocument (*.xlsx *.xls *.xlsm *.ods)"]
+        title: "Open Excel workbook as a native copy"
+        nameFilters: ["Excel workbooks (*.xlsx)"]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: gridModel.openCompatibility(selectedFile)
+        onAccepted: gridModel.openExcel(selectedFile)
     }
     Dialog {
         id: importNotice
@@ -129,7 +129,7 @@ Item {
         height: Math.min(300, controls.height - 32)
         standardButtons: Dialog.Ok | Dialog.Cancel
         contentItem: Label {
-            text: "The original Excel file stays unchanged. OmaSheets imports supported cells and formulas into a new .omasheets workbook. Formatting, charts, macros and some formulas may not carry over. A report shows what was preserved or omitted.\n\nChoose a source file, then a new destination."
+            text: "The original Excel file stays unchanged. OmaSheets imports supported cells and formulas into a new .omasheets workbook. Workbooks with unsupported features are refused before a copy is created. A report shows the preserved cells and formulas.\n\nChoose a source file, then a new destination."
             wrapMode: Text.WordWrap
         }
         onAccepted: importFile.open()

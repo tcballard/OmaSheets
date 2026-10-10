@@ -52,6 +52,36 @@ class IntegrationTests(unittest.TestCase):
         self.assertIn("[X-Added]", text)
         self.assertNotIn(DESKTOP_ID, text)
 
+    def test_upgrade_restores_retired_format_defaults(self):
+        from omasheets.integration import MIME_TYPES
+
+        original = b"[Default Applications]\napplication/vnd.ms-excel=previous.desktop;\n"
+        self.paths.mimeapps.parent.mkdir(parents=True)
+        self.paths.mimeapps.write_bytes(original)
+        with patch("omasheets.integration.MIME_TYPES", (*MIME_TYPES, "application/vnd.ms-excel")):
+            install(self.paths)
+        self.assertIn(f"application/vnd.ms-excel={DESKTOP_ID};previous.desktop;", self.paths.mimeapps.read_text())
+        self.assertTrue(install(self.paths)["changed"])
+        self.assertIn("application/vnd.ms-excel=previous.desktop;", self.paths.mimeapps.read_text())
+        self.assertNotIn("application/vnd.ms-excel;", self.paths.desktop.read_text())
+        uninstall(self.paths)
+        self.assertEqual(self.paths.mimeapps.read_bytes(), original)
+
+    def test_legacy_journal_removal_preserves_unrelated_mime_edits(self):
+        import json
+        from omasheets.integration import MIME_TYPES
+
+        with patch("omasheets.integration.MIME_TYPES", (*MIME_TYPES, "application/vnd.ms-excel")):
+            install(self.paths)
+        journal = json.loads(self.paths.journal.read_text())
+        journal.pop("mime_types")
+        self.paths.journal.write_text(json.dumps(journal))
+        with self.paths.mimeapps.open("ab") as handle:
+            handle.write(b"\n[User setting]\nkeep=yes\n")
+        uninstall(self.paths)
+        self.assertNotIn(DESKTOP_ID, self.paths.mimeapps.read_text())
+        self.assertIn("keep=yes", self.paths.mimeapps.read_text())
+
     def test_modified_desktop_entry_is_never_deleted(self):
         install(self.paths)
         self.paths.desktop.write_text("user modified this")

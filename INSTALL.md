@@ -65,9 +65,10 @@ saved workbooks; trying the example again requires a new filename and never
 replaces earlier work. Close the tour at any time; **Help → Try an example**
 starts another and **F1** opens the full keyboard reference.
 
-Excel and OpenDocument files have a separate opener on the welcome screen.
-Importing an Excel file creates a native copy and shows a report of features
-that could not be preserved.
+Opening a supported `.xlsx` workbook creates a native working copy after a
+strict preservation check. Unsupported features are reported before opening;
+the source file stays unchanged. `.xls`, `.xlsm` and `.ods` are currently refused.
+OmaSheets uses its owned Rust engine and Qt grid for all spreadsheet work.
 
 ### Older home-directory installations
 
@@ -103,7 +104,7 @@ sha256sum and Omarchy's system Python.
 If runtime dependencies are missing, the installer prints the required command:
 
 ```bash
-omarchy pkg add gtk3 libreoffice-fresh bubblewrap qt6-base qt6-declarative qt6-wayland
+omarchy pkg add python gtk3 bubblewrap qt6-base qt6-declarative qt6-wayland
 ```
 
 Run that command, then repeat the installer. It never installs system packages
@@ -150,7 +151,9 @@ The bootstrap installs these surfaces together:
 - Python package and native binaries under
   `$XDG_DATA_HOME/omasheets/app/` (normally `~/.local/share/omasheets/app/`);
 - the stable `~/.local/bin/omasheets` launcher;
-- the source-bound `omasheets-grid` Qt executable for native documents;
+- the source-bound `omasheets-kit`, `omasheets-service` and `omasheets-grid`
+  executables for opening, editing, recalculating and rendering workbooks;
+- the GTK Setup executable for the home-directory installation;
 - the Codex plugin under `~/.codex/plugins/omasheets/`, with an absolute MCP
   command and a personal marketplace entry in
   `~/.agents/plugins/marketplace.json`;
@@ -174,8 +177,10 @@ omasheets doctor
 omasheets --version
 ```
 
-`doctor` must report Bubblewrap, LibreOffice, Python UNO, the compatibility
-window, native Qt grid and desktop integration. The Omarchy bar plugin is optional. Restart or refresh Codex after the
+`doctor` must report the owned kit and service, Qt grid, Qt runtime, Bubblewrap,
+system Python and desktop integration. The home-directory installation also
+checks GTK for Setup. LibreOffice and UNO are not installed or required.
+The Omarchy bar plugin is optional. Restart or refresh Codex after the
 first installation so it discovers the new personal plugin and MCP server.
 
 Launch **OmaSheets** from the app menu, or run `omasheets`. Use **New workbook**
@@ -184,8 +189,8 @@ Enter or Ctrl+S to save the cell. Close and reopen with **Open workbook**
 (Ctrl+O) to continue. F1 shows the keyboard guide. The File menu also provides
 Excel import and XLSX, CSV or Parquet export, with a report of conversion limits.
 
-Open or select a compatibility workbook, then choose **Ask Agent** from either the
-compatibility window header or Omarchy bar. OmaSheets passes a fixed path-free prompt to
+Open or select a workbook, then choose **Ask Agent** from either the
+native grid or Omarchy bar. OmaSheets passes a fixed path-free prompt to
 `omarchy agent prompt`, which launches the default agent selected in Omarchy.
 The Codex plugin supplies native MCP discovery when Codex is that default; other
 agents can use their own MCP configuration or the prompt's provider-neutral

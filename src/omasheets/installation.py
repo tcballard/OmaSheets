@@ -31,7 +31,7 @@ PLUGIN_ENTRY = {
     "category": "Productivity",
 }
 ARCH_PACKAGES = (
-    "gtk3", "libreoffice-fresh", "bubblewrap",
+    "python", "gtk3", "bubblewrap",
     "qt6-base", "qt6-declarative", "qt6-wayland",
 )
 
@@ -130,15 +130,8 @@ def source_identity(root: Path) -> dict[str, str]:
     return {"commit": commit, "sha256": digest.hexdigest()}
 
 
-def dependency_report() -> dict[str, Any]:
+def dependency_report(*, include_setup: bool = True) -> dict[str, Any]:
     checks = [
-        ("GTK3", _first_existing("/usr/lib/libgtk-3.so", "/usr/lib/libgtk-3.so.0")),
-        ("LibreOffice", _first_existing("/usr/bin/soffice", "/usr/bin/libreoffice")),
-        ("LibreOfficeKitGTK", _first_existing(
-            "/usr/lib/libreofficekitgtk.so",
-            "/usr/lib/liblibreofficekitgtk.so",
-            "/usr/lib/libreoffice/program/liblibreofficekitgtk.so",
-        )),
         ("Bubblewrap", _first_existing("/usr/bin/bwrap")),
         ("Qt Quick", _first_existing("/usr/lib/libQt6Quick.so", "/usr/lib/libQt6Quick.so.6")),
         ("Qt Wayland", _first_existing(
@@ -147,25 +140,19 @@ def dependency_report() -> dict[str, Any]:
             "/usr/lib/qt6/plugins/platforms/libqwayland-generic.so",
         )),
         ("system Python", _first_existing("/usr/bin/python")),
-        ("Python UNO", _python_uno()),
     ]
+    if include_setup:
+        checks.insert(0, ("GTK3", _first_existing("/usr/lib/libgtk-3.so", "/usr/lib/libgtk-3.so.0")))
+    packages = ARCH_PACKAGES if include_setup else tuple(name for name in ARCH_PACKAGES if name != "gtk3")
     return {
         "ready": all(detail is not None for _, detail in checks),
         "checks": [{"name": name, "ok": detail is not None, "detail": detail or "missing"} for name, detail in checks],
-        "install_command": "omarchy pkg add " + " ".join(ARCH_PACKAGES),
+        "install_command": "omarchy pkg add " + " ".join(packages),
     }
 
 
 def _first_existing(*values: str) -> str | None:
     return next((value for value in values if Path(value).is_file()), None)
-
-
-def _python_uno() -> str | None:
-    python = _first_existing("/usr/bin/python")
-    if not python:
-        return None
-    result = subprocess.run([python, "-c", "import uno"], capture_output=True)
-    return "importable" if result.returncode == 0 else None
 
 
 def _launcher(app: Path) -> bytes:

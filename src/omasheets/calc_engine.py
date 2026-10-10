@@ -1,4 +1,4 @@
-"""Isolated LibreOffice Calc execution boundary."""
+"""Subprocess and artifact boundary for the owned Rust workbook engine."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from typing import Any, Callable
 from .errors import ConflictError, EngineError
 from .identity import FileIdentity
 from .paths import AppPaths
-from .policy import conversion_destination
 from .store import read_json, write_json_atomic
 
 
@@ -34,9 +33,7 @@ class CalcLimits:
 @dataclass(frozen=True, slots=True)
 class CalcConfig:
     bwrap: Path = Path("/usr/bin/bwrap")
-    python: Path = Path("/usr/bin/python")
-    soffice: Path = Path("/usr/bin/soffice")
-    worker: Path | None = None
+    kit: Path | None = None
     allow_unsafe_development_mode: bool = False
 
 
@@ -190,7 +187,7 @@ def _runtime_path_arguments(paths: tuple[Path, ...]) -> list[str]:
 
 
 class CalcEngine:
-    """Run one Calc job per process inside a networkless Bubblewrap sandbox."""
+    """Run one owned Rust job inside a networkless Bubblewrap sandbox."""
 
     def __init__(
         self,
@@ -206,23 +203,29 @@ class CalcEngine:
         self.paths.ensure()
 
     @property
-    def worker_path(self) -> Path:
-        return self.config.worker or Path(__file__).with_name("calc_worker.py")
+    def kit_path(self) -> Path:
+        if self.config.kit is not None:
+            return self.config.kit
+        configured = os.environ.get("OMASHEETS_KIT")
+        if configured:
+            return Path(configured)
+        bundled = Path(__file__).resolve().parents[2] / "bin" / "omasheets-kit"
+        if bundled.is_file():
+            return bundled
+        found = shutil.which("omasheets-kit")
+        return Path(found) if found else bundled
 
     def _sandbox_command(self, job: Path) -> list[str]:
         if not self.config.bwrap.is_file() and not self.config.allow_unsafe_development_mode:
             raise EngineError("Bubblewrap is required for Calc jobs")
-        if not self.config.python.is_file():
-            raise EngineError("system Python with LibreOffice UNO support is unavailable")
-        if not self.config.soffice.is_file():
-            raise EngineError("LibreOffice Calc is unavailable")
-        if not self.worker_path.is_file():
-            raise EngineError("Calc worker is unavailable")
+        kit = self.kit_path.resolve()
+        if not kit.is_file() or not os.access(kit, os.X_OK):
+            raise EngineError("the owned omasheets-kit binary is unavailable")
 
         if self.config.allow_unsafe_development_mode and not self.config.bwrap.is_file():
             return [
-                str(self.config.python),
-                str(self.worker_path),
+                str(kit),
+                "job",
                 str(job / "request.json"),
                 str(job / "result.json"),
             ]
@@ -241,32 +244,26 @@ class CalcEngine:
         ]
         command.extend(_runtime_path_arguments(tuple(Path(item) for item in ("/bin", "/sbin", "/lib", "/lib64"))))
         for runtime_path in (
-            "/etc/fonts",
             "/etc/passwd",
             "/etc/group",
             "/etc/nsswitch.conf",
             "/etc/host.conf",
             "/etc/hosts",
             "/etc/localtime",
-            "/etc/machine-id",
-            "/var/cache/fontconfig",
         ):
             if Path(runtime_path).exists():
                 command.extend(["--ro-bind", runtime_path, runtime_path])
         command.extend([
             "--bind", str(job), "/job",
-            "--ro-bind", str(self.worker_path), "/omasheets-worker.py",
+            "--ro-bind", str(kit), "/omasheets-kit",
             "--chdir", "/job",
             "--setenv", "HOME", "/job/home",
             "--setenv", "XDG_RUNTIME_DIR", "/job/runtime",
             "--setenv", "PATH", "/usr/bin",
             "--setenv", "LANG", "C.UTF-8",
             "--setenv", "LC_ALL", "C.UTF-8",
-            "--setenv", "PYTHONNOUSERSITE", "1",
-            "--setenv", "PYTHONPATH", "/usr/lib/libreoffice/program",
-            "--setenv", "SAL_USE_VCLPLUGIN", "svp",
-            str(self.config.python),
-            "/omasheets-worker.py",
+            "/omasheets-kit",
+            "job",
             "/job/request.json",
             "/job/result.json",
         ])
@@ -294,10 +291,18 @@ class CalcEngine:
         job = Path(tempfile.mkdtemp(prefix="calc-", dir=job_root))
         job.chmod(0o700)
         try:
-            for name in ("input", "out", "home", "runtime", "profile"):
+            for name in ("input", "out", "home", "runtime"):
                 (job / name).mkdir(mode=0o700)
             job_source = job / "input" / f"workbook{source.suffix.lower()}"
+            # File jobs are immutable snapshots. Live native workbooks use the
+            # existing native_* service tools; copying only their main SQLite
+            # file would omit edits that still reside in its WAL.
+            wal = source.with_name(f"{source.name}-wal")
+            if source.suffix.lower() == ".omasheets" and wal.exists() and wal.stat().st_size:
+                raise ConflictError("active native workbook requires the native service tools")
             _copy_stable_input_no_clobber(source, job_source)
+            if source.suffix.lower() == ".omasheets" and wal.exists() and wal.stat().st_size:
+                raise ConflictError("native workbook became active while preparing the job")
             request = {
                 "action": action,
                 "source": f"input/{job_source.name}",
@@ -305,10 +310,9 @@ class CalcEngine:
                 "limits": {
                     "max_cells": 250_000,
                     "max_formulas": 20_000,
-                    "max_sheets": 256,
+                    "max_sheets": 64,
                     "max_results": 200,
                 },
-                "soffice": str(self.config.soffice),
             }
             write_json_atomic(job / "request.json", request)
             command = self._sandbox_command(job)
@@ -334,25 +338,25 @@ class CalcEngine:
                         raise EngineError(detail[:512])
                 raise EngineError("isolated Calc job failed")
             if not result_path.is_file() or result_path.stat().st_size > 4 * 1024 * 1024:
-                raise EngineError("Calc worker returned no bounded result")
+                raise EngineError("Owned engine returned no bounded result")
             result = read_json(result_path)
             if result.get("ok") is not True:
-                raise EngineError(str(result.get("error", "Calc worker failed"))[:512])
+                raise EngineError(str(result.get("error", "Owned engine job failed"))[:512])
 
             for artifact_name, destination in (artifacts or {}).items():
                 relative = result.get("artifacts", {}).get(artifact_name)
                 if not isinstance(relative, str):
-                    raise EngineError(f"Calc worker omitted {artifact_name}")
+                    raise EngineError(f"Owned engine omitted {artifact_name}")
                 candidate = (job / relative).resolve()
                 output_root = (job / "out").resolve()
                 if output_root not in candidate.parents or not candidate.is_file():
-                    raise EngineError("Calc worker returned an invalid artifact path")
+                    raise EngineError("Owned engine returned an invalid artifact path")
                 if candidate.stat().st_size > self.limits.output_bytes:
-                    raise EngineError("Calc artifact exceeded its size limit")
+                    raise EngineError("Owned engine artifact exceeded its size limit")
                 _copy_no_clobber(candidate, destination)
             payload = result.get("result")
             if not isinstance(payload, dict):
-                raise EngineError("Calc worker returned an invalid result")
+                raise EngineError("Owned engine returned an invalid result")
             return payload
         finally:
             shutil.rmtree(job, ignore_errors=True)
@@ -394,17 +398,4 @@ class CalcEngine:
         )
 
     def convert_legacy(self, source: Path, *, destination: Path | None = None, preview: Path) -> dict[str, Any]:
-        expected = conversion_destination(source)
-        chosen = destination or expected
-        if chosen != expected:
-            raise ConflictError("legacy conversion destination must be the adjacent .xlsx path")
-        return self._execute(
-            "convert_xls",
-            source,
-            {},
-            # Keep the public adjacent workbook as the final copy. If the
-            # process is interrupted during artifact publication, at worst a
-            # private preview remains; no half-completed public conversion is
-            # presented as finished.
-            {"preview": preview, "workbook": chosen},
-        )
+        raise EngineError("legacy XLS conversion is not supported by the owned engine")

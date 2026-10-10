@@ -224,6 +224,48 @@ pub(crate) fn desktop_call(request: &Value) -> Result<Value, String> {
     client.call(request)
 }
 
+/// Writable imports use the same strict admission boundary as CLI opening.
+/// This helper runs on a worker thread, before the new native document is opened.
+pub(crate) fn import_workbook(source: &Path, output: &Path) -> Result<Value, String> {
+    let executable = if let Some(configured) = std::env::var_os("OMASHEETS_KIT") {
+        PathBuf::from(configured)
+    } else {
+        let sibling = std::env::current_exe()
+            .map_err(|error| error.to_string())?
+            .parent()
+            .ok_or("The installed application could not be located")?
+            .join("omasheets-kit");
+        if sibling.is_file() {
+            sibling
+        } else {
+            PathBuf::from("omasheets-kit")
+        }
+    };
+    let result = std::process::Command::new(executable)
+        .arg("import")
+        .arg(source)
+        .arg(output)
+        .output()
+        .map_err(|error| format!("Could not start the workbook engine: {error}"))?;
+    if result.stdout.len() > MAX_RESPONSE_BYTES {
+        return Err("Workbook import report exceeded its limit".into());
+    }
+    let report: Value = serde_json::from_slice(&result.stdout)
+        .map_err(|_| "Workbook engine returned an invalid import report")?;
+    if !result.status.success() || report["ok"] != true {
+        return Err(report["error"]
+            .as_str()
+            .unwrap_or("Workbook import was refused")
+            .chars()
+            .take(2000)
+            .collect());
+    }
+    report["probe"]["import_manifest"]
+        .as_object()
+        .map(|manifest| Value::Object(manifest.clone()))
+        .ok_or_else(|| "Workbook engine omitted the preservation report".into())
+}
+
 /// Publish only the user-selected workbook to the bounded agent bridge.
 pub(crate) fn publish_agent_session(
     path: &Path,
@@ -798,7 +840,12 @@ impl GridDocument {
             .sheets
             .get(state.current_sheet)
             .ok_or("current sheet is unavailable")?;
-        let mut request = json!({"kind": format!("export_{format}"),
+        let kind = if format == "xlsx" {
+            "export_xlsx_strict".to_string()
+        } else {
+            format!("export_{format}")
+        };
+        let mut request = json!({"kind": kind,
             "path": state.path, "branch": state.branch, "output": output});
         if format != "xlsx" {
             request["sheet"] = sheet.id.clone().into();

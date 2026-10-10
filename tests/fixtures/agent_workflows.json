@@ -2,57 +2,106 @@
   {
     "id": "explain",
     "request": "Explain why the selected total differs from the source rows.",
-    "inspection": ["describe_workbook", "read_range", "trace_formula"],
+    "inspection": [
+      "describe_workbook",
+      "read_range",
+      "trace_formula"
+    ],
     "may_plan": false,
     "required_operations": []
   },
   {
     "id": "clean",
     "request": "Clean this imported table and order it by date.",
-    "inspection": ["describe_workbook", "read_range"],
+    "inspection": [
+      "describe_workbook",
+      "read_range"
+    ],
     "may_plan": true,
-    "required_operations": ["set_range_values", "sort_range"]
+    "required_operations": [
+      "set_range_values",
+      "sort_range"
+    ]
   },
   {
     "id": "variance",
     "request": "Add budget variance values and highlight the result.",
-    "inspection": ["describe_workbook", "read_range"],
+    "inspection": [
+      "describe_workbook",
+      "read_range"
+    ],
     "may_plan": true,
-    "required_operations": ["set_formula", "fill_down", "format_cells"]
+    "required_operations": [
+      "set_range_formulas",
+      "format_cells"
+    ]
   },
   {
     "id": "reconcile",
     "request": "Reconcile the IDs and amounts on these two sheets.",
-    "inspection": ["describe_workbook", "read_range", "search_workbook"],
+    "inspection": [
+      "describe_workbook",
+      "read_range",
+      "search_workbook"
+    ],
     "may_plan": true,
-    "required_operations": ["add_sheet", "set_range_values", "set_range_formulas"]
+    "required_operations": [
+      "add_sheet",
+      "set_range_values",
+      "set_range_formulas"
+    ]
   },
   {
     "id": "summarise",
     "request": "Create a checked summary sheet from the inspected source data.",
-    "inspection": ["describe_workbook", "read_range"],
+    "inspection": [
+      "describe_workbook",
+      "read_range"
+    ],
     "may_plan": true,
-    "required_operations": ["add_sheet", "set_range_values", "set_range_formulas", "format_cells"]
+    "required_operations": [
+      "add_sheet",
+      "set_range_values",
+      "set_range_formulas",
+      "format_cells"
+    ]
   },
   {
     "id": "format",
     "request": "Standardise this table without changing any values.",
-    "inspection": ["describe_workbook", "read_range"],
+    "inspection": [
+      "describe_workbook",
+      "read_range"
+    ],
     "may_plan": true,
-    "required_operations": ["format_cells"]
+    "required_operations": [
+      "format_cells"
+    ]
   },
   {
     "id": "analyse",
     "request": "Audit the whole workbook and show me the important findings.",
-    "inspection": ["describe_workbook", "analyze_workbook"],
+    "inspection": [
+      "describe_workbook",
+      "analyze_workbook"
+    ],
     "may_plan": false,
     "required_operations": []
   },
   {
     "id": "management",
-    "request": "Build a checked management summary with a pivot and chart from the workbook audit.",
-    "inspection": ["describe_workbook", "analyze_workbook", "read_range"],
+    "request": "Build a checked management summary from the workbook audit using supported cells and formulas.",
+    "inspection": [
+      "describe_workbook",
+      "analyze_workbook",
+      "read_range"
+    ],
     "may_plan": true,
-    "required_operations": ["add_sheet", "set_range_values", "format_cells", "upsert_pivot", "upsert_chart"]
+    "required_operations": [
+      "add_sheet",
+      "set_range_values",
+      "set_range_formulas",
+      "format_cells"
+    ]
   }
 ]

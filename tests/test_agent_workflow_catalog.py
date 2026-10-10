@@ -2,8 +2,7 @@ import json
 from pathlib import Path
 import unittest
 
-from omasheets.mcp import TOOLS_BY_NAME
-from omasheets.operations import SUPPORTED_OPERATIONS
+from omasheets.mcp import TOOLS_BY_NAME, OPERATION_SCHEMA
 
 
 class AgentWorkflowCatalogTests(unittest.TestCase):
@@ -20,7 +19,7 @@ class AgentWorkflowCatalogTests(unittest.TestCase):
                 self.assertIn(scenario["id"], skill)
                 self.assertIn("describe_workbook", scenario["inspection"])
                 self.assertTrue(set(scenario["inspection"]) <= set(TOOLS_BY_NAME))
-                self.assertTrue(set(scenario["required_operations"]) <= set(SUPPORTED_OPERATIONS))
+                self.assertTrue(set(scenario["required_operations"]) <= set(OPERATION_SCHEMA["properties"]["type"]["enum"]))
                 self.assertEqual(bool(scenario["required_operations"]), scenario["may_plan"])
 
     def test_agent_protocol_has_no_publication_primitive(self):

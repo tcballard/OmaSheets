@@ -13,7 +13,7 @@ shipped native artifact and bounded reference-process scenarios.
 | Does OmaSheets need LOK's complete office ABI? | `native/libreofficekit/{window,lok_render}.cpp` | It needs a spreadsheet document/view boundary; the window delegates input and painting to GTK LOKDocView. |
 | Which direct rendering methods are used? | `lok_render.cpp` | Init, load, document type, initialize rendering, size, paint tile, tile mode and parts. |
 | Which interaction operations are used? | `window.cpp` | Sheets, zoom, viewport, text clipboard, Undo/Redo/Bold/Italic and native GTK input. |
-| What must an unsaved snapshot preserve? | `window.cpp`, `src/omasheets/live_bridge.py` | A complete visible document revision, original source identity and source bytes. Whether LOK saveAs changes dirty state was not established. |
+| What must an unsaved snapshot preserve? | `window.cpp` and the prior compatibility bridge | A complete visible document revision, original source identity and source bytes. Whether LOK saveAs changes dirty state was not established. |
 | Is the installed reference a shipped native artifact? | [REA artifact Evidence](evidence/native-kit/rea-artifact.json) | ELF dynamic library, 1,528,376 bytes, SHA-256 `1a26a77a054c57e2fef3db9b22d16a328563fe0e37f8d2127d57bb1513a540e5`. Inventory is not decompilation or behavioural proof. |
 | Can the old renderer produce a real spreadsheet tile? | Locally compiled `lok_render.cpp`, installed reference, generated M0 XLSX | Observed one 800×500 BGRA tile, one sheet, a valid RGB P6 output, unchanged source SHA-256. This establishes one bounded scenario only. |
 | Can the owned engine preserve a simple editable workbook? | Kit session tests and `examples/round_trip.rs` | Ten formulas retained, A2 changed to 20, dependent C2 recalculated to 22; snapshot/save/reopen digest agrees and source bytes remain unchanged. openpyxl independently reads the formula and cached result. |
@@ -69,9 +69,16 @@ map to native `Action`, `GridPage`, snapshot and export interfaces.
 | Hidden format loss | Package admission and actual import counts before writable open |
 | Reference observation | REA investigation dependency in CI; absent from product runtime |
 
-The default compatibility launcher and its LibreOffice dependency remain until
-wider admission and desktop gates are established. Native-kit operation itself
-does not start LibreOffice/UNO. XLS/XLSM/ODS, VBA, pivots, general printing/PDF,
-complete Excel semantics/layout, accessibility and physical Wayland input are
-unresolved capabilities, not parity claims. This branch is an initial usable
-replacement for supported native/XLSX workbooks.
+The default launcher, installer and release bundle now use only the owned kit,
+service and Qt grid. The LibreOfficeKit window, renderer, UNO worker and live
+save-copy bridge are removed from the product runtime. Compiler-free Arch CI
+asserts LibreOffice is absent while it opens XLSX through the default launcher,
+runs isolated Rust workbook jobs, exports/reopens reviewed edits and exercises
+native human review. The separate REA reference job remains an investigation
+dependency only.
+
+XLS/XLSM/ODS and unsupported XLSX source features are refused. General printing,
+full Excel semantics/layout, accessibility and physical Wayland input remain
+unresolved capabilities. Rust PDF previews are bounded cell previews. This
+branch displaces the product dependency for the supported native/XLSX subset;
+it does not claim complete LibreOfficeKit C ABI or Excel feature parity.

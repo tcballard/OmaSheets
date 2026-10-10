@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 from pathlib import Path
 import shutil
@@ -10,11 +11,76 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Any
 
 from .errors import EngineError, PolicyError
 from .identity import identify_regular_file
+from .policy import require_agent_readable
+from .bounded_process import run_bounded
+
+
+def kit_executable() -> Path | None:
+    configured = os.environ.get("OMASHEETS_KIT")
+    if configured:
+        candidate = Path(configured).expanduser()
+        return candidate if candidate.is_file() and os.access(candidate, os.X_OK) else None
+    discovered = shutil.which("omasheets-kit")
+    return Path(discovered) if discovered else None
+
+
+def open_workbook(path: Path) -> int:
+    """Admit XLSX before opening a durable native copy in the owned grid."""
+
+    source = path.expanduser().resolve(strict=True)
+    require_agent_readable(source)
+    identify_regular_file(source)
+    kit = kit_executable()
+    if kit is None:
+        raise EngineError("omasheets-kit is not installed; run OmaSheets setup")
+    if source.suffix.lower() == ".xlsx":
+        data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+        root = data / "omasheets/native-kit"
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        working = Path(tempfile.mkdtemp(prefix="workbook-", dir=root))
+        document = working / f"{source.stem}.omasheets"
+        # The Rust kit stages immutable bytes, refuses known losses, publishes
+        # without clobbering, and checks native replay before returning.
+        try:
+            result = run_bounded(
+                [str(kit), "import", str(source), str(document)],
+                byte_limit=4 * 1024 * 1024,
+                timeout_seconds=90,
+            )
+            if not result.ok:
+                try:
+                    detail = json.loads(result.output).get("error", "Workbook import was refused")
+                except (ValueError, AttributeError):
+                    detail = f"Workbook import did not complete ({result.status})"
+                raise EngineError(str(detail)[:2000])
+        except BaseException:
+            shutil.rmtree(working, ignore_errors=True)
+            raise
+        source = document
+    return _open_kit(source, kit)
+
+
+def _open_kit(source: Path, kit: Path) -> int:
+    grid = grid_executable()
+    service = service_executable()
+    if grid is None or service is None:
+        raise EngineError("The OmaSheets grid and document service must be installed")
+    environment = os.environ.copy()
+    environment.pop("OMASHEETS_DOCUMENT", None)
+    environment["OMASHEETS_GRID"] = str(grid)
+    environment["OMASHEETS_NATIVE_SERVICE"] = str(service)
+    return subprocess.Popen(
+        [str(kit), "open", str(source)],
+        env=environment,
+        close_fds=True,
+        start_new_session=True,
+    ).pid
 
 
 def grid_executable() -> Path | None:
@@ -160,8 +226,7 @@ def open_grid(path: Path) -> int:
     source = path.expanduser().resolve(strict=True)
     if source.suffix.lower() != ".omasheets":
         raise PolicyError("the native grid opens .omasheets documents only")
-    identify_regular_file(source)
-    return _open_host(source)
+    return open_workbook(source)
 
 
 def open_app() -> int:

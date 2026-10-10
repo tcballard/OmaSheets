@@ -11,6 +11,7 @@ For Omarchy on Linux x86_64. Setup uses Omarchy's GTK 3 runtime and internet acc
 If your file manager asks, choose Execute. Extraction preserves the executable permission.
 
 This is a development preview. Some Excel features are unsupported; read import/export reports.
+OmaSheets uses its owned spreadsheet engine and Qt grid. LibreOffice is not required.
 Your workbooks stay on your computer. Setup does not upload them.
 
 Project and installation help: https://github.com/tcballard/OmaSheets

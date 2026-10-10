@@ -1,79 +1,41 @@
 # OmaSheets
 
-**A spreadsheet for Omarchy, with agent changes you can review.**
+**A spreadsheet for Omarchy, with its own engine and agent changes you can review.**
 
-OmaSheets gives you a local spreadsheet window and a way to let your configured
-agent inspect workbooks, explain formulas and propose changes. You review the
-evidence and approve the result. The native document stack adds a Qt grid,
-a Rust formula engine and replayable edit history, with branches for proposed
-work and checks before a human-approved merge.
+OmaSheets uses an owned Rust calculation engine, a replayable native document
+store, an authenticated local service and a Qt grid. The development build does
+not require, start, or ship LibreOffice or LibreOfficeKit. REA was used to inspect
+the former document/view boundary; the implementation reuses OmaSheets' owned
+Rust stack. See the [investigation and retained evidence](docs/NATIVE-KIT-INVESTIGATION.md).
 
 **Development preview:** native `.omasheets` documents support keyboard editing,
-range copy/paste with relative formulas, undo/redo, selection-aware Ask Agent,
-native proposal review, bounded XLSX import, and
-CSV, XLSX and Parquet export. Existing Excel and OpenDocument workbooks use the
-separate LibreOfficeKit compatibility window. Native import/export reports
-what cannot be preserved; it does not promise full Excel fidelity.
+range copy/paste with relative formulas, undo/redo, formatting, charts, checks,
+selection-aware Ask Agent and human-reviewed proposals. Supported `.xlsx`
+workbooks open through the same grid after strict conversion to a durable native
+working copy. The original XLSX stays unchanged. Unsupported source features are
+refused before conversion; cached formula results never stand in for unsupported
+formulas. XLS, XLSM and ODS are currently refused.
 
-**Open OmaSheets:** after installing a matching current build, choose OmaSheets
-from the app launcher or run `omasheets`. Create a workbook with **Ctrl+N**,
-open one with **Ctrl+O**, and press **F1** for the keyboard guide. Native edits
-save when you finish each cell. **Ctrl+Space** opens the searchable command
-menu for formatting, sheets, data tools, import and export.
-Use **Agent → Ask Agent** (Ctrl+Shift+A) to propose changes and **Review
-proposals** (Ctrl+Shift+R) to inspect cell edits, calculated results and checks
-before approving or rejecting.
-[Install the Arch package](INSTALL.md) and choose **Try an example** for a guided first workbook.
-Published development builds need no GitHub login or local compiler; the
-published v0.0.2 release remains the older compatibility baseline.
+This replaces the product's dependency on LibreOfficeKit. It does not implement
+LibreOfficeKit's office-wide C ABI or promise full Excel compatibility. Native
+CSV/Parquet exports are explicit value projections; XLSX exports preserve
+representable formulas and disclose native-only metadata. They refuse formulas
+whose stable references cannot be expressed faithfully in XLSX.
+
+Open **OmaSheets** from the app launcher or run `omasheets`. Create a workbook
+with **Ctrl+N**, open one with **Ctrl+O**, and press **F1** for the keyboard guide.
+Native edits save when you finish each cell. **Ctrl+Space** opens the searchable
+command menu. **Agent → Ask Agent** (Ctrl+Shift+A) starts your configured Omarchy
+agent; **Review proposals** (Ctrl+Shift+R) shows proposed edits, derived results
+and checks before you approve or reject them.
 
 The [CI workflow](https://github.com/tcballard/OmaSheets/actions/workflows/ci.yml)
-checks replay, rejected edits, clipboard round-trips and compiler-free Arch
-installation. Real Omarchy acceptance, refreshed corpus evidence and release
-signing remain [v0.1.0 release gates](docs/V0.1-RELEASE.md).
-
-## v0.0.2 scope
-
-- Open `.xls`, `.xlsx`, `.xlsm`, and `.ods` in LibreOffice Calc.
-- Inspect workbook structure, values, formulas, named ranges, deduplicated cell
-  styles, and formula errors.
-- Audit every bounded used range for table structure, missing or duplicate
-  headers, duplicate rows, sparse columns, numeric outliers, formula errors,
-  existing charts and pivots, and management-summary opportunities.
-- Trace formula precedents and dependents within a bounded request.
-- Stage cell-value and formula changes against an immutable source hash.
-- Stage bounded bulk values, bulk formulas, and typed cell formatting.
-- Insert and delete bounded rows or columns, fill formulas with Calc's
-  reference-aware engine, and sort bounded ranges.
-- Create or update typed column, bar, line, pie and scatter charts; create,
-  update and refresh typed pivot tables with bounded sources.
-- Require every agent proposal to state its goal, summary, assumptions,
-  evidence and purpose-grouped operations.
-- Revise a verified proposal by superseding it; never silently mutate a plan
-  already presented for review.
-- Recalculate, reopen, render, and compare staged output before approval.
-- Require a local, explicit approval before publishing workbook bytes.
-- Preserve legacy `.xls` originals and convert only to a new `.xlsx` file.
-- Expose read and planning operations to agents over MCP; never expose commit.
-
-OmaSheets does not claim perfect Microsoft Excel compatibility. In particular,
-macro-enabled `.xlsm` workbooks are read-only in v0.0.2 and legacy conversion
-always requires manual review.
-
-The product and safety contracts are in [`docs/`](docs/).
-The in-place native-core decision and its measured milestone gates are in
-[`ADR-0003`](docs/ADR-0003-EVENT-SOURCED-NATIVE-CORE.md) and the
-[`OmaSheets roadmap`](docs/ROADMAP.md). The v0.0.2 release remains the
-compatibility and agent-safety baseline. The native document stack now exists
-on the development branch, but it is not a released compatibility claim.
-The evidence required before the first public native alpha is listed separately
-in the [`v0.1.0 native release gate`](docs/V0.1-RELEASE.md).
-The native service can also convert a bounded `.xlsx` source into a new
-replayable `.omasheets` document. It never replaces an output file and returns
-a loss manifest; this is an alpha import path, not a full-fidelity Excel claim.
-The same authenticated service binary ships inside the verified native bundle;
-the compiler-free Arch acceptance runs its complete local review workflow after
-installation.
+builds and installs the product in Arch containers without LibreOffice, verifies
+shared-library dependencies, exercises the default XLSX launcher and tests
+isolated agent jobs, native review, replay and removal. Physical Wayland input,
+accessibility, large-workbook measurements and wider compatibility remain
+[v0.1.0 release gates](docs/V0.1-RELEASE.md). The already published v0.0.2 release
+is the older compatibility build; these changes are on the development branch.
 
 ## Install on Omarchy
 
@@ -104,91 +66,75 @@ user's configured default agent. The agent starts from the path-free
 `omasheets://session` resource, which carries the live selection and workflow
 contract. Agents without OmaSheets MCP discovery can use the equivalent bounded
 `omasheets agent-session` JSON command bridge; neither surface exposes
-publication. Flagship v0.0.2 workflows
-are formula explanation, bounded data cleanup, variance analysis, cross-sheet
-reconciliation, checked summaries, formatting-only cleanup, workbook-wide
-audit, and audit-backed management summaries with pivots and charts.
+publication. Current workflows include formula explanation, bounded data cleanup, variance
+analysis, cross-sheet reconciliation, checked summaries and formatting.
 
 ## Commands
 
 ```bash
 omasheets
 omasheets doctor
+omasheets open workbook.xlsx
 omasheets launch workbook.omasheets
-omasheets launch workbook.xlsx
-omasheets open workbook.xls
 omasheets window workbook.xlsx
 omasheets select workbook.xlsx
-omasheets convert workbook.xls
 omasheets status --json
 omasheets agent-session
 omasheets agent-session resource
 omasheets agent-session tools
 omasheets mcp serve
-omasheets lok status
-omasheets lok render workbook.xls --output /tmp/workbook-tile.ppm
+omasheets-kit probe workbook.xlsx
+omasheets-kit import workbook.xlsx workbook.omasheets
+omasheets-kit open workbook.omasheets
+omasheets-kit export workbook.omasheets copy.xlsx
 ```
 
-The real Omarchy, Wayland and LibreOffice release pass remains in
-[`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).
+Every file-opening command uses the owned engine. There is no compatibility
+fallback and no `lok` or legacy conversion command. XLSX conversion keeps a
+working file under the user's OmaSheets data directory; closing the window does
+not delete it. Use **Export workbook as Excel** to produce a separate XLSX copy.
+The [kit API](crates/omasheets-kit/README.md) exposes the same session boundary.
 
-`omasheets` and `omasheets launch` without a path open the start screen, with
-New, Open, Import Excel and compatibility-window actions. New workbooks start
-with one sheet, 1,000 rows and 26 columns, at the filename you choose. Enter,
-Tab or Ctrl+S commits a cell draft; Escape cancels it. Close and reopen the
-`.omasheets` file to continue working. Commands → Workbook → Export writes a new XLSX workbook
-or the current sheet as CSV or Parquet and displays the conversion report.
-Creation and export refuse to overwrite existing files.
+## Agent work
 
-`omasheets launch FILE` is the production desktop-entry boundary. It opens native
-`.omasheets` documents in the Qt grid and compatibility formats in the
-LibreOfficeKit window. The Qt grid starts an authenticated native service on
-demand, reuses an existing user service when one is already running, and stops
-only the transient service it owns after the last launched grid closes. Closing
-the window that originally started the service does not interrupt other open
-grids. Failed service startup is bounded and cleans up the attempted process.
+**Ask Agent** invokes `omarchy agent prompt`. An agent starts from the path-free
+`omasheets://session` resource, or the equivalent `omasheets agent-session`
+JSON bridge when MCP discovery is unavailable. Live native windows use the
+`native_*` tools against the owned service; cell edits persist immediately, and
+proposals live on branches until a human approves them in the Qt review window.
 
-Development builds also provide [OmaSheets Kit](crates/omasheets-kit/README.md),
-an owned Rust replacement path for supported XLSX workbooks. Run
-`omasheets-kit probe FILE.xlsx` to see the admission report, then
-`omasheets-kit open FILE.xlsx` to edit a durable native working copy in the Qt
-grid. Unsupported formulas and package features are refused before conversion;
-the source workbook is preserved. This path has no LibreOffice/UNO runtime
-dependency and remains explicit while broader compatibility is developed.
+For a workbook explicitly selected with `omasheets select`, isolated Rust jobs
+provide description, bounded reads, search, tracing, audit, batched queries and
+PDF cell previews. Staging supports values/formulas/ranges, clearing, supported
+cell formatting, sheet creation/rename/deletion, row/column changes and a
+single-key whole-row sort. Fill, chart and pivot operations in this selected-file
+job interface are refused. Native UI capabilities have a separate service API.
 
-The native workbook window source is in
-[`native/libreofficekit/`](native/libreofficekit/). It embeds LibreOfficeKit's
-interactive tile engine in OmaSheets-owned GTK chrome with scrolling,
-selection, keyboard editing, sheets, zoom and save-copy controls. CI exercises
-the installed XDG binary under Xvfb; real Omarchy/Wayland acceptance is still a
-separate release gate.
+Selected-file plans bind source identity, operations, evidence and staged output.
+The Rust kit exports and reopens a staged workbook before local review; the user
+can approve a new copy or an explicit replacement. Agents receive no publication
+or undo primitive. `.omasheets` files with live SQLite WAL state must be accessed
+through the native service, rather than copied by a selected-file job.
 
-The native window and MCP server share one immutable workbook session. Agents
-can observe its bounded, path-free selection and viewport through
-`omasheets://session`, inspect the relevant cells, and stage semantic changes;
-they cannot drive pointer/keyboard input or publish workbook bytes.
+Owned PDF previews show at most eight sheets, fifty rows and twelve columns per
+sheet and disclose cropping. They are cell-value previews, not print-layout or
+Excel-equivalence evidence.
 
-While the window is open, those reads and plans are based on private
-LibreOfficeKit save-copies of the exact in-memory document, including unsaved
-work. Agents never mutate the visible document; verified output still goes
-through local review and live plans are copy-only.
+## Development
 
-Verified proposals appear inside the native window as an OmaSheets-owned diff
-overlay. It shows the agent's goal, explanation, assumptions and purpose groups
-beside cited audit findings and bounded cell-level before/after values,
-formulas, formatting, charts and pivots. It
-flags destructive operations and truncation and never paints changes into
-LibreOfficeKit. The user can hide it or explicitly approve a new, no-clobber
-workbook copy from the overlay.
+```bash
+PYTHONPATH=src python -m unittest discover -s tests -q
+python scripts/check_release.py
+cargo +1.88.0 fmt --all --check
+cargo +1.88.0 clippy --workspace --all-targets --locked -- -D warnings
+cargo +1.88.0 test --workspace --locked
+```
 
-## Status
+Python remains bootstrap/MCP/process glue; parsing, calculation, workbook jobs
+and document editing run in Rust. The release bundle contains only
+`omasheets-kit`, `omasheets-service`, `omasheets-grid` and `omasheets-setup`.
+The Arch package omits Setup and uses pacman for updates. LibreOffice exists
+only in a separate [REA reference investigation job](.github/workflows/native-kit.yml).
 
-Early development. v0.0.2 has an automated Arch install/native/agent/uninstall
-gate and has received maintainer hands-on testing. The repository does not yet
-record evidence for every item in the complete Omarchy/Wayland release runbook,
-and no perfect Excel compatibility claim is made.
-
-Large-workbook performance claims are likewise evidence-gated. The
-dependency-free [performance harness](docs/PERFORMANCE.md) generates truthful
-dense, sparse and formula workloads and records Linux process-tree RSS, PSS and
-USS rather than relying on a single sparse used-range smoke file.
+The product contracts, roadmap and outstanding native release gates are in
+[docs](docs/). This migration stays on a feature branch until review and CI pass.

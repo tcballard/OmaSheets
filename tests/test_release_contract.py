@@ -203,6 +203,7 @@ class ReleaseWorkflowPinTests(unittest.TestCase):
             (self.workflow.replace("pacman -Syyuu", "pacman -Syu"), "converge on the snapshot"),
             (self.workflow.replace("archive.archlinux.org/repos/", "mirror.example/"), "Archive snapshot"),
             (self.workflow.replace("actions/attest-build-provenance@", "actions/other@"), "not attested"),
+            (self.workflow.replace("git python rust", "git python rust libreoffice-fresh"), "cannot depend on LibreOffice"),
             (self.workflow + "        env:\n          KEY: ${{ secrets.SIGNING_KEY }}\n", "no signing secret"),
         ):
             with self.subTest(message=message), self.assertRaisesRegex(AssertionError, message):

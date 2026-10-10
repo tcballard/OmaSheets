@@ -15,6 +15,13 @@ test ! -e /home/builder/.local/share/omasheets/app
 pacman -Qk omasheets-bin
 test -x /usr/bin/omasheets-kit
 /usr/bin/omasheets-kit --provenance
+test ! -e /usr/lib/omasheets/bin/omasheets-window
+test ! -e /usr/lib/omasheets/bin/omasheets-lok-render
+PYTHONPATH=src python - <<'PY'
+from pathlib import Path
+from scripts.build_native_bundle import verify_owned_runtime
+verify_owned_runtime(Path('/usr/lib/omasheets/bin'), ('omasheets-kit', 'omasheets-service', 'omasheets-grid'))
+PY
 desktop-file-validate /usr/share/applications/io.github.tcballard.OmaSheets.desktop
 test ! -e /usr/lib/omasheets/bin/omasheets-setup
 test ! -e /usr/lib/omasheets/bin/omasheets-update

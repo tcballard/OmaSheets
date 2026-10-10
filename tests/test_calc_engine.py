@@ -23,13 +23,12 @@ class CalcEngineTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.paths = AppPaths(self.root / "state", self.root / "cache", self.root / "runtime")
-        for name in ("bwrap", "python", "soffice", "worker.py"):
+        for name in ("bwrap", "omasheets-kit"):
             (self.root / name).write_text("placeholder")
+            (self.root / name).chmod(0o700)
         self.config = CalcConfig(
             bwrap=self.root / "bwrap",
-            python=self.root / "python",
-            soffice=self.root / "soffice",
-            worker=self.root / "worker.py",
+            kit=self.root / "omasheets-kit",
         )
 
     def tearDown(self):
@@ -44,17 +43,17 @@ class CalcEngineTests(unittest.TestCase):
         self.assertIn("--clearenv", command)
         self.assertNotIn("--share-net", command)
         self.assertNotIn(str(Path.home()), command)
-        self.assertIn("/omasheets-worker.py", command)
-        self.assertEqual(command[command.index("SAL_USE_VCLPLUGIN") + 1], "svp")
+        self.assertEqual(command[-4:], ["/omasheets-kit", "job", "/job/request.json", "/job/result.json"])
+        self.assertNotIn("PYTHONPATH", command)
+        self.assertNotIn("SAL_USE_VCLPLUGIN", command)
+        self.assertFalse(any("libreoffice" in argument.lower() or "soffice" in argument.lower() for argument in command))
         if Path("/etc/passwd").exists():
             self.assertIn("/etc/passwd", command)
 
     def test_missing_bubblewrap_fails_closed(self):
         config = CalcConfig(
             bwrap=self.root / "missing",
-            python=self.root / "python",
-            soffice=self.root / "soffice",
-            worker=self.root / "worker.py",
+            kit=self.root / "omasheets-kit",
         )
         with self.assertRaises(EngineError):
             CalcEngine(self.paths, config=config)._sandbox_command(self.root)
@@ -229,11 +228,11 @@ class CalcEngineTests(unittest.TestCase):
         self.assertTrue(swapped)
         self.assertFalse(destination.exists())
 
-    def test_conversion_destination_cannot_be_redirected(self):
+    def test_legacy_conversion_is_an_explicit_unsupported_capability(self):
         engine = CalcEngine(self.paths, config=self.config)
         source = self.root / "legacy.xls"
         source.write_bytes(b"xls")
-        with self.assertRaises(ConflictError):
+        with self.assertRaisesRegex(EngineError, "not supported"):
             engine.convert_legacy(
                 source,
                 destination=self.root / "elsewhere.xlsx",
@@ -294,6 +293,48 @@ class CalcEngineTests(unittest.TestCase):
         self.assertEqual(requests[0]["action"], "query")
         self.assertEqual(requests[0]["arguments"], {"queries": queries})
         self.assertEqual([item["id"] for item in result["items"]], ["structure", "cells"])
+
+    def test_development_mode_executes_only_the_owned_binary(self):
+        config = CalcConfig(
+            bwrap=self.root / "missing", kit=self.root / "omasheets-kit",
+            allow_unsafe_development_mode=True,
+        )
+        self.assertEqual(CalcEngine(self.paths, config=config)._sandbox_command(self.root), [
+            str(self.root / "omasheets-kit"), "job", str(self.root / "request.json"), str(self.root / "result.json"),
+        ])
+
+    def test_missing_owned_binary_fails_before_starting_a_job(self):
+        config = CalcConfig(bwrap=self.root / "bwrap", kit=self.root / "missing")
+        with self.assertRaisesRegex(EngineError, "owned omasheets-kit"):
+            CalcEngine(self.paths, config=config)._sandbox_command(self.root)
+
+    def test_native_file_jobs_reject_an_active_wal(self):
+        source = self.root / "book.omasheets"
+        source.write_bytes(b"database")
+        wal = source.with_name(f"{source.name}-wal")
+        wal.write_bytes(b"uncheckpointed edits")
+        calls = []
+        engine = CalcEngine(self.paths, config=self.config, runner=lambda *args, **kwargs: calls.append(args))
+        with self.assertRaisesRegex(ConflictError, "native service"):
+            engine.describe(source, include_formulas=False)
+        self.assertEqual(calls, [])
+        self.assertEqual(source.read_bytes(), b"database")
+        self.assertEqual(wal.read_bytes(), b"uncheckpointed edits")
+
+    def test_native_file_jobs_reject_a_wal_created_during_copy(self):
+        source = self.root / "book.omasheets"
+        source.write_bytes(b"database")
+        wal = source.with_name(f"{source.name}-wal")
+        copy = _copy_stable_input_no_clobber
+
+        def became_active(source, destination):
+            result = copy(source, destination)
+            wal.write_bytes(b"new live edit")
+            return result
+
+        with patch("omasheets.calc_engine._copy_stable_input_no_clobber", side_effect=became_active):
+            with self.assertRaisesRegex(ConflictError, "became active"):
+                CalcEngine(self.paths, config=self.config).describe(source, include_formulas=False)
 
 
 if __name__ == "__main__":

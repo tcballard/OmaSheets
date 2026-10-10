@@ -1,182 +1,68 @@
-# v0.0.2 acceptance runbook
+# Owned-engine acceptance
 
-Run this on an Omarchy `quattro` workstation. Automated Arch CI covers policy,
-transactions, the pinned plugin validator, wheel packaging, user-local install,
-native launch under Xvfb, live bridge, diff overlay, provenance and uninstall.
-The native/agent job also exercises evidence-cited planning, structural rows,
-formula fill, sorting, plan supersession and the non-publishing apply handoff.
-It does not prove a real Quickshell/Wayland session, physical input,
-accessibility, desktop portal behavior or file-manager integration.
+Automated CI builds and installs OmaSheets on Arch without LibreOffice. It
+checks ELF/shared-library dependencies, default XLSX opening, isolated Rust
+workbook jobs, owned PDF previews, export/reopen, reviewed agent changes and
+installation/removal. REA reference rendering runs separately and does not
+establish product runtime compatibility.
 
-## Preconditions
+## On Omarchy
 
-```bash
-omarchy plugin add https://github.com/tcballard/OmaSheets.git --enable
-~/.config/omarchy/plugins/io.github.tcballard.omasheets/bin/omasheets-plugin install
-omasheets --version
-omasheets doctor
-omarchy plugin validate ~/.config/omarchy/plugins/io.github.tcballard.omasheets
-```
+1. Install a package or bundle built from the exact reviewed commit, run
+   `omasheets doctor`, and retain its provenance and dependency report.
+2. Confirm `libreoffice` and `soffice` are absent, then run `omasheets` and use
+   **Try an example**. Edit a value and formula, close, reopen and compare the
+   persisted calculated values and native digest.
+3. Run `omasheets launch sample.xlsx` for a supported workbook. Verify it opens
+   in the Qt grid, the original SHA-256 remains unchanged, and the durable
+   `.omasheets` working copy survives closing the window.
+4. Repeat through the file manager and the app's Excel/import commands. Try an
+   unsupported formula, named range, macro, external link and pivot source;
+   each must refuse before a native copy is published. XLS/XLSM/ODS must refuse.
+5. Export a new XLSX copy. Independently inspect formula text, calculated values
+   and supported styles. A formula whose stable binding cannot be represented
+   must refuse before writing an output. Review the export's native-only
+   metadata limitations; an XLSX projection does not preserve native history.
+6. Open two windows sharing the owned service. Close the window that started it
+   and verify the other remains usable. Close both and verify a transient
+   service exits. An independently started user service must remain running.
 
-`doctor` must report Bubblewrap, LibreOffice, Python UNO, the native engine,
-the Qt grid, desktop integration and the Omarchy plugin as ready. Confirm Codex lists the
-OmaSheets personal plugin after a refresh/restart and can start its MCP server.
+## Agent jobs and native review
 
-Use disposable workbooks containing formulas, formatting, a chart, multiple
-sheets, and one filename with spaces and shell punctuation. Record SHA-256
-hashes before every mutation test.
+1. Use **Ask Agent** with the configured Omarchy default agent. Read
+   `omasheets://session` or `omasheets agent-session resource`. Check that it
+   contains live native selection/overview without a filesystem path.
+2. Use `native_read` and `native_lineage` after a human cell edit. Propose a change
+   with `native_propose`. Verify only its branch changes; inspect derived values,
+   lineage and checks through `native_review` and the Qt review panel.
+3. Cancel, approve and reject separate proposals. A failed check or stale
+   revision must block approval. Confirm approval and rejection survive reopen.
+4. Separately select an immutable supported XLSX using `omasheets select`.
+   Describe, read, search, trace, query and audit it through selected-file tools.
+   A query batch must share one sealed evidence record and preserve order; an
+   invalid subquery must create no partial observation.
+5. Stage supported value/formula/range/format or structural changes. Inspect
+   sealed source identity, before/after values, export/reopen verification and
+   bounded PDF preview. Selected-file fill/chart/pivot operations must refuse.
+6. Approve a new copy locally, verify source preservation, and independently
+   read exported cells/formulas. Test explicit replacement/undo on disposable
+   files; source drift or later edits must block publication/undo.
+7. Active native documents use the native service. Selected-file jobs reject
+   live SQLite WAL state rather than copying an incomplete database.
 
-## Native Qt grid on Wayland
+## Physical desktop gates
 
-1. Create or import a disposable `.omasheets` document with at least two sheets,
-   formulas, text, numbers and enough rows and columns to scroll in both axes.
-2. Run `omasheets launch sample.omasheets`. Confirm the Qt grid opens, shows the
-   document's sheets and cells, and does not open LibreOffice Calc.
-3. Double-click the same document in the file manager. Confirm the
-   `application/x-omasheets` association routes it through the same grid.
-4. Edit a value and formula, switch sheets, close the grid, reopen the document
-   and confirm deterministic replay preserved the edits. Retain the document
-   digest from before and after replay.
-5. Exercise keyboard navigation and editing with arrows, Enter, F2, Escape,
-   Page Up, Page Down, Home and End. Repeat at 100%, 150% and 200% display scale.
-6. With an Omarchy theme active, confirm grid chrome and semantic colors follow
-   the resolved theme without making selection, errors or focus ambiguous.
-7. Test keyboard-only operation with the accessibility inspector enabled.
-   Record the exposed roles, names, focus order and any blockers; do not infer
-   accessibility from appearance alone.
-8. Measure the roadmap fixtures on the declared hardware: cold open of 10 MB /
-   100k cells, keystroke-to-paint p95, one-million-row continuous scroll, and
-   idle RSS. Record cold/warm state and the exact metric for each result.
-9. Close the grid and confirm a transient native service exits. Repeat while the
-   opt-in user service is already running and confirm the grid reuses it and
-   leaves it running.
-
-Passing this section supplies the hands-on Wayland, input, theme and
-accessibility evidence that CI's Xvfb launch cannot provide.
-
-## Native LibreOfficeKit window on Wayland
-
-1. Run `omasheets lok status` and confirm all three checks are ready.
-2. Run `omasheets lok render sample.xls --output /tmp/sample-tile.ppm`.
-3. Run `omasheets window sample.xlsx` and verify the title bar identifies
-   OmaSheets rather than Calc.
-4. Select a cell and a dragged range; type a value and a formula; copy and
-   paste; undo and redo; toggle bold; and switch every sheet.
-5. Scroll horizontally and vertically with mouse, touchpad and keyboard. Check
-   that tiles repaint without stale seams and the address/formula surfaces track
-   the selected cell.
-6. Save a copy, reopen it in both OmaSheets and Calc, and confirm values,
-   formulas, formats and sheet inventory survive. Confirm an existing output is
-   never replaced without a separate explicit workflow.
-7. Open the PPM and compare the first visible region against Calc. Record load
-   and render latency separately for cold and warm runs.
-8. Repeat with `.xlsx`, `.xlsm`, and `.ods`, a non-ASCII filename, and a broken
-   workbook. Confirm failures never alter the source or an existing output.
-9. Open a workbook with at least 100,000 used rows and 50 used columns. Confirm
-    initial load stays below 15 seconds, first paint below 5 seconds, and RSS
-    below 1 GiB; record the actual hardware and measured values.
-10. Drag both scrollbars continuously for 10 seconds. Confirm controls remain
-    responsive and no stale tile seams remain after input stops.
-
-Passing this section supplies the hands-on Wayland evidence CI lacks. It does
-not prove Excel equivalence or close the remaining accessibility, dialog and
-crash-containment limitations.
-
-## Native opening and selection
-
-1. Double-click `.xls`, `.xlsx`, `.xlsm`, and `.ods` files in the file manager.
-2. Confirm `.xlsx` and `.ods` open editable in the OmaSheets window, while
-   `.xls` and `.xlsm` open read-only and preserve their source bytes.
-3. Run `omasheets select sample.xlsx` and open the bar panel.
-4. Confirm the panel shows only the basename and format, never a filesystem
-   path, and that right-click opens the exact selected workbook.
-
-## Agent read and staged change
-
-1. Configure a non-Codex Omarchy default agent, then choose **Ask Agent** in the
-   native header and Omarchy panel. Confirm each opens that default agent with
-   no workbook path in its initial prompt. Repeat once with Codex as default.
-2. Read `omasheets://session` and confirm it contains the selected workbook's
-   public session and current focus but no source path or publication authority.
-   With MCP discovery disabled, repeat the same bounded read
-   through `omasheets agent-session resource` and one tool call through
-   `omasheets agent-session call`; confirm no publication tool is listed.
-3. Start `omasheets mcp serve` through another MCP client if needed.
-4. Read `omasheets://window` while changing cells and sheets in the native
-   window. Confirm address, formula, sheet, zoom and visible rectangle follow
-   within 100 ms, and confirm the resource contains no filesystem path.
-5. Make an unsaved value and formula edit, then use `read_range`. Confirm the
-   result reports `document_source: live_window` and contains both edits while
-   the source file hash remains unchanged. Retain each returned `evidence_id`.
-6. Use one `query_workbook` call to describe the workbook, read a range, search,
-   and trace one formula. Confirm the results retain input order, share one
-   evidence ID, and reflect the same unsaved snapshot. Repeat with an invalid
-   nested query and confirm that no partial result or evidence is created. Run
-   the separate audit tool, then confirm a plan cannot cite evidence from
-   another session or semantic live snapshot.
-7. Confirm the audit covers every used sheet, reports formula errors and data
-   quality findings, inventories existing charts and pivots, and suggests only
-   bounded management-summary candidates. Cite its `evidence_id` in a plan and
-   confirm the native overlay shows the findings as read-only audit cards.
-8. Stage scalar value, formula, formatting, bounded range, inserted row,
-   reference-aware fill and bounded sort changes. Confirm the native diff
-   overlay opens and shows the goal, explanation, assumptions, purpose groups,
-   red/green before-and-after records, and destructive flags. Confirm hiding it
-   does not change the workbook and that a proposal over 200 visible changes
-   states it is truncated.
-9. Ask for a management summary. Confirm the plan creates a separate sheet,
-   adds or updates a named pivot and chart, and groups them by purpose. Reopen
-   the staged `.ods` in Calc and confirm both objects survive. Repeat with
-   `.xlsx`, confirm the pivot compatibility warning appears, and manually open
-   the result in Microsoft Excel before release sign-off.
-10. Refresh the named pivot after changing its staged source data and confirm
-    save/reopen object fingerprints and the rendered preview both pass.
-11. Give a correction such as “exclude Forecast” and confirm `revise_plan`
-   creates a new plan, the prior plan becomes `superseded`, and only the new
-   plan is actionable.
-12. Change a different live cell after staging and invoke the MCP apply handoff;
-   confirm semantic fingerprint drift rejects the plan. Restage without further
-   edits and confirm the handoff returns local review instructions
-   and still does not write a workbook.
-13. From the overlay choose **Approve & Save a Copy**. Cancel the confirmation
-   first and confirm no output appears. Repeat, approve a new destination, and
-   confirm the verified copy appears, the overlay closes and the original and
-   open in-memory workbook remain unchanged. Also repeat the terminal review,
-   enter a wrong token and confirm that path still writes nothing.
-
-## Replacement and undo
-
-1. Stage another change and run the explicit local approval command with
-   `--replace`.
-2. Confirm a private verified backup and hash-chained receipt exist.
-3. Run `omasheets undo <receipt-id>`, type the exact undo token, and confirm the
-   original SHA-256 is restored.
-4. Modify the published workbook after replacement and confirm undo refuses to
-   overwrite those later bytes.
-
-## Legacy conversion
-
-```bash
-omasheets convert sample.xls
-```
-
-Confirm `sample.xls` retains its original SHA-256, a new adjacent
-`sample.xlsx` and PDF preview are created, and the receipt says
-`manual_review_required: true` and `excel_equivalence_claimed: false`. Open both
-versions and manually compare sheets, formulas, formatting, charts, named
-ranges, and any warnings.
-
-The maintainer has reported completing a hands-on test. Record the tested
-commit, Omarchy version, hardware, files, measurements and pass/fail notes here
-before treating every numbered item above as release evidence.
+Record the commit, Omarchy/Qt version, machine and fixture identities. Exercise
+keyboard editing/navigation, copy/paste, undo/redo, mouse/touchpad scrolling,
+sheet changes, themes and 100/150/200% display scale on Wayland. Inspect actual
+accessibility roles, labels and focus. Measure cold open, editing latency,
+continuous scroll and idle memory on the declared hardware. Xvfb screenshots
+do not establish these physical desktop or accessibility results.
 
 ## Removal
 
-1. Add an unrelated MIME association and a separate personal Codex marketplace
-   entry after installation.
-2. Run `~/.local/bin/omasheets uninstall`.
-3. Confirm OmaSheets application bytes, launcher, Codex plugin and associations
-   are removed; the unrelated edits remain; and an independently modified
-   desktop entry is preserved and reported as a conflict rather than deleted.
-4. Resolve any reported conflict, repeat uninstall, then run
-   `omarchy plugin remove io.github.tcballard.omasheets`.
+Add unrelated MIME and Codex plugin entries, uninstall OmaSheets, and confirm
+owned launchers/application/integration are removed while workbooks and those
+unrelated entries remain. A user-modified owned file must be preserved and
+reported as a conflict. Upgrading an older installation must remove retired
+LOK executables without deleting workbooks or modifying their source bytes.

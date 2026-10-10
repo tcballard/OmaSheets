@@ -1,32 +1,21 @@
 from pathlib import Path
-import tempfile
 import unittest
 from unittest.mock import patch
 
 from omasheets.desktop import open_workbooks
-from omasheets.errors import PolicyError
+from omasheets.errors import EngineError
 
 
 class DesktopTests(unittest.TestCase):
-    def test_open_uses_an_argv_vector_without_a_shell(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            workbook = Path(temporary) / "budget $(touch nope).xls"
-            workbook.write_bytes(b"xls")
-            with patch("omasheets.desktop.calc_executable", return_value="/usr/bin/libreoffice"), patch(
-                "omasheets.desktop.subprocess.Popen"
-            ) as popen:
-                popen.return_value.pid = 42
-                self.assertEqual(open_workbooks([workbook]), 42)
-            args, kwargs = popen.call_args
-            self.assertEqual(args[0], ["/usr/bin/libreoffice", "--calc", "--", str(workbook.resolve())])
-            self.assertNotIn("shell", kwargs)
+    def test_all_documents_use_owned_launchers(self):
+        paths = [Path("book.xlsx"), Path("native.omasheets")]
+        with patch("omasheets.desktop.open_workbook", side_effect=[41, 42]) as launch:
+            self.assertEqual(open_workbooks(paths), 42)
+        self.assertEqual([call.args[0] for call in launch.call_args_list], paths)
 
-    def test_open_rejects_unsupported_files(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            document = Path(temporary) / "notes.txt"
-            document.write_text("no")
-            with self.assertRaises(PolicyError):
-                open_workbooks([document])
+    def test_open_requires_a_document(self):
+        with self.assertRaises(EngineError):
+            open_workbooks([])
 
 
 if __name__ == "__main__":

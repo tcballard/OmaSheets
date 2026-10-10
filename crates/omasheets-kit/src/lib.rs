@@ -6,6 +6,7 @@
 //! file. [`probe`] reports that admission decision without publishing a file.
 
 mod admission;
+pub mod jobs;
 
 use omasheets_core::{Actor, ActorKind, Command};
 use omasheets_service::spreadsheet::{Action, EditResult};
@@ -462,7 +463,7 @@ impl WorkbookSession {
         self.dirty
     }
 
-    fn document(&mut self) -> Result<omasheets_service::DocumentSummary, KitError> {
+    pub fn document(&mut self) -> Result<omasheets_service::DocumentSummary, KitError> {
         match self.service.handle(Request::Document {
             path: self.working_path.clone(),
             branch: None,
@@ -473,6 +474,18 @@ impl WorkbookSession {
     }
     pub fn sheets(&mut self) -> Result<Vec<SheetSummary>, KitError> {
         Ok(self.document()?.sheets)
+    }
+    /// Resolve a cell's inputs through the owned core, including stable
+    /// references projected into the current sheet/cell view.
+    pub fn lineage(&mut self, sheet: &str, a1: &str) -> Result<serde_json::Value, KitError> {
+        match self.service.handle(Request::NativeLineage {
+            path: self.working_path.clone(),
+            sheet: sheet.into(),
+            a1: a1.into(),
+        })? {
+            Response::NativeLineage(lineage) => Ok(lineage),
+            _ => Err(KitError::Invalid("Unexpected lineage response".into())),
+        }
     }
     pub fn revision(&mut self) -> Result<String, KitError> {
         match self.service.handle(Request::Revision {
@@ -656,7 +669,7 @@ impl WorkbookSession {
                 }
             }
         }
-        let response = self.service.handle(Request::ExportXlsx {
+        let response = self.service.handle(Request::ExportXlsxStrict {
             path: self.working_path.clone(),
             branch: None,
             output: output.to_path_buf(),

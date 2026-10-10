@@ -183,7 +183,7 @@ ApplicationWindow {
                         { heading: "Workbook", shortcuts: [
                             ["Ctrl+N", "Create a native workbook"],
                             ["Ctrl+O", "Open a native workbook"],
-                            ["Commands → Workbook", "Import, open Excel / ODS, or export a copy"]
+                            ["Commands → Workbook", "Import Excel, open a workbook, or export a copy"]
                         ] },
                         { heading: "Agent review", shortcuts: [
                             ["Ctrl+Shift+A / Ctrl+Shift+R", "Ask Agent / review proposals"],
@@ -379,7 +379,7 @@ ApplicationWindow {
         }
         RowLayout {
             Button { action: fileActions.importAction }
-            Button { action: fileActions.compatibilityAction }
+            Button { action: fileActions.excelAction }
         }
         Label {
             text: "Native workbooks save as you finish each cell edit. Press F1 for the keyboard guide."

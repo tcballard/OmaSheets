@@ -19,8 +19,8 @@ import subprocess
 import sys
 
 DEFAULT_PACKAGES = (
-    "gcc", "glibc", "cmake", "make", "rust", "gtk3", "libreoffice-fresh",
-    "libreoffice-fresh-sdk", "qt6-base", "qt6-declarative", "qt6-wayland",
+    "gcc", "glibc", "make", "pkgconf", "python", "rust", "gtk3",
+    "qt6-base", "qt6-declarative", "qt6-wayland",
 )
 
 

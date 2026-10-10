@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
 from .integration import DESKTOP_ID, IntegrationPaths
-from .lok_spike import status as lok_status
-from .native_window import status as window_status
+from .installation import dependency_report
 from .native_grid import status as grid_status
 from .package_install import is_package_managed
 
@@ -20,27 +18,13 @@ def _executable(name: str, expected: Path | None = None) -> dict[str, Any]:
 
 
 def diagnose() -> dict[str, Any]:
-    checks = [
-        _executable("bwrap", Path("/usr/bin/bwrap")),
-        _executable("soffice", Path("/usr/bin/soffice")),
-        _executable("python", Path("/usr/bin/python")),
-    ]
-    python = checks[2]["detail"] if checks[2]["ok"] else None
-    uno_ok = False
-    if python:
-        completed = subprocess.run(
-            [python, "-c", "import uno"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-        )
-        uno_ok = completed.returncode == 0
-    checks.append({"name": "python-uno", "ok": uno_ok, "detail": "importable" if uno_ok else "import uno failed"})
+    package_managed = is_package_managed()
+    checks = dependency_report(include_setup=not package_managed)["checks"]
+    checks.extend(_executable(name) for name in ("omasheets-kit", "omasheets-service"))
 
     integration = IntegrationPaths.discover()
     desktop_ok = integration.desktop.is_file() and integration.journal.is_file()
-    if is_package_managed():
+    if package_managed:
         desktop_ok = Path("/usr/share/applications", DESKTOP_ID).is_file()
     checks.append({
         "name": "desktop-integration",
@@ -54,20 +38,6 @@ def diagnose() -> dict[str, Any]:
         "ok": plugin.is_file(),
         "detail": str(plugin) if plugin.is_file() else "optional bar widget is not installed",
         "required": False,
-    })
-    lok = lok_status()
-    checks.append({
-        "name": "libreofficekit-engine",
-        "ok": lok["ready"],
-        "detail": "ready" if lok["ready"] else "run: omasheets lok status",
-        "required": True,
-    })
-    native = window_status()
-    checks.append({
-        "name": "omasheets-window",
-        "ok": native["ready"],
-        "detail": native["detail"],
-        "required": True,
     })
     grid = grid_status()
     checks.append({

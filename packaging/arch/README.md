@@ -2,19 +2,24 @@
 
 CI reuses the verified native bundle to create a runtime tarball, then runs
 `makepkg` as an unprivileged user. The resulting `omasheets-bin` package owns
-`/usr/lib/omasheets`, two commands in `/usr/bin`, desktop/MIME entries and the
+`/usr/lib/omasheets`, three commands in `/usr/bin`, desktop/MIME entries and the
 license. Standard Arch hooks refresh the desktop and MIME databases. There
 are no root install scripts and no writes to a user's home directory.
 
 The package omits the custom Setup/updater. Python modules live in a private
 directory so a system Python minor-version upgrade does not strand them in an
 old site-packages directory. Native binaries keep their verified provenance.
+The package carries only the owned Rust kit/service and Qt grid. It requires
+Qt, Bubblewrap and system Python; LibreOffice, UNO and the old LOK executables
+are absent. GTK is needed only by the separate home-directory Setup installer.
 
 CI tests migration from the old install, Pacman installation, desktop checks,
-an ordinary user's doctor and native window, the full service workflow,
+an ordinary user's doctor and Qt grid, the full service workflow,
 upgrade to a higher pkgrel, removal and preservation of user files. Main CI
 must pass before publication; another job downloads and installs the public
 package without GitHub credentials.
+The installed-package check also audits the actual ELF shared libraries and
+refuses unresolved libraries or a LibreOffice/UNO dependency.
 
 ## AUR publication
 

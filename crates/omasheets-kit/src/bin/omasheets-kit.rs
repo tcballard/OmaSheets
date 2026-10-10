@@ -4,7 +4,7 @@
 //! takes the same service lease as the existing desktop launcher, so closing
 //! the window that started a service cannot interrupt another open window.
 
-use omasheets_kit::{KitError, ProbeReport, import_xlsx, probe};
+use omasheets_kit::{KitError, ProbeReport, WorkbookSession, import_xlsx, jobs, probe};
 use omasheets_service::{Request, Response};
 use serde_json::{Value, json};
 use std::env;
@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "usage:\n  omasheets-kit --provenance\n  omasheets-kit probe INPUT\n  omasheets-kit import INPUT.xlsx OUTPUT.omasheets\n  omasheets-kit open INPUT [--working OUTPUT.omasheets] [--runtime-dir DIR]";
+const USAGE: &str = "usage:\n  omasheets-kit --provenance\n  omasheets-kit probe INPUT\n  omasheets-kit import INPUT.xlsx OUTPUT.omasheets\n  omasheets-kit export INPUT.omasheets OUTPUT.xlsx\n  omasheets-kit job REQUEST.json RESULT.json\n  omasheets-kit open INPUT [--working OUTPUT.omasheets] [--runtime-dir DIR]";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const PROBE_TIMEOUT: Duration = Duration::from_millis(250);
@@ -697,6 +697,14 @@ fn main() -> ExitCode {
         }
         [command, source] if command == "probe" => probe(source).map(|report| { println!("{}", serde_json::to_string(&report).expect("probe report is serializable")); if report.can_import { 0 } else { 2 } }).map_err(kit_error),
         [command, source, output] if command == "import" => import_xlsx(source, output).map(|report| { println!("{}", json!({"ok": true, "engine": "omasheets-kit", "working_document": output, "source_preserved": true, "probe": report})); 0 }).map_err(kit_error),
+        [command, source, output] if command == "export" => (|| {
+            let mut session = WorkbookSession::open_native(source)?;
+            let manifest = session.save_xlsx_copy(output)?;
+            session.close()?;
+            println!("{}", json!({"ok": true, "engine": "omasheets-kit", "manifest": manifest}));
+            Ok(0)
+        })().map_err(kit_error),
+        [command, request, result] if command == "job" => jobs::run_files(request, result).map(|ok| if ok { 0 } else { 2 }).map_err(kit_error),
         [command, rest @ ..] if command == "open" => {
             let result = open(rest).map(|status| status.code().unwrap_or(1) as u8);
             let signal = INTERRUPTED.load(Ordering::Relaxed);

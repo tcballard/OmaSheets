@@ -94,12 +94,7 @@ OPERATION_SCHEMA = _object(
                 "delete_rows",
                 "insert_columns",
                 "delete_columns",
-                "fill_down",
-                "fill_right",
                 "sort_range",
-                "upsert_chart",
-                "upsert_pivot",
-                "refresh_pivot",
             ],
         },
         "sheet": SHEET,
@@ -309,7 +304,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "analyze_workbook",
-        "description": "Audit the whole bounded workbook for structure, quality issues, anomalies, formulas, charts, pivots, and management-summary opportunities without modifying it.",
+        "description": "Audit the bounded workbook for formula errors and summary statistics without modifying it.",
         "inputSchema": _object(
             {
                 "session_id": SESSION,
