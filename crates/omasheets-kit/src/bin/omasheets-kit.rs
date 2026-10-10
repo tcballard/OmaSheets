@@ -953,9 +953,11 @@ mod tests {
         let ran = directory.path("grid-ran");
         let grid = directory.script("grid-stub", &format!("touch {}", quote(&ran)));
         let mut config = directory.config(grid);
-        config.service = directory.script("failed-service", "exit 9");
+        // Execute an existing binary: concurrent process tests can briefly
+        // inherit a writer for a newly created script before exec closes it.
+        config.service = PathBuf::from("/bin/false");
         let error = run_grid(&config, &directory.path("book.omasheets")).unwrap_err();
-        assert!(error.contains("did not become ready"));
+        assert!(error.contains("did not become ready"), "{error}");
         assert!(!ran.exists());
     }
 
