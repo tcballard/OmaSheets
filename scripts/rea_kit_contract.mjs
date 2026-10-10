@@ -1,0 +1,73 @@
+// REA is an investigation dependency, never a runtime dependency of the kit.
+// Keep complete, unmodified Evidence beside this derived contract summary.
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+
+const directory = resolve(process.argv[2] ?? "");
+assert(process.argv.length === 3, "usage: node scripts/rea_kit_contract.mjs EVIDENCE_DIR");
+const rea = process.env.REA;
+assert(rea, "set REA to the installed rea CLI");
+const program = process.env.OMASHEETS_LOK_PROGRAM ?? "/usr/lib/libreoffice/program";
+const source = join(directory, "reference.xlsx");
+const output = join(directory, "reference.ppm");
+const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
+const before = sha256(source);
+function investigate(command, arguments_, name) {
+  // No shell; complete bytes are retained before projecting a result.
+  const bytes = execFileSync(rea, [command, ...arguments_, "--format", "json"], {
+    maxBuffer: 64 * 1024 * 1024, timeout: 90_000,
+  });
+  writeFileSync(join(directory, name), bytes, { flag: "wx" });
+  const evidence = JSON.parse(bytes);
+  assert(evidence.evidence_id && evidence.normalized_result, "REA did not produce Evidence");
+  return evidence;
+}
+const artifact = investigate("inspect-artifact", [join(program, "libsofficeapp.so")], "artifact.json");
+const layout = investigate("inspect-binary-layout", [join(program, "libsofficeapp.so")], "layout.json");
+assert.equal(layout.operation, "inspect_binary_layout");
+assert.equal(layout.subject.digest.sha256, artifact.subject.digest.sha256);
+const hooks = layout.normalized_result.symbols.filter((symbol) =>
+  JSON.stringify(symbol.name).includes("libreofficekit_hook"));
+assert(hooks.length >= 2, "reference must export both LibreOfficeKit entry points");
+
+const scenario = {
+  executable: join(directory, "omasheets-lok-render"),
+  arguments: [source, output, "800", "500"],
+  working_directory: directory,
+  environment: { OMASHEETS_LOK_PROGRAM: program, SAL_USE_VCLPLUGIN: "svp" },
+  filesystem_observation_paths: [source, output],
+  timeout_ms: 30_000, idle_timeout_ms: 30_000,
+};
+const scenarioPath = join(directory, "scenario.json");
+writeFileSync(scenarioPath, JSON.stringify(scenario, null, 2) + "\n", { flag: "wx" });
+const capture = investigate("capture-process", [scenarioPath], "capture.json");
+assert.equal(capture.operation, "capture_process_scenario");
+assert.equal(capture.normalized_result.exit.code, 0);
+assert.equal(capture.normalized_result.truncated, false);
+const text = capture.normalized_result.frames.map((frame) => frame.data).join("");
+const report = JSON.parse(text.trim());
+assert.equal(report.engine, "libreofficekit");
+assert.equal(report.parts, 1);
+assert.equal(report.width, 800);
+assert.equal(report.height, 500);
+const ppm = readFileSync(output);
+const header = Buffer.from("P6\n800 500\n255\n");
+assert(ppm.subarray(0, header.length).equals(header));
+assert.equal(ppm.length, header.length + 800 * 500 * 3);
+assert.equal(sha256(source), before, "rendering must preserve source bytes");
+
+const summary = {
+  schema: 1, rea_version: "6.3.0", reference_sha256: layout.subject.digest.sha256,
+  evidence: { artifact: artifact.evidence_id, layout: layout.evidence_id, capture: capture.evidence_id },
+  entry_points: hooks, render: report, source_preserved: true,
+  limitations: [
+    "This is one bounded spreadsheet rendering observation, not full LibreOfficeKit parity.",
+    "ELF linkage does not establish function implementation or runtime addresses.",
+    "Input events, saveAs dirty-state effects, ODS, XLS, macros and physical Wayland were not observed.",
+  ],
+};
+writeFileSync(join(directory, "summary.json"), JSON.stringify(summary, null, 2) + "\n", { flag: "wx" });
+console.log(JSON.stringify(summary));

@@ -1,0 +1,50 @@
+name: Native kit contract
+
+on:
+  push:
+    branches: ["feature/rea-native-kit", "feat/**"]
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.*"
+      - "native/libreofficekit/**"
+      - "scripts/rea_kit_contract.mjs"
+      - ".github/workflows/native-kit.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-kit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rea-reference:
+    name: REA LibreOfficeKit reference
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install reference and inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libreoffice-calc libreofficekit-dev
+          npm install --prefix "$RUNNER_TEMP/rea" --no-audit --no-fund rea-agents@6.3.0
+          python3 -m venv "$RUNNER_TEMP/rea-python"
+          "$RUNNER_TEMP/rea-python/bin/pip" install pwntools==4.15.0 pyelftools==0.33 unicorn==2.1.2
+      - name: Capture reference ABI and rendering evidence
+        env:
+          REA: ${{ runner.temp }}/rea/node_modules/.bin/rea
+          REA_PWNTOOLS_PYTHON: ${{ runner.temp }}/rea-python/bin/python
+          EVIDENCE: ${{ runner.temp }}/native-kit-rea
+        run: |
+          mkdir -p "$EVIDENCE"
+          g++ -std=c++17 -O2 native/libreofficekit/lok_render.cpp -ldl -o "$EVIDENCE/omasheets-lok-render"
+          python3 scripts/generate_m0_xlsx.py "$EVIDENCE/reference.xlsx" --rows 10 > "$EVIDENCE/fixture.json"
+          node scripts/rea_kit_contract.mjs "$EVIDENCE"
+      - name: Retain complete REA evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-kit-rea-reference
+          path: ${{ runner.temp }}/native-kit-rea
