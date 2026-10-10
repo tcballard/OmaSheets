@@ -2,6 +2,7 @@
 
 Requested by the maintainer on 2026-10-10. This supersedes the old roadmap's
 parked spreadsheet parity scope. Full parity is the target, not a present claim.
+[Issue #97](https://github.com/tcballard/OmaSheets/issues/97) tracks the full acceptance programme.
 The product must not link, load, launch, bundle or require LibreOfficeKit,
 LibreOffice or UNO. Calc may run in isolated development/reference jobs.
 
@@ -30,7 +31,7 @@ function count, workbook open rate or passing CI is not full parity evidence.
 | Dimension | Required behaviour | Current known gap |
 | --- | --- | --- |
 | Formula language | Calc/Excel/ODF dialects, references, names, arrays, dynamic dependencies, errors | Bounded Excel syntax; no 3D refs or spilling; limited dynamic refs |
-| Function semantics | Every supported Calc built-in, argument coercion, domains, locale, precision | 122 parser names, including aliases; comprehensive Calc inventory not yet measured |
+| Function semantics | Every supported Calc built-in, argument coercion, domains, locale, precision | 125 parser names, including aliases; comprehensive Calc inventory not yet measured |
 | Recalculation | Dirty graph, cycles/iteration, volatility, calculation settings | Iteration and Calc clock/random policies unresolved |
 | Document model | All sheet/cell properties, annotations, protection, merges, hidden content | Strict admission refuses many source features |
 | Data workflows | Sort/filter, tables, validation, conditional formatting, pivots, links and refresh | Incomplete owned workflows and source admission |
@@ -76,3 +77,29 @@ coercion/reference/array semantics; date/locale and number formats; named ranges
 structured source features and preservation; ODS model/import/export; charts,
 pivots and printing; interactions/accessibility; automation and scale. Every
 unimplemented dimension remains a release blocker for full parity.
+
+## First measured blockers
+
+The first live reference run used LibreOffice 24.2.7.2 (420 Build 2), not the
+source inventory's newer commit. Its exact version is recorded in evidence.
+It observed 29 formulas: 27 compiled, 25 matched, two refused `TRUE()` and two
+miscalculated. `TRUE()`/`FALSE()` support is now added, along with lazy `IFNA`.
+The reference suite has expanded to 34 expressions and is still required to
+report every one.
+
+The remaining observed differences are `ERROR.TYPE(SQRT(-1))` and
+`ERROR.TYPE(VALUE("bad"))`: Calc returned `#N/A`; the owned engine produced
+6 and 3 respectively. The reference's `SQRT(-1)` uses an internal illegal
+argument error, which differs from a standard `#NUM!` for error inspection.
+Fixing this requires deliberate dialect/internal-error provenance rather than
+changing Excel error classification globally. These cases remain in the strict
+reference suite; it fails while these differences remain. They are tracked in [issue #98](https://github.com/tcballard/OmaSheets/issues/98),
+and are not removed or accepted as matching results. Per-cell typed diagnostics identify blockers.
+
+A reproducible source catalogue is retained in
+`tests/calc-parity/calc-catalogue.json`, generated with
+`scripts/inventory_calc_parity.mjs` from the pinned upstream header. All five
+English maps are recorded. The Calc map has 432 named tokens; 118 names match
+the owned parser and 314 do not. These are token-name counts, include aliases
+and special names, and are **not a function-completion percentage**. Matching
+a name does not establish coercion, reference, error, array or locale semantics.

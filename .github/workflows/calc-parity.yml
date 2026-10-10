@@ -34,9 +34,9 @@ jobs:
           rustup toolchain install 1.88.0 --profile minimal --component clippy,rustfmt --no-self-update
           cargo +1.88.0 fmt --all --check
           cargo +1.88.0 test --locked -p omasheets-calc -p omasheets-xlsx
-          cargo +1.88.0 build --locked -p omasheets-xlsx --bin omasheets-xlsx-score
+          cargo +1.88.0 build --locked -p omasheets-xlsx --example calc_parity
       - name: Generate fresh Calc results and compare every formula
-        run: node scripts/check_calc_parity.mjs "$RUNNER_TEMP/calc-parity" target/debug/omasheets-xlsx-score
+        run: node scripts/check_calc_parity.mjs "$RUNNER_TEMP/calc-parity" target/debug/examples/calc_parity
       - name: Retain differential evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

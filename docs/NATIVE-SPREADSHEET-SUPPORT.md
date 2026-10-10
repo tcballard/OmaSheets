@@ -62,7 +62,7 @@ The width calculation follows the [SpreadsheetML column specification](https://l
 
 ## Formula and editing boundaries
 
-The parser registry contains 122 function names, including TEXTJOIN, TEXT,
+The parser registry contains 125 function names, including TEXTJOIN, TEXT,
 HYPERLINK, RANK, PV, IRR, RRI, covariance and standard-normal distribution
 functions. Bounded array constants work in aggregates and lookups without
 spilling into neighbouring cells. The registry and [function list](FUNCTIONS.md)

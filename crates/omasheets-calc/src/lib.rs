@@ -345,6 +345,9 @@ enum Function {
     Or,
     Not,
     IfError,
+    IfNa,
+    True,
+    False,
     Sign,
     Ceiling,
     Floor,
@@ -1694,12 +1697,13 @@ impl Workbook {
         if matches!(function, Function::Row | Function::Column) {
             return self.evaluate_position_function(function, arguments);
         }
-        if function == Function::IfError {
+        if matches!(function, Function::IfError | Function::IfNa) {
             if arguments.len() != 2 {
                 return Value::Error(CalcError::InvalidArguments);
             }
             let value = self.evaluate(&arguments[0]);
-            return if matches!(value, Value::Error(_)) {
+            return if matches!(&value, Value::Error(error) if function == Function::IfError || *error == CalcError::NotAvailable)
+            {
                 self.evaluate(&arguments[1])
             } else {
                 value
@@ -1816,6 +1820,13 @@ impl Workbook {
             return self.evaluate_rri(arguments);
         }
 
+        if matches!(function, Function::True | Function::False) {
+            return if arguments.is_empty() {
+                Value::Boolean(function == Function::True)
+            } else {
+                Value::Error(CalcError::InvalidArguments)
+            };
+        }
         let mut values = Vec::new();
         for argument in arguments {
             self.flatten_values(argument, &mut values);
@@ -1934,7 +1945,10 @@ impl Workbook {
             | Function::Not
             | Function::If
             | Function::IfError
+            | Function::IfNa
             | Function::Pi
+            | Function::True
+            | Function::False
             | Function::CountIf
             | Function::SumIf
             | Function::CountIfs
@@ -3290,6 +3304,7 @@ fn is_elementwise(function: Function) -> bool {
             | Function::Sqrt
             | Function::Not
             | Function::IfError
+            | Function::IfNa
             | Function::Sign
             | Function::Ceiling
             | Function::Floor
@@ -5940,6 +5955,9 @@ const FUNCTION_REGISTRY: &[(&str, Function)] = &[
     ("OR", Function::Or),
     ("NOT", Function::Not),
     ("IFERROR", Function::IfError),
+    ("IFNA", Function::IfNa),
+    ("TRUE", Function::True),
+    ("FALSE", Function::False),
     ("SIGN", Function::Sign),
     ("CEILING", Function::Ceiling),
     ("FLOOR", Function::Floor),
@@ -8849,6 +8867,12 @@ mod information_parity_tests {
             ("=ISNONTEXT(\"\")", Value::Boolean(false)),
             ("=ISNONTEXT(TRUE)", Value::Boolean(true)),
             ("=ISERR(42)", Value::Boolean(false)),
+            ("=TRUE()", Value::Boolean(true)),
+            ("=FALSE()", Value::Boolean(false)),
+            ("=TRUE(1)", Value::Error(CalcError::InvalidArguments)),
+            ("=IFNA(NA(),42)", Value::Number(42.0)),
+            ("=IFNA(1/0,42)", Value::Error(CalcError::DivisionByZero)),
+            ("=IFNA(42,1/0)", Value::Number(42.0)),
             ("=ERROR.TYPE(42)", Value::Error(CalcError::NotAvailable)),
             ("=SUMPRODUCT(ISERR({1,#DIV/0!,#N/A})*1)", Value::Number(1.0)),
         ] {

@@ -46,13 +46,15 @@ const conversion = run('libreoffice', [
 writeFileSync(join(output, 'reference.log'), conversion, { flag: 'wx' });
 const workbook = join(workbooks, 'information.xlsx');
 if (!existsSync(workbook)) throw new Error('Calc did not produce the reference workbook');
-const score = JSON.parse(run(scorer, [workbook]));
+const diagnostic = JSON.parse(run(scorer, [workbook]));
+const score = diagnostic.report;
 const passed = ['formula_cells_observed', 'formula_cells_loaded', 'formula_cells_compared', 'stored_values_matched']
   .every(field => score[field] === formulas.length)
   && score.unsupported_formulas === 0 && score.stored_values_mismatched === 0;
 const evidence = {
   schema: 1, referenceVersion, fixtureSha256: createHash('sha256').update(fixtureBytes).digest('hex'),
-  formulas, passed, score,
+  sourceSha256: createHash('sha256').update(readFileSync(source)).digest('hex'),
+  formulas, passed, score, mismatches: diagnostic.mismatches, unsupported: diagnostic.unsupported,
   scope: 'scalar information functions and basic numerical regression; not full Calc parity',
 };
 writeFileSync(join(output, 'parity.json'), JSON.stringify(evidence, null, 2) + '\n', { flag: 'wx' });
