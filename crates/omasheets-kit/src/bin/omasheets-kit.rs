@@ -725,12 +725,23 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
-    use std::sync::mpsc;
+    use std::sync::{Mutex, MutexGuard, mpsc};
 
-    struct TestDirectory(PathBuf);
+    // A concurrent fork can inherit a freshly written executable until exec
+    // closes its writer, producing ETXTBSY in another test. Isolate fixtures;
+    // peer launchers inside the lifetime test remain concurrent.
+    static PROCESS_FIXTURES: Mutex<()> = Mutex::new(());
+
+    struct TestDirectory {
+        root: PathBuf,
+        _process_guard: MutexGuard<'static, ()>,
+    }
 
     impl TestDirectory {
         fn new() -> Self {
+            let process_guard = PROCESS_FIXTURES
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             let mut bytes = [0_u8; 16];
             File::open("/dev/urandom")
                 .unwrap()
@@ -739,11 +750,14 @@ mod tests {
             let name: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
             let path = env::temp_dir().join(format!("omasheets-kit-cli-{name}"));
             fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
-            Self(path)
+            Self {
+                root: path,
+                _process_guard: process_guard,
+            }
         }
 
         fn path(&self, name: &str) -> PathBuf {
-            self.0.join(name)
+            self.root.join(name)
         }
 
         fn script(&self, name: &str, body: &str) -> PathBuf {
@@ -759,13 +773,13 @@ mod tests {
                 .unwrap();
             self.script("service-stub", &format!(
                 "export OMASHEETS_KIT_STUB_RUNTIME={}\nexec {} --exact tests::service_process_stub --nocapture",
-                quote(&self.0), quote(&executable),
+                quote(&self.root), quote(&executable),
             ))
         }
 
         fn config(&self, grid: PathBuf) -> LaunchConfig {
             LaunchConfig {
-                runtime: self.0.clone(),
+                runtime: self.root.clone(),
                 grid,
                 service: self.service(),
             }
@@ -774,7 +788,7 @@ mod tests {
 
     impl Drop for TestDirectory {
         fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
+            let _ = fs::remove_dir_all(&self.root);
         }
     }
 
@@ -846,8 +860,8 @@ mod tests {
         let directory = TestDirectory::new();
         let source = directory.path("budget $(touch unwanted).xlsx");
         fs::write(&source, b"source bytes").unwrap();
-        let first = private_working_path(&directory.0, &source).unwrap();
-        let second = private_working_path(&directory.0, &source).unwrap();
+        let first = private_working_path(&directory.root, &source).unwrap();
+        let second = private_working_path(&directory.root, &source).unwrap();
         assert_ne!(first, second);
         assert_eq!(first.extension().unwrap(), "omasheets");
         assert_eq!(
@@ -874,7 +888,7 @@ mod tests {
         fs::set_permissions(&broad, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(ensure_private_directory(&broad).is_err());
         let linked = directory.path("linked");
-        std::os::unix::fs::symlink(&directory.0, &linked).unwrap();
+        std::os::unix::fs::symlink(&directory.root, &linked).unwrap();
         assert!(ensure_private_directory(&linked).is_err());
         let lock = directory.path("lease");
         std::os::unix::fs::symlink(directory.path("target"), &lock).unwrap();
@@ -903,7 +917,7 @@ mod tests {
             vec![
                 document.to_str().unwrap(),
                 document.to_str().unwrap(),
-                directory.0.to_str().unwrap()
+                directory.root.to_str().unwrap()
             ]
         );
         assert!(!directory.path("unwanted").exists());

@@ -14,27 +14,39 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
+// Keep executable fixture writers out of unrelated concurrent forks. The
+// supervisor/peer scenarios within each fixture still run concurrently.
+static PROCESS_FIXTURES: Mutex<()> = Mutex::new(());
 
-struct Fixture(PathBuf);
+struct Fixture {
+    root: PathBuf,
+    _process_guard: MutexGuard<'static, ()>,
+}
 
 impl Fixture {
     fn new() -> Self {
+        let process_guard = PROCESS_FIXTURES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let path = env::temp_dir().join(format!(
             "omasheets-kit-launcher-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
-        Self(path)
+        Self {
+            root: path,
+            _process_guard: process_guard,
+        }
     }
 
     fn path(&self, name: &str) -> PathBuf {
-        self.0.join(name)
+        self.root.join(name)
     }
 
     fn script(&self, name: &str, body: &str) -> PathBuf {
@@ -52,7 +64,7 @@ impl Fixture {
             "service",
             &format!(
                 "export OMASHEETS_KIT_TEST_RUNTIME={}\nexec {} --exact service_process --nocapture",
-                quote(&self.0),
+                quote(&self.root),
                 quote(&executable)
             ),
         )
@@ -64,7 +76,7 @@ impl Fixture {
             .arg("open")
             .arg(document)
             .arg("--runtime-dir")
-            .arg(&self.0)
+            .arg(&self.root)
             .env("OMASHEETS_GRID", grid)
             .env("OMASHEETS_NATIVE_SERVICE", service)
             .stdin(Stdio::null())
@@ -89,7 +101,7 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         // On a failed assertion also stop grids/services isolated from the
         // test's own process group, so a failed CI test leaves no child behind.
-        if let Ok(entries) = fs::read_dir(&self.0) {
+        if let Ok(entries) = fs::read_dir(&self.root) {
             for entry in entries.flatten() {
                 if entry.path().extension().is_some_and(|value| value == "pid")
                     && let Some(pid) = read_pid(&entry.path())
@@ -98,7 +110,7 @@ impl Drop for Fixture {
                 }
             }
         }
-        let _ = fs::remove_dir_all(&self.0);
+        let _ = fs::remove_dir_all(&self.root);
     }
 }
 
