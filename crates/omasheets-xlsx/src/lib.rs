@@ -1667,6 +1667,10 @@ fn value_kind(value: &Value) -> &str {
 
 fn values_match(stored: &Value, calculated: &Value) -> bool {
     match (stored, calculated) {
+        // XLSX stores standard error labels, not Calc's internal origin. Compare
+        // that interchange value here; keep the origin in the live graph so
+        // dependent ERROR.TYPE formulas are independently recalculated.
+        (Value::Error(stored), Value::Error(calculated)) => stored.label() == calculated.label(),
         (Value::Number(stored), Value::Number(calculated)) => {
             stored.is_finite()
                 && calculated.is_finite()

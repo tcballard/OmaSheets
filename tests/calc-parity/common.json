@@ -3263,5 +3263,515 @@
     "id": "references-0653",
     "group": "references",
     "formula": "=SUBTOTAL(9,A649)"
+  },
+  {
+    "id": "errors-0654",
+    "group": "errors",
+    "formula": "=SQRT(-1)"
+  },
+  {
+    "id": "errors-0655",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(A654)"
+  },
+  {
+    "id": "errors-0656",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(A654+1)"
+  },
+  {
+    "id": "errors-0657",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(SUM(A654:A654))"
+  },
+  {
+    "id": "errors-0658",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(IF(TRUE(),A654,42))"
+  },
+  {
+    "id": "errors-0659",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(IFNA(A654,42))"
+  },
+  {
+    "id": "errors-0660",
+    "group": "errors",
+    "formula": "=IFERROR(A654,42)"
+  },
+  {
+    "id": "errors-0661",
+    "group": "errors",
+    "formula": "=ISERR(A654)"
+  },
+  {
+    "id": "errors-0662",
+    "group": "errors",
+    "formula": "=ISNA(A654)"
+  },
+  {
+    "id": "errors-0663",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(INDEX(A654:A654,1))"
+  },
+  {
+    "id": "errors-0664",
+    "group": "errors",
+    "formula": "=VALUE(\"bad\")"
+  },
+  {
+    "id": "errors-0665",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(A664)"
+  },
+  {
+    "id": "errors-0666",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(A664+1)"
+  },
+  {
+    "id": "errors-0667",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(SUM(A664:A664))"
+  },
+  {
+    "id": "errors-0668",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(IF(TRUE(),A664,42))"
+  },
+  {
+    "id": "errors-0669",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(IFNA(A664,42))"
+  },
+  {
+    "id": "errors-0670",
+    "group": "errors",
+    "formula": "=IFERROR(A664,42)"
+  },
+  {
+    "id": "errors-0671",
+    "group": "errors",
+    "formula": "=ISERR(A664)"
+  },
+  {
+    "id": "errors-0672",
+    "group": "errors",
+    "formula": "=ISNA(A664)"
+  },
+  {
+    "id": "errors-0673",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(INDEX(A664:A664,1))"
+  },
+  {
+    "id": "errors-0674",
+    "group": "errors",
+    "formula": "=#VALUE!"
+  },
+  {
+    "id": "errors-0675",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(A674)"
+  },
+  {
+    "id": "errors-0676",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(A674+1)"
+  },
+  {
+    "id": "errors-0677",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(SUM(A674:A674))"
+  },
+  {
+    "id": "errors-0678",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(IF(TRUE(),A674,42))"
+  },
+  {
+    "id": "errors-0679",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(IFNA(A674,42))"
+  },
+  {
+    "id": "errors-0680",
+    "group": "errors",
+    "formula": "=IFERROR(A674,42)"
+  },
+  {
+    "id": "errors-0681",
+    "group": "errors",
+    "formula": "=ISERR(A674)"
+  },
+  {
+    "id": "errors-0682",
+    "group": "errors",
+    "formula": "=ISNA(A674)"
+  },
+  {
+    "id": "errors-0683",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(INDEX(A674:A674,1))"
+  },
+  {
+    "id": "errors-0684",
+    "group": "errors",
+    "formula": "=#NUM!"
+  },
+  {
+    "id": "errors-0685",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(A684)"
+  },
+  {
+    "id": "errors-0686",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(A684+1)"
+  },
+  {
+    "id": "errors-0687",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(SUM(A684:A684))"
+  },
+  {
+    "id": "errors-0688",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(IF(TRUE(),A684,42))"
+  },
+  {
+    "id": "errors-0689",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(IFNA(A684,42))"
+  },
+  {
+    "id": "errors-0690",
+    "group": "errors",
+    "formula": "=IFERROR(A684,42)"
+  },
+  {
+    "id": "errors-0691",
+    "group": "errors",
+    "formula": "=ISERR(A684)"
+  },
+  {
+    "id": "errors-0692",
+    "group": "errors",
+    "formula": "=ISNA(A684)"
+  },
+  {
+    "id": "errors-0693",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(INDEX(A684:A684,1))"
+  },
+  {
+    "id": "errors-0694",
+    "group": "errors",
+    "formula": "=1/0"
+  },
+  {
+    "id": "errors-0695",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(A694)"
+  },
+  {
+    "id": "errors-0696",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(A694+1)"
+  },
+  {
+    "id": "errors-0697",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(SUM(A694:A694))"
+  },
+  {
+    "id": "errors-0698",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(IF(TRUE(),A694,42))"
+  },
+  {
+    "id": "errors-0699",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(IFNA(A694,42))"
+  },
+  {
+    "id": "errors-0700",
+    "group": "errors",
+    "formula": "=IFERROR(A694,42)"
+  },
+  {
+    "id": "errors-0701",
+    "group": "errors",
+    "formula": "=ISERR(A694)"
+  },
+  {
+    "id": "errors-0702",
+    "group": "errors",
+    "formula": "=ISNA(A694)"
+  },
+  {
+    "id": "errors-0703",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(INDEX(A694:A694,1))"
+  },
+  {
+    "id": "errors-0704",
+    "group": "errors",
+    "formula": "=NA()"
+  },
+  {
+    "id": "errors-0705",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(A704)"
+  },
+  {
+    "id": "errors-0706",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(A704+1)"
+  },
+  {
+    "id": "errors-0707",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(SUM(A704:A704))"
+  },
+  {
+    "id": "errors-0708",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(IF(TRUE(),A704,42))"
+  },
+  {
+    "id": "errors-0709",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(IFNA(A704,42))"
+  },
+  {
+    "id": "errors-0710",
+    "group": "errors",
+    "formula": "=IFERROR(A704,42)"
+  },
+  {
+    "id": "errors-0711",
+    "group": "errors",
+    "formula": "=ISERR(A704)"
+  },
+  {
+    "id": "errors-0712",
+    "group": "errors",
+    "formula": "=ISNA(A704)"
+  },
+  {
+    "id": "errors-0713",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(INDEX(A704:A704,1))"
+  },
+  {
+    "id": "errors-0714",
+    "group": "errors",
+    "formula": "=SUMPRODUCT(ISNA(ERROR.TYPE(SQRT({-1,4,-9})))*1)"
+  },
+  {
+    "id": "errors-0715",
+    "group": "errors",
+    "formula": "=SUMPRODUCT(ISERR(SQRT({-1,4,-9}))*1)"
+  },
+  {
+    "id": "errors-0716",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(SQRT(#NUM!))"
+  },
+  {
+    "id": "errors-0717",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(VALUE(#VALUE!))"
+  },
+  {
+    "id": "errors-0718",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(SQRT(1/0))"
+  },
+  {
+    "id": "errors-0719",
+    "group": "errors",
+    "formula": "=ERROR.TYPE(VALUE(NA()))"
+  },
+  {
+    "id": "coercion-0720",
+    "group": "coercion",
+    "formula": "=SUM(TRUE(),2)"
+  },
+  {
+    "id": "coercion-0721",
+    "group": "coercion",
+    "formula": "=SUM(\"3\",2)"
+  },
+  {
+    "id": "coercion-0722",
+    "group": "coercion",
+    "formula": "=SUM(\"bad\",2)"
+  },
+  {
+    "id": "coercion-0723",
+    "group": "coercion",
+    "formula": "=SUM({TRUE(),2})"
+  },
+  {
+    "id": "coercion-0724",
+    "group": "coercion",
+    "formula": "=SUM({\"3\",2})"
+  },
+  {
+    "id": "coercion-0725",
+    "group": "coercion",
+    "formula": "=SUM(Inputs!A1:A5)"
+  },
+  {
+    "id": "coercion-0726",
+    "group": "coercion",
+    "formula": "=AVERAGE(TRUE(),2)"
+  },
+  {
+    "id": "coercion-0727",
+    "group": "coercion",
+    "formula": "=AVERAGE(\"3\",2)"
+  },
+  {
+    "id": "coercion-0728",
+    "group": "coercion",
+    "formula": "=AVERAGE(\"bad\",2)"
+  },
+  {
+    "id": "coercion-0729",
+    "group": "coercion",
+    "formula": "=AVERAGE({TRUE(),2})"
+  },
+  {
+    "id": "coercion-0730",
+    "group": "coercion",
+    "formula": "=AVERAGE({\"3\",2})"
+  },
+  {
+    "id": "coercion-0731",
+    "group": "coercion",
+    "formula": "=AVERAGE(Inputs!A1:A5)"
+  },
+  {
+    "id": "coercion-0732",
+    "group": "coercion",
+    "formula": "=MIN(TRUE(),2)"
+  },
+  {
+    "id": "coercion-0733",
+    "group": "coercion",
+    "formula": "=MIN(\"3\",2)"
+  },
+  {
+    "id": "coercion-0734",
+    "group": "coercion",
+    "formula": "=MIN(\"bad\",2)"
+  },
+  {
+    "id": "coercion-0735",
+    "group": "coercion",
+    "formula": "=MIN({TRUE(),2})"
+  },
+  {
+    "id": "coercion-0736",
+    "group": "coercion",
+    "formula": "=MIN({\"3\",2})"
+  },
+  {
+    "id": "coercion-0737",
+    "group": "coercion",
+    "formula": "=MIN(Inputs!A1:A5)"
+  },
+  {
+    "id": "coercion-0738",
+    "group": "coercion",
+    "formula": "=MAX(TRUE(),2)"
+  },
+  {
+    "id": "coercion-0739",
+    "group": "coercion",
+    "formula": "=MAX(\"3\",2)"
+  },
+  {
+    "id": "coercion-0740",
+    "group": "coercion",
+    "formula": "=MAX(\"bad\",2)"
+  },
+  {
+    "id": "coercion-0741",
+    "group": "coercion",
+    "formula": "=MAX({TRUE(),2})"
+  },
+  {
+    "id": "coercion-0742",
+    "group": "coercion",
+    "formula": "=MAX({\"3\",2})"
+  },
+  {
+    "id": "coercion-0743",
+    "group": "coercion",
+    "formula": "=MAX(Inputs!A1:A5)"
+  },
+  {
+    "id": "coercion-0744",
+    "group": "coercion",
+    "formula": "=PRODUCT(TRUE(),2)"
+  },
+  {
+    "id": "coercion-0745",
+    "group": "coercion",
+    "formula": "=PRODUCT(\"3\",2)"
+  },
+  {
+    "id": "coercion-0746",
+    "group": "coercion",
+    "formula": "=PRODUCT(\"bad\",2)"
+  },
+  {
+    "id": "coercion-0747",
+    "group": "coercion",
+    "formula": "=PRODUCT({TRUE(),2})"
+  },
+  {
+    "id": "coercion-0748",
+    "group": "coercion",
+    "formula": "=PRODUCT({\"3\",2})"
+  },
+  {
+    "id": "coercion-0749",
+    "group": "coercion",
+    "formula": "=PRODUCT(Inputs!A1:A5)"
+  },
+  {
+    "id": "coercion-0750",
+    "group": "coercion",
+    "formula": "=COUNT(TRUE(),2)"
+  },
+  {
+    "id": "coercion-0751",
+    "group": "coercion",
+    "formula": "=COUNT(\"3\",2)"
+  },
+  {
+    "id": "coercion-0752",
+    "group": "coercion",
+    "formula": "=COUNT(\"bad\",2)"
+  },
+  {
+    "id": "coercion-0753",
+    "group": "coercion",
+    "formula": "=COUNT({TRUE(),2})"
+  },
+  {
+    "id": "coercion-0754",
+    "group": "coercion",
+    "formula": "=COUNT({\"3\",2})"
+  },
+  {
+    "id": "coercion-0755",
+    "group": "coercion",
+    "formula": "=COUNT(Inputs!A1:A5)"
   }
 ]

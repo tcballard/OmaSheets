@@ -246,6 +246,87 @@ fn common_calculations_survive_edits_and_owned_xlsx_round_trip() {
 }
 
 #[test]
+fn internal_error_origins_survive_edits_and_native_and_xlsx_reopening() {
+    let fixture = Fixture::new();
+    let source = fixture.path("errors.xlsx");
+    let working = fixture.path("errors.omasheets");
+    let saved = fixture.path("errors-saved.xlsx");
+    let cells = r#"<row r="1"><c r="A1"><v>-1</v></c>
+        <c r="B1" t="e"><f>SQRT(A1)</f><v>#VALUE!</v></c>
+        <c r="C1" t="e"><f>ERROR.TYPE(B1)</f><v>#N/A</v></c>
+        <c r="D1"><f>ERROR.TYPE(#VALUE!)</f><v>3</v></c>
+        <c r="E1" t="e"><f>VALUE("bad")</f><v>#VALUE!</v></c>
+        <c r="F1" t="e"><f>ERROR.TYPE(E1)</f><v>#N/A</v></c>
+        <c r="G1"><f>ERROR.TYPE(#NUM!)</f><v>6</v></c>
+        <c r="H1" t="e"><f>ERROR.TYPE(SUM(B1:B2))</f><v>#N/A</v></c>
+        <c r="I1"><f>SUMPRODUCT(ISERR(SQRT({-1,4,-9}))*1)</f><v>2</v></c></row>
+        <row r="2"><c r="A2"><v>0</v></c></row>"#;
+    write_xlsx(&source, cells, "", "", &[]);
+    let admission = probe(&source).unwrap();
+    assert!(admission.can_import, "{:?}", admission.reasons);
+    let mut session = WorkbookSession::open_xlsx(&source, &working).unwrap();
+    let sheet = session.sheets().unwrap()[0].id.to_string();
+    let assert_errors = |session: &mut WorkbookSession, sheet: &str| {
+        for (column, expected) in [
+            (1, CellValue::Error("#VALUE!".into())),
+            (2, CellValue::Error("#N/A".into())),
+            (3, CellValue::Number(3.0)),
+            (4, CellValue::Error("#VALUE!".into())),
+            (5, CellValue::Error("#N/A".into())),
+            (6, CellValue::Number(6.0)),
+            (7, CellValue::Error("#N/A".into())),
+            (8, CellValue::Number(2.0)),
+        ] {
+            assert_eq!(
+                session.viewport(sheet, 0, column, 1, 1).unwrap().cells[0].value,
+                expected
+            );
+        }
+    };
+    assert_errors(&mut session, &sheet);
+    for value in ["4", "-9"] {
+        let revision = session.revision().unwrap();
+        session
+            .edit(
+                &sheet,
+                &revision,
+                Action::SetCells {
+                    row: 0,
+                    column: 0,
+                    values: vec![vec![value.into()]],
+                },
+            )
+            .unwrap();
+        if value == "4" {
+            assert_eq!(number(&mut session, &sheet, 0, 1), 2.0);
+        } else {
+            assert_errors(&mut session, &sheet);
+        }
+    }
+    let manifest = session.save_xlsx_copy(&saved).unwrap();
+    assert_eq!(manifest.formula_cells_preserved, 8);
+    assert_eq!(manifest.formula_cells_flattened, 0);
+    session.close().unwrap();
+    for mut reopened in [
+        WorkbookSession::open_native(&working).unwrap(),
+        WorkbookSession::open_xlsx(&saved, fixture.path("errors-reimport.omasheets")).unwrap(),
+    ] {
+        let sheet = reopened.sheets().unwrap()[0].id.to_string();
+        assert_errors(&mut reopened, &sheet);
+        reopened.close().unwrap();
+    }
+    let mut archive = zip::ZipArchive::new(File::open(&saved).unwrap()).unwrap();
+    let mut xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .unwrap()
+        .read_to_string(&mut xml)
+        .unwrap();
+    assert!(xml.contains("<f>SQRT(A1)</f><v>#VALUE!</v>"));
+    assert!(xml.contains("<f>ERROR.TYPE(B1)</f><v>#N/A</v>"));
+}
+
+#[test]
 fn revision_guard_undo_redo_and_no_clobber_preserve_saved_state() {
     let f = Fixture::new();
     let source = f.path("source.xlsx");

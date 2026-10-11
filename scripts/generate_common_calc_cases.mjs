@@ -127,6 +127,29 @@ add('references', '=Inputs!A1');
 add('references', `=SUBTOTAL(9,A${nestedRow}:A${nestedRow + 1})`);
 add('references', `=SUM(A${nestedRow}:A${nestedRow + 1})`);
 add('references', `=SUBTOTAL(9,A${nestedRow})`);
+// Error origin must survive real dependencies, nesting and array evaluation.
+for (const expression of ['SQRT(-1)', 'VALUE("bad")', '#VALUE!', '#NUM!', '1/0', 'NA()']) {
+  const row = cases.length + 1;
+  add('errors', `=${expression}`);
+  for (const formula of [
+    `=ERROR.TYPE(A${row})`, `=ERROR.TYPE(A${row}+1)`,
+    `=ERROR.TYPE(SUM(A${row}:A${row}))`, `=ERROR.TYPE(IF(TRUE(),A${row},42))`,
+    `=ERROR.TYPE(IFNA(A${row},42))`, `=IFERROR(A${row},42)`,
+    `=ISERR(A${row})`, `=ISNA(A${row})`, `=ERROR.TYPE(INDEX(A${row}:A${row},1))`,
+  ]) add('errors', formula);
+}
+for (const formula of [
+  '=SUMPRODUCT(ISNA(ERROR.TYPE(SQRT({-1,4,-9})))*1)',
+  '=SUMPRODUCT(ISERR(SQRT({-1,4,-9}))*1)',
+  '=ERROR.TYPE(SQRT(#NUM!))', '=ERROR.TYPE(VALUE(#VALUE!))',
+  '=ERROR.TYPE(SQRT(1/0))', '=ERROR.TYPE(VALUE(NA()))',
+]) add('errors', formula);
+// Scalar arguments and cells/arrays follow different aggregate coercion rules.
+for (const name of ['SUM','AVERAGE','MIN','MAX','PRODUCT','COUNT']) {
+  for (const args of ['TRUE(),2', '"3",2', '"bad",2', '{TRUE(),2}', '{"3",2}', 'Inputs!A1:A5']) {
+    add('coercion', `=${name}(${args})`);
+  }
+}
 writeFileSync('tests/calc-parity/common.json',JSON.stringify(cases,null,2)+'\n');
 const counts={};for(const c of cases) counts[c.group]=(counts[c.group]??0)+1;
 console.log(JSON.stringify({cases:cases.length,groups:counts}));

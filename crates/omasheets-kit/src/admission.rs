@@ -730,6 +730,8 @@ fn inspect_theme(xml: &[u8], require_minor_font: bool, reasons: &mut BTreeSet<St
 fn inspect_xml(kind: Kind, xml: &[u8], reasons: &mut BTreeSet<String>) {
     let mut reader = NsReader::from_reader(xml);
     let mut path = Vec::<String>::new();
+    let mut error_cell = false;
+    let mut cell_has_formula = false;
     loop {
         let event = match reader.read_event() {
             Ok(event) => event,
@@ -795,6 +797,20 @@ fn inspect_xml(kind: Kind, xml: &[u8], reasons: &mut BTreeSet<String>) {
                     }
                     attrs.insert(key, value);
                 }
+                if kind == Kind::Sheet {
+                    if name == "c" {
+                        error_cell = attrs.get("t").is_some_and(|value| value == "e");
+                        cell_has_formula = false;
+                        if empty && error_cell {
+                            reason(
+                                reasons,
+                                "Source error literals cannot be preserved by native conversion",
+                            );
+                        }
+                    } else if name == "f" && path.last().is_some_and(|name| name == "c") {
+                        cell_has_formula = true;
+                    }
+                }
                 check_values(kind, &path, &name, &attrs, reasons);
                 path.push(name);
                 if path.len() > 64 {
@@ -806,6 +822,19 @@ fn inspect_xml(kind: Kind, xml: &[u8], reasons: &mut BTreeSet<String>) {
                 }
             }
             Event::End(_) => {
+                if kind == Kind::Sheet && path.last().is_some_and(|name| name == "c") {
+                    // Supported formulas are recalculated, so their cached errors
+                    // need not become native literals. Compilation is checked by
+                    // the import manifest before the staged file is published.
+                    if error_cell && !cell_has_formula {
+                        reason(
+                            reasons,
+                            "Source error literals cannot be preserved by native conversion",
+                        );
+                    }
+                    error_cell = false;
+                    cell_has_formula = false;
+                }
                 path.pop();
             }
             Event::DocType(_) | Event::PI(_) | Event::CData(_) => {
@@ -891,12 +920,6 @@ fn check_values(
             }
         }
         (Kind::Sheet, "c") => {
-            if get("t") == Some("e") {
-                reason(
-                    reasons,
-                    "Source error cells/caches cannot be preserved by native conversion",
-                );
-            }
             if get("t").is_some_and(|v| !["n", "b", "s", "str", "inlineStr", "e"].contains(&v)) {
                 reason(
                     reasons,

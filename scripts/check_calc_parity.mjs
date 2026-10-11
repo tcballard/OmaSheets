@@ -101,15 +101,7 @@ for (const refusal of diagnostic.unsupported) {
   refusal.case = cases[refusal.row - 1];
   groups[refusal.case.group].unsupported++;
 }
-const known = mismatch =>
-  mismatch.reference.type === 'error' && mismatch.reference.value === '#N/A'
-  && ((mismatch.formula === 'ERROR.TYPE(SQRT(-1))' && mismatch.owned.value === 6)
-  || (mismatch.formula === 'ERROR.TYPE(VALUE("bad"))' && mismatch.owned.value === 3));
-const targetPassed = suite === 'common'
-  ? formulas.length >= 400 && score.formula_cells_observed === formulas.length && score.formula_cells_loaded === formulas.length
-    && score.formula_cells_compared === formulas.length && score.unsupported_formulas === 0
-    && score.stored_values_matched / formulas.length >= 0.99 && diagnostic.mismatches.every(known)
-  : fullParityPassed;
+const targetPassed = fullParityPassed && (suite !== 'common' || formulas.length >= 400);
 const evidence = {
   schema: 1, referenceVersion, referenceSettings,
   comparison: 'Typed text, boolean and error values must match; finite numbers use |owned-reference| <= 1e-9 * max(|reference|, 1), the existing XLSX scorer tolerance',
@@ -117,7 +109,7 @@ const evidence = {
   fixtureSha256: createHash('sha256').update(fixtureBytes).digest('hex'),
   sourceSha256: createHash('sha256').update(readFileSync(source)).digest('hex'),
   suite, cases, groups, passed: targetPassed, fullParityPassed, score, mismatches: diagnostic.mismatches, unsupported: diagnostic.unsupported,
-  scope: suite === 'common' ? 'declared common-calculation suite: minimum 400 cases, >=99% match, no refusals; only issue #98 internal-error gaps permitted' : 'strict information function reference slice; not full Calc parity',
+  scope: suite === 'common' ? 'declared common-calculation suite: minimum 400 cases, every typed result must match, no refusals; not full Calc parity' : 'strict information function reference slice; not full Calc parity',
 };
 writeFileSync(join(output, 'parity.json'), JSON.stringify(evidence, null, 2) + '\n', { flag: 'wx' });
 console.log(JSON.stringify({ suite, passed: targetPassed, fullParityPassed, groups, score, mismatches: diagnostic.mismatches, unsupported: diagnostic.unsupported }));

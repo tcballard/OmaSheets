@@ -93,6 +93,9 @@ pub enum CalcError {
     InvalidValue,
     /// Excel `#NUM!`: a numeric argument outside the function's domain.
     InvalidNumber,
+    /// Calc's internal illegal-argument error (502). It projects to `#VALUE!`
+    /// in XLSX, but ERROR.TYPE returns #N/A rather than the literal's code 3.
+    IllegalArgument,
     /// Excel `#NAME?`, only ever imported from a source workbook or written
     /// as a literal; unknown names fail to compile instead.
     InvalidName,
@@ -109,7 +112,7 @@ impl CalcError {
             Self::DivisionByZero => "#DIV/0!",
             Self::InvalidReference => "#REF!",
             Self::NotAvailable => "#N/A",
-            Self::InvalidValue => "#VALUE!",
+            Self::InvalidValue | Self::IllegalArgument => "#VALUE!",
             Self::InvalidNumber => "#NUM!",
             Self::InvalidName => "#NAME?",
             Self::NullIntersection => "#NULL!",
@@ -1930,14 +1933,7 @@ impl Workbook {
             Function::Rept => repeat_text(&values),
             Function::Abs => unary_number(&values, f64::abs),
             Function::Int => unary_number(&values, f64::floor),
-            Function::Sqrt => {
-                unary_number(
-                    &values,
-                    |value| {
-                        if value < 0.0 { f64::NAN } else { value.sqrt() }
-                    },
-                )
-            }
+            Function::Sqrt => square_root(&values),
             Function::Round => round_function(&values, RoundDirection::Nearest),
             Function::RoundUp => round_function(&values, RoundDirection::AwayFromZero),
             Function::RoundDown => round_function(&values, RoundDirection::TowardZero),
@@ -2358,7 +2354,9 @@ impl Workbook {
                     CalcError::InvalidName => Value::Number(5.0),
                     CalcError::InvalidNumber => Value::Number(6.0),
                     CalcError::NotAvailable => Value::Number(7.0),
-                    CalcError::InvalidArguments => Value::Error(CalcError::NotAvailable),
+                    CalcError::InvalidArguments | CalcError::IllegalArgument => {
+                        Value::Error(CalcError::NotAvailable)
+                    }
                 },
                 _ => Value::Error(CalcError::NotAvailable),
             },
@@ -4049,6 +4047,17 @@ fn median(mut numbers: Vec<f64>) -> Value {
     })
 }
 
+fn square_root(values: &[Value]) -> Value {
+    if values.len() != 1 {
+        return Value::Error(CalcError::InvalidArguments);
+    }
+    match number(values[0].clone()) {
+        Ok(value) if value < 0.0 => Value::Error(CalcError::IllegalArgument),
+        Ok(value) => number_value(value.sqrt()),
+        Err(error) => Value::Error(error),
+    }
+}
+
 fn unary_number(values: &[Value], operation: impl FnOnce(f64) -> f64) -> Value {
     if values.len() != 1 {
         return Value::Error(CalcError::InvalidArguments);
@@ -4056,7 +4065,7 @@ fn unary_number(values: &[Value], operation: impl FnOnce(f64) -> f64) -> Value {
     match number(values[0].clone()) {
         Ok(value) => {
             let result = operation(value);
-            // Outside the function's domain (`SQRT(-1)`, `LN(0)`) is `#NUM!`.
+            // A non-finite floating-point result projects to `#NUM!`.
             if result.is_finite() {
                 Value::Number(result)
             } else {
@@ -4272,7 +4281,7 @@ fn parse_text_number(values: &[Value]) -> Value {
         value
             .trim()
             .parse::<f64>()
-            .map_err(|_| CalcError::InvalidValue)
+            .map_err(|_| CalcError::IllegalArgument)
     }) {
         Ok(value) => Value::Number(value),
         Err(error) => Value::Error(error),
@@ -7226,7 +7235,7 @@ mod tests {
                 "=VLOOKUP(A1,A1:B3,2,FALSE)",
                 Value::Error(CalcError::InvalidReference),
             ),
-            ("=SQRT(-1)", Value::Error(CalcError::InvalidNumber)),
+            ("=SQRT(-1)", Value::Error(CalcError::IllegalArgument)),
             ("=LN(0)", Value::Error(CalcError::InvalidNumber)),
             ("=SQRT(16)", Value::Number(4.0)),
         ];
@@ -9009,6 +9018,66 @@ mod tests {
 #[cfg(test)]
 mod information_parity_tests {
     use super::*;
+
+    #[test]
+    fn internal_argument_errors_keep_their_origin_through_dependencies_and_arrays() {
+        let mut book = Workbook::default();
+        let input = CellId::new(0, 0, 0);
+        book.set_number(input, -1.0);
+        book.set_formula(CellId::new(0, 0, 1), "=SQRT(A1)").unwrap();
+        book.set_formula(CellId::new(0, 0, 2), "=ERROR.TYPE(B1)")
+            .unwrap();
+        assert_eq!(
+            book.value(CellId::new(0, 0, 1)),
+            Value::Error(CalcError::IllegalArgument)
+        );
+        assert_eq!(
+            book.value(CellId::new(0, 0, 2)),
+            Value::Error(CalcError::NotAvailable)
+        );
+        let output = CellId::new(0, 0, 3);
+        for (formula, expected) in [
+            (
+                "=ERROR.TYPE(VALUE(\"bad\"))",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            ("=ERROR.TYPE(B1+1)", Value::Error(CalcError::NotAvailable)),
+            (
+                "=ERROR.TYPE(SUM(B1:B2))",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            (
+                "=ERROR.TYPE(IFNA(B1,42))",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            (
+                "=ERROR.TYPE(IF(TRUE,B1,42))",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            (
+                "=ERROR.TYPE(INDEX(B1:B2,1))",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            (
+                "=SUMPRODUCT(ISNA(ERROR.TYPE(SQRT({-1,4,-9})))*1)",
+                Value::Number(3.0),
+            ),
+            ("=IFERROR(B1,42)", Value::Number(42.0)),
+            ("=ISNA(B1)", Value::Boolean(false)),
+            ("=ISERR(B1)", Value::Boolean(true)),
+            ("=ERROR.TYPE(#VALUE!)", Value::Number(3.0)),
+            ("=ERROR.TYPE(#NUM!)", Value::Number(6.0)),
+            ("=ERROR.TYPE(SQRT(#NUM!))", Value::Number(6.0)),
+            ("=ERROR.TYPE(VALUE(#VALUE!))", Value::Number(3.0)),
+        ] {
+            book.set_formula(output, formula).unwrap();
+            assert_eq!(book.value(output), expected, "{formula}");
+        }
+        book.set_number(input, 4.0);
+        assert_eq!(book.value(CellId::new(0, 0, 1)), Value::Number(2.0));
+        book.set_error(input, CalcError::InvalidNumber);
+        assert_eq!(book.value(CellId::new(0, 0, 2)), Value::Number(6.0));
+    }
 
     #[test]
     fn information_functions_classify_errors_without_propagating_them() {
