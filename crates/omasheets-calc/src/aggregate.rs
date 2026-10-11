@@ -6,6 +6,7 @@ pub(super) enum ArgumentKind {
     Scalar,
     Reference,
     Array,
+    ErrorLiteral,
 }
 
 impl Workbook {
@@ -281,6 +282,9 @@ impl Workbook {
                     Err(error) => visit(&Value::Error(error), ArgumentKind::Array),
                 },
                 Expr::Reference(_) => visit(&self.evaluate(argument), ArgumentKind::Reference),
+                Expr::Error(error) => {
+                    visit(&Value::Error(error.clone()), ArgumentKind::ErrorLiteral)
+                }
                 other => visit(&self.evaluate(other), ArgumentKind::Scalar),
             }
         }

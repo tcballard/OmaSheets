@@ -65,6 +65,24 @@ impl Workbook {
         visit: &mut impl FnMut(&Value, ArgumentKind),
     ) {
         let mut argument = |arg: &Expr<usize>| {
+            if matches!(
+                arg,
+                Expr::Function(Function::Index | Function::ReferenceSpan, _)
+            ) {
+                match self.reference_view(arg) {
+                    Ok(reference) => {
+                        reference.visit(self, &mut |value: &Value| {
+                            visit(value, ArgumentKind::Reference)
+                        });
+                        return;
+                    }
+                    Err(CalcError::InvalidArguments) => {}
+                    Err(error) => {
+                        visit(&Value::Error(error), ArgumentKind::Reference);
+                        return;
+                    }
+                }
+            }
             // Calc's statistical matrix collection traverses columns first.
             if contains_array_operand(arg) && !matches!(arg, Expr::RangeNode { .. }) {
                 match self.evaluate_array(arg) {
@@ -99,7 +117,7 @@ impl Workbook {
         arguments: &[Expr<usize>],
         text_as_zero: bool,
         reverse: bool,
-        scalar_error_is_parameter: bool,
+        retain_intermediate_error: bool,
     ) -> Result<Vec<f64>, CalcError> {
         let mut numbers = Vec::new();
         let mut error = None;
@@ -114,8 +132,8 @@ impl Workbook {
                 }
                 Value::Error(e) => {
                     error.get_or_insert_with(|| {
-                        if scalar_error_is_parameter && kind == ArgumentKind::Scalar {
-                            CalcError::IllegalParameter
+                        if retain_intermediate_error {
+                            statistical_error(e, kind)
                         } else {
                             e.clone()
                         }
@@ -132,13 +150,7 @@ impl Workbook {
             return Err(CalcError::InvalidArguments);
         }
         let numbers = self.statistical_numbers(arguments, false, false, false)?;
-        let mut modes = all_modes(&numbers)?;
-        modes.sort_by_key(|value| {
-            numbers
-                .iter()
-                .position(|n| n == value)
-                .expect("mode belongs to input")
-        });
+        let modes = ordered_modes(&numbers)?;
         Ok(ArrayValue::from_parts(
             modes.len(),
             1,
@@ -162,12 +174,8 @@ impl Workbook {
             .iter()
             .map(|value| {
                 let n = match value {
-                    Value::Text(text) => text
-                        .trim()
-                        .parse::<f64>()
-                        .ok()
-                        .filter(|n| n.is_finite())
-                        .ok_or(CalcError::IllegalArgument),
+                    Value::Text(_) | Value::Blank => Err(CalcError::InvalidValue),
+                    Value::Error(error) => Err(CalcError::Pending(Box::new(error.clone()))),
                     value => number(value.clone()),
                 };
                 match n {
@@ -276,7 +284,15 @@ impl Workbook {
             // arguments still propagate when Calc drains its argument stack.
             if let Value::Error(error) = value {
                 if !matches!(finished, Some(Value::Error(_))) {
-                    finished = Some(Value::Error(error.clone()));
+                    finished = Some(Value::Error(
+                        if matches!(finished, Some(Value::Number(0.0)))
+                            && kind != ArgumentKind::Array
+                        {
+                            error.clone()
+                        } else {
+                            statistical_error(error, kind)
+                        },
+                    ));
                 }
                 return;
             }
@@ -514,6 +530,17 @@ impl Workbook {
     }
 }
 
+fn statistical_error(error: &CalcError, kind: ArgumentKind) -> CalcError {
+    match kind {
+        ArgumentKind::ErrorLiteral => CalcError::IllegalParameter,
+        ArgumentKind::Reference => error.clone(),
+        _ => match error {
+            CalcError::Pending(_) => error.clone(),
+            error => CalcError::Pending(Box::new(error.clone())),
+        },
+    }
+}
+
 fn numeric_observation(value: &Value) -> Option<f64> {
     match value {
         Value::Number(n) => Some(*n),
@@ -555,20 +582,26 @@ fn all_modes(numbers: &[f64]) -> Result<Vec<f64>, CalcError> {
     Ok(modes)
 }
 fn mode(numbers: &[f64], first_encountered: bool) -> Value {
-    let modes = match all_modes(numbers) {
+    let modes = match if first_encountered {
+        ordered_modes(numbers)
+    } else {
+        all_modes(numbers)
+    } {
         Ok(modes) => modes,
         Err(error) => return Value::Error(error),
     };
-    if first_encountered {
-        Value::Number(
-            *numbers
-                .iter()
-                .find(|n| modes.contains(n))
-                .expect("mode belongs to input"),
-        )
-    } else {
-        Value::Number(modes[0])
-    }
+    Value::Number(modes[0])
+}
+fn ordered_modes(numbers: &[f64]) -> Result<Vec<f64>, CalcError> {
+    let key = |n: f64| if n == 0.0 { 0 } else { n.to_bits() };
+    let mut remaining: std::collections::HashSet<_> =
+        all_modes(numbers)?.into_iter().map(key).collect();
+    // Preserve first encounter order without a full input scan for every tie.
+    Ok(numbers
+        .iter()
+        .copied()
+        .filter(|n| remaining.remove(&key(*n)))
+        .collect())
 }
 fn moments(numbers: &[f64], function: Function) -> Value {
     let kurtosis = function == Function::Kurt;
@@ -609,6 +642,30 @@ fn moments(numbers: &[f64], function: Function) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_statistical_errors_publish_for_cell_references() {
+        let mut book = Workbook::default();
+        let input = CellId::new(0, 0, 0);
+        let result = CellId::new(0, 0, 1);
+        let inline = CellId::new(0, 0, 2);
+        let referenced = CellId::new(0, 0, 3);
+        book.set_number(input, 0.0);
+        book.set_formula(result, "=AVEDEV(1/A1,2)").unwrap();
+        book.set_formula(inline, "=ERROR.TYPE(AVEDEV(1/A1,2))")
+            .unwrap();
+        book.set_formula(referenced, "=ERROR.TYPE(B1)").unwrap();
+        assert_eq!(book.value(result), Value::Error(CalcError::DivisionByZero));
+        assert_eq!(book.value(inline), Value::Error(CalcError::NotAvailable));
+        assert_eq!(book.value(referenced), Value::Number(2.0));
+        book.set_number(input, 1.0);
+        assert_eq!(book.value(result), Value::Number(0.5));
+        assert_eq!(book.value(inline), Value::Error(CalcError::NotAvailable));
+        assert_eq!(
+            book.value(referenced),
+            Value::Error(CalcError::NotAvailable)
+        );
+    }
 
     #[test]
     fn statistics_preserve_text_logical_and_empty_path_contracts() {

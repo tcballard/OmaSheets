@@ -100,6 +100,10 @@ pub enum CalcError {
     IllegalArgument,
     /// Calc internal wrong-parameter-type error; projects to `#VALUE!`.
     IllegalParameter,
+    /// A calculation error held by an intermediate interpreter operation.
+    /// Its visible error survives, but inline ERROR.TYPE cannot inspect it.
+    /// A completed cell publishes the underlying error for its dependents.
+    Pending(Box<CalcError>),
     /// Excel `#NAME?`, only ever imported from a source workbook or written
     /// as a literal; unknown names fail to compile instead.
     InvalidName,
@@ -121,6 +125,22 @@ impl CalcError {
             Self::InvalidName => "#NAME?",
             Self::NullIntersection => "#NULL!",
             Self::InvalidArguments => "#ARGS!",
+            Self::Pending(error) => error.label(),
+        }
+    }
+
+    fn is_na(&self) -> bool {
+        match self {
+            Self::NotAvailable => true,
+            Self::Pending(error) => error.is_na(),
+            _ => false,
+        }
+    }
+
+    fn published(self) -> Self {
+        match self {
+            Self::Pending(error) => error.published(),
+            error => error,
         }
     }
 
@@ -1520,6 +1540,7 @@ impl Workbook {
                     Some(match self.evaluate(expression) {
                         // A formula whose result is an empty reference shows 0.
                         Value::Blank => Value::Number(0.0),
+                        Value::Error(error) => Value::Error(error.published()),
                         value => value,
                     })
                 }
@@ -1768,7 +1789,7 @@ impl Workbook {
                 return Value::Error(CalcError::InvalidArguments);
             }
             let value = self.evaluate(&arguments[0]);
-            return if matches!(&value, Value::Error(error) if function == Function::IfError || *error == CalcError::NotAvailable)
+            return if matches!(&value, Value::Error(error) if function == Function::IfError || error.is_na())
             {
                 self.evaluate(&arguments[1])
             } else {
@@ -2304,9 +2325,9 @@ impl Workbook {
             Function::IsText => Value::Boolean(matches!(value, Value::Text(_))),
             Function::IsLogical => Value::Boolean(matches!(value, Value::Boolean(_))),
             Function::IsError => Value::Boolean(matches!(value, Value::Error(_))),
-            Function::IsErr => Value::Boolean(
-                matches!(value, Value::Error(ref error) if *error != CalcError::NotAvailable),
-            ),
+            Function::IsErr => {
+                Value::Boolean(matches!(value, Value::Error(ref error) if !error.is_na()))
+            }
             Function::IsNonText => Value::Boolean(!matches!(value, Value::Text(_))),
             Function::ErrorType => match value {
                 Value::Error(error) => match error {
@@ -2319,12 +2340,13 @@ impl Workbook {
                     CalcError::NotAvailable => Value::Number(7.0),
                     CalcError::InvalidArguments
                     | CalcError::IllegalArgument
-                    | CalcError::IllegalParameter => Value::Error(CalcError::NotAvailable),
+                    | CalcError::IllegalParameter
+                    | CalcError::Pending(_) => Value::Error(CalcError::NotAvailable),
                 },
                 _ => Value::Error(CalcError::NotAvailable),
             },
             Function::IsNa => {
-                Value::Boolean(matches!(value, Value::Error(CalcError::NotAvailable)))
+                Value::Boolean(matches!(value, Value::Error(ref error) if error.is_na()))
             }
             Function::N => match value {
                 Value::Number(number) => Value::Number(number),

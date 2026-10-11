@@ -300,6 +300,28 @@ for (const name of ['LARGE','SMALL']) for (const ranks of ['{1,2,3}','{1;2;3}','
   add('statistics-arrays', '=SUM(' + name + '({1,2,3,4},' + ranks + '))');
   add('statistics-arrays', '=ERROR.TYPE(SUM(' + name + '({1,2,3,4},' + ranks + ')))');
 }
+for (const name of ['MINA','MAXA','STDEVA','STDEVPA','VARA','VARPA','DEVSQ','MODE.SNGL','GEOMEAN']) {
+  for (const arg of ['INDEX(Inputs!A5:A6,0)','INDEX(Inputs!A1:A5,0)','INDEX(IF({0,1,1},{10,20,30}),1,0)']) {
+    add('statistics-references', '=' + name + '(' + arg + ')');
+  }
+}
+for (const expr of ['INDEX(SMALL({1,2,3,4},{1,2}),1,2)','SUM(TRANSPOSE(MODE.MULT({4,4,2,2})))','MINA(IF({0,0},{10,20}))','VARA(IF({0,0},{10,20}))']) add('statistics-references', '=' + expr);
+// Cell publication and nested inspection must distinguish pending errors.
+for (const expr of ['AVEDEV(NA(),2)','AVEDEV(1/0,2)','GEOMEAN({0,#N/A})','GEOMEAN(NA(),0)','SUM(LARGE({1,2,3},{#N/A,2}))']) {
+  const row = cases.length + 1;
+  add('statistics-pending', '=' + expr);
+  for (const inner of [expr, 'A' + row]) {
+    for (const inspection of ['ERROR.TYPE','ISNA','ISERR','ISERROR']) add('statistics-pending', '=' + inspection + '(' + inner + ')');
+    for (const handler of ['IFNA','IFERROR']) add('statistics-pending', '=' + handler + '(' + inner + ',42)');
+  }
+  add('statistics-pending', '=ERROR.TYPE((' + expr + ')+0)');
+}
+for (const error of ['#N/A','#DIV/0!','#NUM!','#VALUE!','#REF!','#NAME?','#NULL!']) {
+  for (const expr of ['AVEDEV(' + error + ',2)', 'SUM(SMALL({1,2,3},{' + error + ',2}))']) {
+    add('statistics-pending', '=' + expr);
+    add('statistics-pending', '=ERROR.TYPE(' + expr + ')');
+  }
+}
 writeFileSync('tests/calc-parity/common.json',JSON.stringify(cases,null,2)+'\n');
 const counts={};for(const c of cases) counts[c.group]=(counts[c.group]??0)+1;
 console.log(JSON.stringify({cases:cases.length,groups:counts}));

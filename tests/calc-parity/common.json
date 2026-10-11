@@ -8538,5 +8538,650 @@
     "id": "statistics-arrays-1708",
     "group": "statistics-arrays",
     "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},{#N/A,2})))"
+  },
+  {
+    "id": "statistics-references-1709",
+    "group": "statistics-references",
+    "formula": "=MINA(INDEX(Inputs!A5:A6,0))"
+  },
+  {
+    "id": "statistics-references-1710",
+    "group": "statistics-references",
+    "formula": "=MINA(INDEX(Inputs!A1:A5,0))"
+  },
+  {
+    "id": "statistics-references-1711",
+    "group": "statistics-references",
+    "formula": "=MINA(INDEX(IF({0,1,1},{10,20,30}),1,0))"
+  },
+  {
+    "id": "statistics-references-1712",
+    "group": "statistics-references",
+    "formula": "=MAXA(INDEX(Inputs!A5:A6,0))"
+  },
+  {
+    "id": "statistics-references-1713",
+    "group": "statistics-references",
+    "formula": "=MAXA(INDEX(Inputs!A1:A5,0))"
+  },
+  {
+    "id": "statistics-references-1714",
+    "group": "statistics-references",
+    "formula": "=MAXA(INDEX(IF({0,1,1},{10,20,30}),1,0))"
+  },
+  {
+    "id": "statistics-references-1715",
+    "group": "statistics-references",
+    "formula": "=STDEVA(INDEX(Inputs!A5:A6,0))"
+  },
+  {
+    "id": "statistics-references-1716",
+    "group": "statistics-references",
+    "formula": "=STDEVA(INDEX(Inputs!A1:A5,0))"
+  },
+  {
+    "id": "statistics-references-1717",
+    "group": "statistics-references",
+    "formula": "=STDEVA(INDEX(IF({0,1,1},{10,20,30}),1,0))"
+  },
+  {
+    "id": "statistics-references-1718",
+    "group": "statistics-references",
+    "formula": "=STDEVPA(INDEX(Inputs!A5:A6,0))"
+  },
+  {
+    "id": "statistics-references-1719",
+    "group": "statistics-references",
+    "formula": "=STDEVPA(INDEX(Inputs!A1:A5,0))"
+  },
+  {
+    "id": "statistics-references-1720",
+    "group": "statistics-references",
+    "formula": "=STDEVPA(INDEX(IF({0,1,1},{10,20,30}),1,0))"
+  },
+  {
+    "id": "statistics-references-1721",
+    "group": "statistics-references",
+    "formula": "=VARA(INDEX(Inputs!A5:A6,0))"
+  },
+  {
+    "id": "statistics-references-1722",
+    "group": "statistics-references",
+    "formula": "=VARA(INDEX(Inputs!A1:A5,0))"
+  },
+  {
+    "id": "statistics-references-1723",
+    "group": "statistics-references",
+    "formula": "=VARA(INDEX(IF({0,1,1},{10,20,30}),1,0))"
+  },
+  {
+    "id": "statistics-references-1724",
+    "group": "statistics-references",
+    "formula": "=VARPA(INDEX(Inputs!A5:A6,0))"
+  },
+  {
+    "id": "statistics-references-1725",
+    "group": "statistics-references",
+    "formula": "=VARPA(INDEX(Inputs!A1:A5,0))"
+  },
+  {
+    "id": "statistics-references-1726",
+    "group": "statistics-references",
+    "formula": "=VARPA(INDEX(IF({0,1,1},{10,20,30}),1,0))"
+  },
+  {
+    "id": "statistics-references-1727",
+    "group": "statistics-references",
+    "formula": "=DEVSQ(INDEX(Inputs!A5:A6,0))"
+  },
+  {
+    "id": "statistics-references-1728",
+    "group": "statistics-references",
+    "formula": "=DEVSQ(INDEX(Inputs!A1:A5,0))"
+  },
+  {
+    "id": "statistics-references-1729",
+    "group": "statistics-references",
+    "formula": "=DEVSQ(INDEX(IF({0,1,1},{10,20,30}),1,0))"
+  },
+  {
+    "id": "statistics-references-1730",
+    "group": "statistics-references",
+    "formula": "=MODE.SNGL(INDEX(Inputs!A5:A6,0))"
+  },
+  {
+    "id": "statistics-references-1731",
+    "group": "statistics-references",
+    "formula": "=MODE.SNGL(INDEX(Inputs!A1:A5,0))"
+  },
+  {
+    "id": "statistics-references-1732",
+    "group": "statistics-references",
+    "formula": "=MODE.SNGL(INDEX(IF({0,1,1},{10,20,30}),1,0))"
+  },
+  {
+    "id": "statistics-references-1733",
+    "group": "statistics-references",
+    "formula": "=GEOMEAN(INDEX(Inputs!A5:A6,0))"
+  },
+  {
+    "id": "statistics-references-1734",
+    "group": "statistics-references",
+    "formula": "=GEOMEAN(INDEX(Inputs!A1:A5,0))"
+  },
+  {
+    "id": "statistics-references-1735",
+    "group": "statistics-references",
+    "formula": "=GEOMEAN(INDEX(IF({0,1,1},{10,20,30}),1,0))"
+  },
+  {
+    "id": "statistics-references-1736",
+    "group": "statistics-references",
+    "formula": "=INDEX(SMALL({1,2,3,4},{1,2}),1,2)"
+  },
+  {
+    "id": "statistics-references-1737",
+    "group": "statistics-references",
+    "formula": "=SUM(TRANSPOSE(MODE.MULT({4,4,2,2})))"
+  },
+  {
+    "id": "statistics-references-1738",
+    "group": "statistics-references",
+    "formula": "=MINA(IF({0,0},{10,20}))"
+  },
+  {
+    "id": "statistics-references-1739",
+    "group": "statistics-references",
+    "formula": "=VARA(IF({0,0},{10,20}))"
+  },
+  {
+    "id": "statistics-pending-1740",
+    "group": "statistics-pending",
+    "formula": "=AVEDEV(NA(),2)"
+  },
+  {
+    "id": "statistics-pending-1741",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(AVEDEV(NA(),2))"
+  },
+  {
+    "id": "statistics-pending-1742",
+    "group": "statistics-pending",
+    "formula": "=ISNA(AVEDEV(NA(),2))"
+  },
+  {
+    "id": "statistics-pending-1743",
+    "group": "statistics-pending",
+    "formula": "=ISERR(AVEDEV(NA(),2))"
+  },
+  {
+    "id": "statistics-pending-1744",
+    "group": "statistics-pending",
+    "formula": "=ISERROR(AVEDEV(NA(),2))"
+  },
+  {
+    "id": "statistics-pending-1745",
+    "group": "statistics-pending",
+    "formula": "=IFNA(AVEDEV(NA(),2),42)"
+  },
+  {
+    "id": "statistics-pending-1746",
+    "group": "statistics-pending",
+    "formula": "=IFERROR(AVEDEV(NA(),2),42)"
+  },
+  {
+    "id": "statistics-pending-1747",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(A1740)"
+  },
+  {
+    "id": "statistics-pending-1748",
+    "group": "statistics-pending",
+    "formula": "=ISNA(A1740)"
+  },
+  {
+    "id": "statistics-pending-1749",
+    "group": "statistics-pending",
+    "formula": "=ISERR(A1740)"
+  },
+  {
+    "id": "statistics-pending-1750",
+    "group": "statistics-pending",
+    "formula": "=ISERROR(A1740)"
+  },
+  {
+    "id": "statistics-pending-1751",
+    "group": "statistics-pending",
+    "formula": "=IFNA(A1740,42)"
+  },
+  {
+    "id": "statistics-pending-1752",
+    "group": "statistics-pending",
+    "formula": "=IFERROR(A1740,42)"
+  },
+  {
+    "id": "statistics-pending-1753",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE((AVEDEV(NA(),2))+0)"
+  },
+  {
+    "id": "statistics-pending-1754",
+    "group": "statistics-pending",
+    "formula": "=AVEDEV(1/0,2)"
+  },
+  {
+    "id": "statistics-pending-1755",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(AVEDEV(1/0,2))"
+  },
+  {
+    "id": "statistics-pending-1756",
+    "group": "statistics-pending",
+    "formula": "=ISNA(AVEDEV(1/0,2))"
+  },
+  {
+    "id": "statistics-pending-1757",
+    "group": "statistics-pending",
+    "formula": "=ISERR(AVEDEV(1/0,2))"
+  },
+  {
+    "id": "statistics-pending-1758",
+    "group": "statistics-pending",
+    "formula": "=ISERROR(AVEDEV(1/0,2))"
+  },
+  {
+    "id": "statistics-pending-1759",
+    "group": "statistics-pending",
+    "formula": "=IFNA(AVEDEV(1/0,2),42)"
+  },
+  {
+    "id": "statistics-pending-1760",
+    "group": "statistics-pending",
+    "formula": "=IFERROR(AVEDEV(1/0,2),42)"
+  },
+  {
+    "id": "statistics-pending-1761",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(A1754)"
+  },
+  {
+    "id": "statistics-pending-1762",
+    "group": "statistics-pending",
+    "formula": "=ISNA(A1754)"
+  },
+  {
+    "id": "statistics-pending-1763",
+    "group": "statistics-pending",
+    "formula": "=ISERR(A1754)"
+  },
+  {
+    "id": "statistics-pending-1764",
+    "group": "statistics-pending",
+    "formula": "=ISERROR(A1754)"
+  },
+  {
+    "id": "statistics-pending-1765",
+    "group": "statistics-pending",
+    "formula": "=IFNA(A1754,42)"
+  },
+  {
+    "id": "statistics-pending-1766",
+    "group": "statistics-pending",
+    "formula": "=IFERROR(A1754,42)"
+  },
+  {
+    "id": "statistics-pending-1767",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE((AVEDEV(1/0,2))+0)"
+  },
+  {
+    "id": "statistics-pending-1768",
+    "group": "statistics-pending",
+    "formula": "=GEOMEAN({0,#N/A})"
+  },
+  {
+    "id": "statistics-pending-1769",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(GEOMEAN({0,#N/A}))"
+  },
+  {
+    "id": "statistics-pending-1770",
+    "group": "statistics-pending",
+    "formula": "=ISNA(GEOMEAN({0,#N/A}))"
+  },
+  {
+    "id": "statistics-pending-1771",
+    "group": "statistics-pending",
+    "formula": "=ISERR(GEOMEAN({0,#N/A}))"
+  },
+  {
+    "id": "statistics-pending-1772",
+    "group": "statistics-pending",
+    "formula": "=ISERROR(GEOMEAN({0,#N/A}))"
+  },
+  {
+    "id": "statistics-pending-1773",
+    "group": "statistics-pending",
+    "formula": "=IFNA(GEOMEAN({0,#N/A}),42)"
+  },
+  {
+    "id": "statistics-pending-1774",
+    "group": "statistics-pending",
+    "formula": "=IFERROR(GEOMEAN({0,#N/A}),42)"
+  },
+  {
+    "id": "statistics-pending-1775",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(A1768)"
+  },
+  {
+    "id": "statistics-pending-1776",
+    "group": "statistics-pending",
+    "formula": "=ISNA(A1768)"
+  },
+  {
+    "id": "statistics-pending-1777",
+    "group": "statistics-pending",
+    "formula": "=ISERR(A1768)"
+  },
+  {
+    "id": "statistics-pending-1778",
+    "group": "statistics-pending",
+    "formula": "=ISERROR(A1768)"
+  },
+  {
+    "id": "statistics-pending-1779",
+    "group": "statistics-pending",
+    "formula": "=IFNA(A1768,42)"
+  },
+  {
+    "id": "statistics-pending-1780",
+    "group": "statistics-pending",
+    "formula": "=IFERROR(A1768,42)"
+  },
+  {
+    "id": "statistics-pending-1781",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE((GEOMEAN({0,#N/A}))+0)"
+  },
+  {
+    "id": "statistics-pending-1782",
+    "group": "statistics-pending",
+    "formula": "=GEOMEAN(NA(),0)"
+  },
+  {
+    "id": "statistics-pending-1783",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(GEOMEAN(NA(),0))"
+  },
+  {
+    "id": "statistics-pending-1784",
+    "group": "statistics-pending",
+    "formula": "=ISNA(GEOMEAN(NA(),0))"
+  },
+  {
+    "id": "statistics-pending-1785",
+    "group": "statistics-pending",
+    "formula": "=ISERR(GEOMEAN(NA(),0))"
+  },
+  {
+    "id": "statistics-pending-1786",
+    "group": "statistics-pending",
+    "formula": "=ISERROR(GEOMEAN(NA(),0))"
+  },
+  {
+    "id": "statistics-pending-1787",
+    "group": "statistics-pending",
+    "formula": "=IFNA(GEOMEAN(NA(),0),42)"
+  },
+  {
+    "id": "statistics-pending-1788",
+    "group": "statistics-pending",
+    "formula": "=IFERROR(GEOMEAN(NA(),0),42)"
+  },
+  {
+    "id": "statistics-pending-1789",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(A1782)"
+  },
+  {
+    "id": "statistics-pending-1790",
+    "group": "statistics-pending",
+    "formula": "=ISNA(A1782)"
+  },
+  {
+    "id": "statistics-pending-1791",
+    "group": "statistics-pending",
+    "formula": "=ISERR(A1782)"
+  },
+  {
+    "id": "statistics-pending-1792",
+    "group": "statistics-pending",
+    "formula": "=ISERROR(A1782)"
+  },
+  {
+    "id": "statistics-pending-1793",
+    "group": "statistics-pending",
+    "formula": "=IFNA(A1782,42)"
+  },
+  {
+    "id": "statistics-pending-1794",
+    "group": "statistics-pending",
+    "formula": "=IFERROR(A1782,42)"
+  },
+  {
+    "id": "statistics-pending-1795",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE((GEOMEAN(NA(),0))+0)"
+  },
+  {
+    "id": "statistics-pending-1796",
+    "group": "statistics-pending",
+    "formula": "=SUM(LARGE({1,2,3},{#N/A,2}))"
+  },
+  {
+    "id": "statistics-pending-1797",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3},{#N/A,2})))"
+  },
+  {
+    "id": "statistics-pending-1798",
+    "group": "statistics-pending",
+    "formula": "=ISNA(SUM(LARGE({1,2,3},{#N/A,2})))"
+  },
+  {
+    "id": "statistics-pending-1799",
+    "group": "statistics-pending",
+    "formula": "=ISERR(SUM(LARGE({1,2,3},{#N/A,2})))"
+  },
+  {
+    "id": "statistics-pending-1800",
+    "group": "statistics-pending",
+    "formula": "=ISERROR(SUM(LARGE({1,2,3},{#N/A,2})))"
+  },
+  {
+    "id": "statistics-pending-1801",
+    "group": "statistics-pending",
+    "formula": "=IFNA(SUM(LARGE({1,2,3},{#N/A,2})),42)"
+  },
+  {
+    "id": "statistics-pending-1802",
+    "group": "statistics-pending",
+    "formula": "=IFERROR(SUM(LARGE({1,2,3},{#N/A,2})),42)"
+  },
+  {
+    "id": "statistics-pending-1803",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(A1796)"
+  },
+  {
+    "id": "statistics-pending-1804",
+    "group": "statistics-pending",
+    "formula": "=ISNA(A1796)"
+  },
+  {
+    "id": "statistics-pending-1805",
+    "group": "statistics-pending",
+    "formula": "=ISERR(A1796)"
+  },
+  {
+    "id": "statistics-pending-1806",
+    "group": "statistics-pending",
+    "formula": "=ISERROR(A1796)"
+  },
+  {
+    "id": "statistics-pending-1807",
+    "group": "statistics-pending",
+    "formula": "=IFNA(A1796,42)"
+  },
+  {
+    "id": "statistics-pending-1808",
+    "group": "statistics-pending",
+    "formula": "=IFERROR(A1796,42)"
+  },
+  {
+    "id": "statistics-pending-1809",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE((SUM(LARGE({1,2,3},{#N/A,2})))+0)"
+  },
+  {
+    "id": "statistics-pending-1810",
+    "group": "statistics-pending",
+    "formula": "=AVEDEV(#N/A,2)"
+  },
+  {
+    "id": "statistics-pending-1811",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(AVEDEV(#N/A,2))"
+  },
+  {
+    "id": "statistics-pending-1812",
+    "group": "statistics-pending",
+    "formula": "=SUM(SMALL({1,2,3},{#N/A,2}))"
+  },
+  {
+    "id": "statistics-pending-1813",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#N/A,2})))"
+  },
+  {
+    "id": "statistics-pending-1814",
+    "group": "statistics-pending",
+    "formula": "=AVEDEV(#DIV/0!,2)"
+  },
+  {
+    "id": "statistics-pending-1815",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(AVEDEV(#DIV/0!,2))"
+  },
+  {
+    "id": "statistics-pending-1816",
+    "group": "statistics-pending",
+    "formula": "=SUM(SMALL({1,2,3},{#DIV/0!,2}))"
+  },
+  {
+    "id": "statistics-pending-1817",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#DIV/0!,2})))"
+  },
+  {
+    "id": "statistics-pending-1818",
+    "group": "statistics-pending",
+    "formula": "=AVEDEV(#NUM!,2)"
+  },
+  {
+    "id": "statistics-pending-1819",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(AVEDEV(#NUM!,2))"
+  },
+  {
+    "id": "statistics-pending-1820",
+    "group": "statistics-pending",
+    "formula": "=SUM(SMALL({1,2,3},{#NUM!,2}))"
+  },
+  {
+    "id": "statistics-pending-1821",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#NUM!,2})))"
+  },
+  {
+    "id": "statistics-pending-1822",
+    "group": "statistics-pending",
+    "formula": "=AVEDEV(#VALUE!,2)"
+  },
+  {
+    "id": "statistics-pending-1823",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(AVEDEV(#VALUE!,2))"
+  },
+  {
+    "id": "statistics-pending-1824",
+    "group": "statistics-pending",
+    "formula": "=SUM(SMALL({1,2,3},{#VALUE!,2}))"
+  },
+  {
+    "id": "statistics-pending-1825",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#VALUE!,2})))"
+  },
+  {
+    "id": "statistics-pending-1826",
+    "group": "statistics-pending",
+    "formula": "=AVEDEV(#REF!,2)"
+  },
+  {
+    "id": "statistics-pending-1827",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(AVEDEV(#REF!,2))"
+  },
+  {
+    "id": "statistics-pending-1828",
+    "group": "statistics-pending",
+    "formula": "=SUM(SMALL({1,2,3},{#REF!,2}))"
+  },
+  {
+    "id": "statistics-pending-1829",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#REF!,2})))"
+  },
+  {
+    "id": "statistics-pending-1830",
+    "group": "statistics-pending",
+    "formula": "=AVEDEV(#NAME?,2)"
+  },
+  {
+    "id": "statistics-pending-1831",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(AVEDEV(#NAME?,2))"
+  },
+  {
+    "id": "statistics-pending-1832",
+    "group": "statistics-pending",
+    "formula": "=SUM(SMALL({1,2,3},{#NAME?,2}))"
+  },
+  {
+    "id": "statistics-pending-1833",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#NAME?,2})))"
+  },
+  {
+    "id": "statistics-pending-1834",
+    "group": "statistics-pending",
+    "formula": "=AVEDEV(#NULL!,2)"
+  },
+  {
+    "id": "statistics-pending-1835",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(AVEDEV(#NULL!,2))"
+  },
+  {
+    "id": "statistics-pending-1836",
+    "group": "statistics-pending",
+    "formula": "=SUM(SMALL({1,2,3},{#NULL!,2}))"
+  },
+  {
+    "id": "statistics-pending-1837",
+    "group": "statistics-pending",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#NULL!,2})))"
   }
 ]

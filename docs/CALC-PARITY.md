@@ -302,3 +302,14 @@ no LibreOffice implementation is copied or added to the product dependencies.
 A new owned session test imports 15 formulas, edits a precedent, checks dependent
 results, saves without flattening, and reopens native and XLSX documents; ZIP
 inspection independently checks updated formula caches and source preservation.
+
+The fresh 1,708-case run exposed 38 differences, chiefly inline error inspection.
+Calc's interpreter can retain a pending calculation error outside the value on
+its stack: the displayed error survives, while inline ERROR.TYPE returns #N/A.
+The same error published in a cell is inspectable through a reference. The owned
+evaluator now represents that intermediate state and clears it at cell publication;
+ordinary internal illegal-argument origins remain intact. Literal errors, computed
+errors and reference errors are distinct inputs. Array rank selectors also reject
+text, retaining standard #VALUE! provenance. The previous 1,708-case workbook now
+matches every result locally. Fresh reference coverage grows to 1,837 cases,
+including cell publication, handlers, nested inspection and reference-valued INDEX.

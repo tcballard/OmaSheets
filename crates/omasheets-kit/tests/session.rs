@@ -909,3 +909,63 @@ fn statistical_arrays_and_regression_survive_owned_edit_save_and_reopen() {
     assert!(xml.contains("<f>SUM(LARGE(B1:B3,{1,2}))</f><v>12</v>"));
     assert_eq!(fs::read(&source).unwrap(), original);
 }
+
+#[test]
+fn pending_statistical_errors_keep_inline_and_cell_inspection_distinct() {
+    let fixture = Fixture::new();
+    let source = fixture.path("pending.xlsx");
+    let working = fixture.path("pending.omasheets");
+    let saved = fixture.path("pending-saved.xlsx");
+    write_xlsx(
+        &source,
+        r#"<row r="1"><c r="A1"><v>1</v></c>
+        <c r="B1"><f>AVEDEV(1/A1,2)</f><v>0.5</v></c>
+        <c r="C1" t="e"><f>ERROR.TYPE(B1)</f><v>#N/A</v></c>
+        <c r="D1" t="e"><f>ERROR.TYPE(AVEDEV(1/A1,2))</f><v>#N/A</v></c>
+        <c r="E1"><f>IFERROR(AVEDEV(1/A1,2),42)</f><v>0.5</v></c></row>"#,
+        "",
+        "",
+        &[],
+    );
+    let mut session = WorkbookSession::open_xlsx(&source, &working).unwrap();
+    let sheet = session.sheets().unwrap()[0].id.to_string();
+    assert_eq!(number(&mut session, &sheet, 0, 1), 0.5);
+    let revision = session.revision().unwrap();
+    session
+        .edit(
+            &sheet,
+            &revision,
+            Action::SetCells {
+                row: 0,
+                column: 0,
+                values: vec![vec!["0".into()]],
+            },
+        )
+        .unwrap();
+    let check = |session: &mut WorkbookSession, sheet: &str| {
+        for (column, value) in [
+            (1, CellValue::Error("#DIV/0!".into())),
+            (2, CellValue::Number(2.0)),
+            (3, CellValue::Error("#N/A".into())),
+            (4, CellValue::Number(42.0)),
+        ] {
+            assert_eq!(
+                session.viewport(sheet, 0, column, 1, 1).unwrap().cells[0].value,
+                value
+            );
+        }
+    };
+    check(&mut session, &sheet);
+    let manifest = session.save_xlsx_copy(&saved).unwrap();
+    assert_eq!(manifest.formula_cells_preserved, 4);
+    assert_eq!(manifest.formula_cells_flattened, 0);
+    session.close().unwrap();
+    for mut reopened in [
+        WorkbookSession::open_native(&working).unwrap(),
+        WorkbookSession::open_xlsx(&saved, fixture.path("pending-reimport.omasheets")).unwrap(),
+    ] {
+        let sheet = reopened.sheets().unwrap()[0].id.to_string();
+        check(&mut reopened, &sheet);
+        reopened.close().unwrap();
+    }
+}
