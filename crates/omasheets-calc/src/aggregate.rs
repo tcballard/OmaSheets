@@ -59,9 +59,7 @@ impl Workbook {
                     }
                 },
                 Value::Error(e) => {
-                    if kind == ArgumentKind::Array
-                        || !matches!(function, Function::Count | Function::CountA)
-                    {
+                    if !matches!(function, Function::Count | Function::CountA) {
                         error.get_or_insert_with(|| e.clone());
                     }
                     None

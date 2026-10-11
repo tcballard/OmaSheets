@@ -175,7 +175,7 @@ impl Workbook {
             .map(|value| {
                 let n = match value {
                     Value::Text(_) | Value::Blank => Err(CalcError::InvalidValue),
-                    Value::Error(error) => Err(CalcError::Pending(Box::new(error.clone()))),
+                    Value::Error(error) => Err(error.clone()),
                     value => number(value.clone()),
                 };
                 match n {
@@ -280,6 +280,9 @@ impl Workbook {
         let mut count = 0usize;
         let mut finished = None;
         self.visit_statistical_arguments(arguments, false, true, &mut |value, kind| {
+            if kind == ArgumentKind::Array && matches!(finished, Some(Value::Number(0.0))) {
+                return;
+            }
             // A zero short-circuits numeric work, but errors in remaining
             // arguments still propagate when Calc drains its argument stack.
             if let Value::Error(error) = value {
@@ -533,7 +536,7 @@ impl Workbook {
 fn statistical_error(error: &CalcError, kind: ArgumentKind) -> CalcError {
     match kind {
         ArgumentKind::ErrorLiteral => CalcError::IllegalParameter,
-        ArgumentKind::Reference => error.clone(),
+        ArgumentKind::Reference | ArgumentKind::Array => error.clone(),
         _ => match error {
             CalcError::Pending(_) => error.clone(),
             error => CalcError::Pending(Box::new(error.clone())),
@@ -689,7 +692,7 @@ mod tests {
                 "=ERROR.TYPE(PERCENTILE.EXC({1,2},0))",
                 Value::Error(CalcError::NotAvailable),
             ),
-            ("=GEOMEAN({0,#N/A})", Value::Error(CalcError::NotAvailable)),
+            ("=GEOMEAN(IF({FALSE,TRUE},NA(),{0,0}))", Value::Number(0.0)),
             ("=HARMEAN({0,2})", Value::Error(CalcError::IllegalArgument)),
             ("=SKEW({2,2,2})", Value::Error(CalcError::IllegalArgument)),
             ("=KURT({2,2,2,2})", Value::Error(CalcError::DivisionByZero)),
@@ -704,6 +707,18 @@ mod tests {
         let mut book = Workbook::default();
         let output = CellId::new(0, 0, 0);
         for (formula, expected) in [
+            ("=COUNT(IF({TRUE,FALSE},NA(),{0,2}))", Value::Number(1.0)),
+            ("=COUNTA(IF({TRUE,FALSE},NA(),{0,2}))", Value::Number(2.0)),
+            (
+                "=ERROR.TYPE(SUM(SMALL({1,2,3},IF({TRUE,FALSE},NA(),{0,2}))))",
+                Value::Number(7.0),
+            ),
+            ("=ISNA(AVEDEV(NA(),2))", Value::Boolean(false)),
+            ("=ISERR(AVEDEV(NA(),2))", Value::Boolean(true)),
+            (
+                "=IFNA(AVEDEV(NA(),2),42)",
+                Value::Error(CalcError::IllegalParameter),
+            ),
             ("=MODE({4,4,2,2})", Value::Number(2.0)),
             ("=MODE.SNGL({4,4,2,2})", Value::Number(4.0)),
             ("=SUM(MODE.MULT({4,4,2,2}))", Value::Number(6.0)),

@@ -9243,5 +9243,15 @@
     "group": "statistics-pending",
     "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},IF({TRUE,FALSE},#NULL!,{0,2}))))",
     "originalFormula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#NULL!,2})))"
+  },
+  {
+    "id": "statistics-arrays-1838",
+    "group": "statistics-arrays",
+    "formula": "=SUBTOTAL(2,IF({TRUE,FALSE},NA(),{0,2}))"
+  },
+  {
+    "id": "statistics-arrays-1839",
+    "group": "statistics-arrays",
+    "formula": "=SUBTOTAL(3,IF({TRUE,FALSE},NA(),{0,2}))"
   }
 ]

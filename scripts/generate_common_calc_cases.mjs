@@ -322,6 +322,7 @@ for (const error of ['#N/A','#DIV/0!','#NUM!','#VALUE!','#REF!','#NAME?','#NULL!
     add('statistics-pending', '=ERROR.TYPE(' + expr + ')');
   }
 }
+for (const code of [2,3]) add('statistics-arrays', '=SUBTOTAL(' + code + ',IF({TRUE,FALSE},NA(),{0,2}))');
 // Calc's FODS parser rejects literal error members in inline arrays. Build
 // equivalent typed arrays with IF instead of measuring a compilation error.
 // Preserve the original expression for audit; no case is omitted from the gate.

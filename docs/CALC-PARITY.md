@@ -327,3 +327,15 @@ error labels had concealed the compilation failure. No mismatch waiver is added.
 The source boundary is `ScCompiler::CompileString` in pinned `compiler.cxx` and
 `BadArrayContent` in `include/formula/errorcodes.hxx`. A fresh run is required for
 all 1,837 valid inputs; previous passing counts do not validate the corrected cases.
+
+The corrected reference run matched 1,802/1,837. It establishes that actual error
+members in computed arrays keep their standard error codes: COUNT ignores them,
+COUNTA includes them, and statistical/rank consumers propagate them normally.
+GEOMEAN stops at the first zero in a matrix and does not read later error members;
+remaining scalar arguments still drain their errors. The previous assertion that
+COUNT/COUNTA propagate array errors was based on invalid reference array syntax
+and is withdrawn. The implementation and native regressions now follow the valid
+inputs. Pending-error treatment is confined to computed scalar arguments in the
+measured statistical functions. All 1,837 results in that workbook now match
+locally, with no exceptions; fresh exact-commit reference validation remains the gate.
+Two computed-array SUBTOTAL count probes bring the final declared suite to 1,839.
