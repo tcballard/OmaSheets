@@ -3847,7 +3847,8 @@
   {
     "id": "coercion-0770",
     "group": "coercion",
-    "formula": "=COUNT({#N/A,2})"
+    "formula": "=COUNT(IF({TRUE,FALSE},#N/A,{0,2}))",
+    "originalFormula": "=COUNT({#N/A,2})"
   },
   {
     "id": "coercion-0771",
@@ -3877,7 +3878,8 @@
   {
     "id": "coercion-0776",
     "group": "coercion",
-    "formula": "=COUNTA({#N/A,2})"
+    "formula": "=COUNTA(IF({TRUE,FALSE},#N/A,{0,2}))",
+    "originalFormula": "=COUNTA({#N/A,2})"
   },
   {
     "id": "coercion-0777",
@@ -7117,7 +7119,8 @@
   {
     "id": "statistics-expanded-1424",
     "group": "statistics-expanded",
-    "formula": "=SLOPE({1,#N/A,3},{1,2,3})"
+    "formula": "=SLOPE(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3}),{1,2,3})",
+    "originalFormula": "=SLOPE({1,#N/A,3},{1,2,3})"
   },
   {
     "id": "statistics-expanded-1425",
@@ -7177,7 +7180,8 @@
   {
     "id": "statistics-expanded-1436",
     "group": "statistics-expanded",
-    "formula": "=INTERCEPT({1,#N/A,3},{1,2,3})"
+    "formula": "=INTERCEPT(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3}),{1,2,3})",
+    "originalFormula": "=INTERCEPT({1,#N/A,3},{1,2,3})"
   },
   {
     "id": "statistics-expanded-1437",
@@ -7237,7 +7241,8 @@
   {
     "id": "statistics-expanded-1448",
     "group": "statistics-expanded",
-    "formula": "=RSQ({1,#N/A,3},{1,2,3})"
+    "formula": "=RSQ(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3}),{1,2,3})",
+    "originalFormula": "=RSQ({1,#N/A,3},{1,2,3})"
   },
   {
     "id": "statistics-expanded-1449",
@@ -7297,7 +7302,8 @@
   {
     "id": "statistics-expanded-1460",
     "group": "statistics-expanded",
-    "formula": "=STEYX({1,#N/A,3},{1,2,3})"
+    "formula": "=STEYX(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3}),{1,2,3})",
+    "originalFormula": "=STEYX({1,#N/A,3},{1,2,3})"
   },
   {
     "id": "statistics-expanded-1461",
@@ -7357,7 +7363,8 @@
   {
     "id": "statistics-expanded-1472",
     "group": "statistics-expanded",
-    "formula": "=PEARSON({1,#N/A,3},{1,2,3})"
+    "formula": "=PEARSON(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3}),{1,2,3})",
+    "originalFormula": "=PEARSON({1,#N/A,3},{1,2,3})"
   },
   {
     "id": "statistics-expanded-1473",
@@ -7417,7 +7424,8 @@
   {
     "id": "statistics-expanded-1484",
     "group": "statistics-expanded",
-    "formula": "=FORECAST(5,{1,#N/A,3},{1,2,3})"
+    "formula": "=FORECAST(5,IF({FALSE,TRUE,FALSE},#N/A,{1,0,3}),{1,2,3})",
+    "originalFormula": "=FORECAST(5,{1,#N/A,3},{1,2,3})"
   },
   {
     "id": "statistics-expanded-1485",
@@ -7477,7 +7485,8 @@
   {
     "id": "statistics-expanded-1496",
     "group": "statistics-expanded",
-    "formula": "=FORECAST.LINEAR(5,{1,#N/A,3},{1,2,3})"
+    "formula": "=FORECAST.LINEAR(5,IF({FALSE,TRUE,FALSE},#N/A,{1,0,3}),{1,2,3})",
+    "originalFormula": "=FORECAST.LINEAR(5,{1,#N/A,3},{1,2,3})"
   },
   {
     "id": "statistics-expanded-1497",
@@ -7522,7 +7531,8 @@
   {
     "id": "statistics-expanded-1505",
     "group": "statistics-expanded",
-    "formula": "=GEOMEAN({0,#N/A})"
+    "formula": "=GEOMEAN(IF({FALSE,TRUE},#N/A,{0,0}))",
+    "originalFormula": "=GEOMEAN({0,#N/A})"
   },
   {
     "id": "statistics-origins-1506",
@@ -7552,12 +7562,14 @@
   {
     "id": "statistics-origins-1511",
     "group": "statistics-origins",
-    "formula": "=AVEDEV({1,#N/A,3})"
+    "formula": "=AVEDEV(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3}))",
+    "originalFormula": "=AVEDEV({1,#N/A,3})"
   },
   {
     "id": "statistics-origins-1512",
     "group": "statistics-origins",
-    "formula": "=ERROR.TYPE(AVEDEV({1,#N/A,3}))"
+    "formula": "=ERROR.TYPE(AVEDEV(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3})))",
+    "originalFormula": "=ERROR.TYPE(AVEDEV({1,#N/A,3}))"
   },
   {
     "id": "statistics-origins-1513",
@@ -7612,12 +7624,14 @@
   {
     "id": "statistics-origins-1523",
     "group": "statistics-origins",
-    "formula": "=GEOMEAN({1,#N/A,3})"
+    "formula": "=GEOMEAN(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3}))",
+    "originalFormula": "=GEOMEAN({1,#N/A,3})"
   },
   {
     "id": "statistics-origins-1524",
     "group": "statistics-origins",
-    "formula": "=ERROR.TYPE(GEOMEAN({1,#N/A,3}))"
+    "formula": "=ERROR.TYPE(GEOMEAN(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3})))",
+    "originalFormula": "=ERROR.TYPE(GEOMEAN({1,#N/A,3}))"
   },
   {
     "id": "statistics-origins-1525",
@@ -7672,12 +7686,14 @@
   {
     "id": "statistics-origins-1535",
     "group": "statistics-origins",
-    "formula": "=HARMEAN({1,#N/A,3})"
+    "formula": "=HARMEAN(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3}))",
+    "originalFormula": "=HARMEAN({1,#N/A,3})"
   },
   {
     "id": "statistics-origins-1536",
     "group": "statistics-origins",
-    "formula": "=ERROR.TYPE(HARMEAN({1,#N/A,3}))"
+    "formula": "=ERROR.TYPE(HARMEAN(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3})))",
+    "originalFormula": "=ERROR.TYPE(HARMEAN({1,#N/A,3}))"
   },
   {
     "id": "statistics-origins-1537",
@@ -7732,12 +7748,14 @@
   {
     "id": "statistics-origins-1547",
     "group": "statistics-origins",
-    "formula": "=SKEW({1,#N/A,3})"
+    "formula": "=SKEW(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3}))",
+    "originalFormula": "=SKEW({1,#N/A,3})"
   },
   {
     "id": "statistics-origins-1548",
     "group": "statistics-origins",
-    "formula": "=ERROR.TYPE(SKEW({1,#N/A,3}))"
+    "formula": "=ERROR.TYPE(SKEW(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3})))",
+    "originalFormula": "=ERROR.TYPE(SKEW({1,#N/A,3}))"
   },
   {
     "id": "statistics-origins-1549",
@@ -7792,12 +7810,14 @@
   {
     "id": "statistics-origins-1559",
     "group": "statistics-origins",
-    "formula": "=SKEW.P({1,#N/A,3})"
+    "formula": "=SKEW.P(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3}))",
+    "originalFormula": "=SKEW.P({1,#N/A,3})"
   },
   {
     "id": "statistics-origins-1560",
     "group": "statistics-origins",
-    "formula": "=ERROR.TYPE(SKEW.P({1,#N/A,3}))"
+    "formula": "=ERROR.TYPE(SKEW.P(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3})))",
+    "originalFormula": "=ERROR.TYPE(SKEW.P({1,#N/A,3}))"
   },
   {
     "id": "statistics-origins-1561",
@@ -7852,12 +7872,14 @@
   {
     "id": "statistics-origins-1571",
     "group": "statistics-origins",
-    "formula": "=KURT({1,#N/A,3})"
+    "formula": "=KURT(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3}))",
+    "originalFormula": "=KURT({1,#N/A,3})"
   },
   {
     "id": "statistics-origins-1572",
     "group": "statistics-origins",
-    "formula": "=ERROR.TYPE(KURT({1,#N/A,3}))"
+    "formula": "=ERROR.TYPE(KURT(IF({FALSE,TRUE,FALSE},#N/A,{1,0,3})))",
+    "originalFormula": "=ERROR.TYPE(KURT({1,#N/A,3}))"
   },
   {
     "id": "statistics-origins-1573",
@@ -7912,22 +7934,26 @@
   {
     "id": "statistics-origins-1583",
     "group": "statistics-origins",
-    "formula": "=GEOMEAN({0,#N/A})"
+    "formula": "=GEOMEAN(IF({FALSE,TRUE},#N/A,{0,0}))",
+    "originalFormula": "=GEOMEAN({0,#N/A})"
   },
   {
     "id": "statistics-origins-1584",
     "group": "statistics-origins",
-    "formula": "=ERROR.TYPE(GEOMEAN({0,#N/A}))"
+    "formula": "=ERROR.TYPE(GEOMEAN(IF({FALSE,TRUE},#N/A,{0,0})))",
+    "originalFormula": "=ERROR.TYPE(GEOMEAN({0,#N/A}))"
   },
   {
     "id": "statistics-origins-1585",
     "group": "statistics-origins",
-    "formula": "=GEOMEAN({#N/A,0})"
+    "formula": "=GEOMEAN(IF({TRUE,FALSE},#N/A,{0,0}))",
+    "originalFormula": "=GEOMEAN({#N/A,0})"
   },
   {
     "id": "statistics-origins-1586",
     "group": "statistics-origins",
-    "formula": "=ERROR.TYPE(GEOMEAN({#N/A,0}))"
+    "formula": "=ERROR.TYPE(GEOMEAN(IF({TRUE,FALSE},#N/A,{0,0})))",
+    "originalFormula": "=ERROR.TYPE(GEOMEAN({#N/A,0}))"
   },
   {
     "id": "statistics-origins-1587",
@@ -8432,12 +8458,14 @@
   {
     "id": "statistics-arrays-1687",
     "group": "statistics-arrays",
-    "formula": "=SUM(LARGE({1,2,3,4},{#N/A,2}))"
+    "formula": "=SUM(LARGE({1,2,3,4},IF({TRUE,FALSE},#N/A,{0,2})))",
+    "originalFormula": "=SUM(LARGE({1,2,3,4},{#N/A,2}))"
   },
   {
     "id": "statistics-arrays-1688",
     "group": "statistics-arrays",
-    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3,4},{#N/A,2})))"
+    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3,4},IF({TRUE,FALSE},#N/A,{0,2}))))",
+    "originalFormula": "=ERROR.TYPE(SUM(LARGE({1,2,3,4},{#N/A,2})))"
   },
   {
     "id": "statistics-arrays-1689",
@@ -8532,12 +8560,14 @@
   {
     "id": "statistics-arrays-1707",
     "group": "statistics-arrays",
-    "formula": "=SUM(SMALL({1,2,3,4},{#N/A,2}))"
+    "formula": "=SUM(SMALL({1,2,3,4},IF({TRUE,FALSE},#N/A,{0,2})))",
+    "originalFormula": "=SUM(SMALL({1,2,3,4},{#N/A,2}))"
   },
   {
     "id": "statistics-arrays-1708",
     "group": "statistics-arrays",
-    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},{#N/A,2})))"
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},IF({TRUE,FALSE},#N/A,{0,2}))))",
+    "originalFormula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},{#N/A,2})))"
   },
   {
     "id": "statistics-references-1709",
@@ -8837,37 +8867,44 @@
   {
     "id": "statistics-pending-1768",
     "group": "statistics-pending",
-    "formula": "=GEOMEAN({0,#N/A})"
+    "formula": "=GEOMEAN(IF({FALSE,TRUE},#N/A,{0,0}))",
+    "originalFormula": "=GEOMEAN({0,#N/A})"
   },
   {
     "id": "statistics-pending-1769",
     "group": "statistics-pending",
-    "formula": "=ERROR.TYPE(GEOMEAN({0,#N/A}))"
+    "formula": "=ERROR.TYPE(GEOMEAN(IF({FALSE,TRUE},#N/A,{0,0})))",
+    "originalFormula": "=ERROR.TYPE(GEOMEAN({0,#N/A}))"
   },
   {
     "id": "statistics-pending-1770",
     "group": "statistics-pending",
-    "formula": "=ISNA(GEOMEAN({0,#N/A}))"
+    "formula": "=ISNA(GEOMEAN(IF({FALSE,TRUE},#N/A,{0,0})))",
+    "originalFormula": "=ISNA(GEOMEAN({0,#N/A}))"
   },
   {
     "id": "statistics-pending-1771",
     "group": "statistics-pending",
-    "formula": "=ISERR(GEOMEAN({0,#N/A}))"
+    "formula": "=ISERR(GEOMEAN(IF({FALSE,TRUE},#N/A,{0,0})))",
+    "originalFormula": "=ISERR(GEOMEAN({0,#N/A}))"
   },
   {
     "id": "statistics-pending-1772",
     "group": "statistics-pending",
-    "formula": "=ISERROR(GEOMEAN({0,#N/A}))"
+    "formula": "=ISERROR(GEOMEAN(IF({FALSE,TRUE},#N/A,{0,0})))",
+    "originalFormula": "=ISERROR(GEOMEAN({0,#N/A}))"
   },
   {
     "id": "statistics-pending-1773",
     "group": "statistics-pending",
-    "formula": "=IFNA(GEOMEAN({0,#N/A}),42)"
+    "formula": "=IFNA(GEOMEAN(IF({FALSE,TRUE},#N/A,{0,0})),42)",
+    "originalFormula": "=IFNA(GEOMEAN({0,#N/A}),42)"
   },
   {
     "id": "statistics-pending-1774",
     "group": "statistics-pending",
-    "formula": "=IFERROR(GEOMEAN({0,#N/A}),42)"
+    "formula": "=IFERROR(GEOMEAN(IF({FALSE,TRUE},#N/A,{0,0})),42)",
+    "originalFormula": "=IFERROR(GEOMEAN({0,#N/A}),42)"
   },
   {
     "id": "statistics-pending-1775",
@@ -8902,7 +8939,8 @@
   {
     "id": "statistics-pending-1781",
     "group": "statistics-pending",
-    "formula": "=ERROR.TYPE((GEOMEAN({0,#N/A}))+0)"
+    "formula": "=ERROR.TYPE((GEOMEAN(IF({FALSE,TRUE},#N/A,{0,0})))+0)",
+    "originalFormula": "=ERROR.TYPE((GEOMEAN({0,#N/A}))+0)"
   },
   {
     "id": "statistics-pending-1782",
@@ -8977,37 +9015,44 @@
   {
     "id": "statistics-pending-1796",
     "group": "statistics-pending",
-    "formula": "=SUM(LARGE({1,2,3},{#N/A,2}))"
+    "formula": "=SUM(LARGE({1,2,3},IF({TRUE,FALSE},#N/A,{0,2})))",
+    "originalFormula": "=SUM(LARGE({1,2,3},{#N/A,2}))"
   },
   {
     "id": "statistics-pending-1797",
     "group": "statistics-pending",
-    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3},{#N/A,2})))"
+    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3},IF({TRUE,FALSE},#N/A,{0,2}))))",
+    "originalFormula": "=ERROR.TYPE(SUM(LARGE({1,2,3},{#N/A,2})))"
   },
   {
     "id": "statistics-pending-1798",
     "group": "statistics-pending",
-    "formula": "=ISNA(SUM(LARGE({1,2,3},{#N/A,2})))"
+    "formula": "=ISNA(SUM(LARGE({1,2,3},IF({TRUE,FALSE},#N/A,{0,2}))))",
+    "originalFormula": "=ISNA(SUM(LARGE({1,2,3},{#N/A,2})))"
   },
   {
     "id": "statistics-pending-1799",
     "group": "statistics-pending",
-    "formula": "=ISERR(SUM(LARGE({1,2,3},{#N/A,2})))"
+    "formula": "=ISERR(SUM(LARGE({1,2,3},IF({TRUE,FALSE},#N/A,{0,2}))))",
+    "originalFormula": "=ISERR(SUM(LARGE({1,2,3},{#N/A,2})))"
   },
   {
     "id": "statistics-pending-1800",
     "group": "statistics-pending",
-    "formula": "=ISERROR(SUM(LARGE({1,2,3},{#N/A,2})))"
+    "formula": "=ISERROR(SUM(LARGE({1,2,3},IF({TRUE,FALSE},#N/A,{0,2}))))",
+    "originalFormula": "=ISERROR(SUM(LARGE({1,2,3},{#N/A,2})))"
   },
   {
     "id": "statistics-pending-1801",
     "group": "statistics-pending",
-    "formula": "=IFNA(SUM(LARGE({1,2,3},{#N/A,2})),42)"
+    "formula": "=IFNA(SUM(LARGE({1,2,3},IF({TRUE,FALSE},#N/A,{0,2}))),42)",
+    "originalFormula": "=IFNA(SUM(LARGE({1,2,3},{#N/A,2})),42)"
   },
   {
     "id": "statistics-pending-1802",
     "group": "statistics-pending",
-    "formula": "=IFERROR(SUM(LARGE({1,2,3},{#N/A,2})),42)"
+    "formula": "=IFERROR(SUM(LARGE({1,2,3},IF({TRUE,FALSE},#N/A,{0,2}))),42)",
+    "originalFormula": "=IFERROR(SUM(LARGE({1,2,3},{#N/A,2})),42)"
   },
   {
     "id": "statistics-pending-1803",
@@ -9042,7 +9087,8 @@
   {
     "id": "statistics-pending-1809",
     "group": "statistics-pending",
-    "formula": "=ERROR.TYPE((SUM(LARGE({1,2,3},{#N/A,2})))+0)"
+    "formula": "=ERROR.TYPE((SUM(LARGE({1,2,3},IF({TRUE,FALSE},#N/A,{0,2}))))+0)",
+    "originalFormula": "=ERROR.TYPE((SUM(LARGE({1,2,3},{#N/A,2})))+0)"
   },
   {
     "id": "statistics-pending-1810",
@@ -9057,12 +9103,14 @@
   {
     "id": "statistics-pending-1812",
     "group": "statistics-pending",
-    "formula": "=SUM(SMALL({1,2,3},{#N/A,2}))"
+    "formula": "=SUM(SMALL({1,2,3},IF({TRUE,FALSE},#N/A,{0,2})))",
+    "originalFormula": "=SUM(SMALL({1,2,3},{#N/A,2}))"
   },
   {
     "id": "statistics-pending-1813",
     "group": "statistics-pending",
-    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#N/A,2})))"
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},IF({TRUE,FALSE},#N/A,{0,2}))))",
+    "originalFormula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#N/A,2})))"
   },
   {
     "id": "statistics-pending-1814",
@@ -9077,12 +9125,14 @@
   {
     "id": "statistics-pending-1816",
     "group": "statistics-pending",
-    "formula": "=SUM(SMALL({1,2,3},{#DIV/0!,2}))"
+    "formula": "=SUM(SMALL({1,2,3},IF({TRUE,FALSE},#DIV/0!,{0,2})))",
+    "originalFormula": "=SUM(SMALL({1,2,3},{#DIV/0!,2}))"
   },
   {
     "id": "statistics-pending-1817",
     "group": "statistics-pending",
-    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#DIV/0!,2})))"
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},IF({TRUE,FALSE},#DIV/0!,{0,2}))))",
+    "originalFormula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#DIV/0!,2})))"
   },
   {
     "id": "statistics-pending-1818",
@@ -9097,12 +9147,14 @@
   {
     "id": "statistics-pending-1820",
     "group": "statistics-pending",
-    "formula": "=SUM(SMALL({1,2,3},{#NUM!,2}))"
+    "formula": "=SUM(SMALL({1,2,3},IF({TRUE,FALSE},#NUM!,{0,2})))",
+    "originalFormula": "=SUM(SMALL({1,2,3},{#NUM!,2}))"
   },
   {
     "id": "statistics-pending-1821",
     "group": "statistics-pending",
-    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#NUM!,2})))"
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},IF({TRUE,FALSE},#NUM!,{0,2}))))",
+    "originalFormula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#NUM!,2})))"
   },
   {
     "id": "statistics-pending-1822",
@@ -9117,12 +9169,14 @@
   {
     "id": "statistics-pending-1824",
     "group": "statistics-pending",
-    "formula": "=SUM(SMALL({1,2,3},{#VALUE!,2}))"
+    "formula": "=SUM(SMALL({1,2,3},IF({TRUE,FALSE},#VALUE!,{0,2})))",
+    "originalFormula": "=SUM(SMALL({1,2,3},{#VALUE!,2}))"
   },
   {
     "id": "statistics-pending-1825",
     "group": "statistics-pending",
-    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#VALUE!,2})))"
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},IF({TRUE,FALSE},#VALUE!,{0,2}))))",
+    "originalFormula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#VALUE!,2})))"
   },
   {
     "id": "statistics-pending-1826",
@@ -9137,12 +9191,14 @@
   {
     "id": "statistics-pending-1828",
     "group": "statistics-pending",
-    "formula": "=SUM(SMALL({1,2,3},{#REF!,2}))"
+    "formula": "=SUM(SMALL({1,2,3},IF({TRUE,FALSE},#REF!,{0,2})))",
+    "originalFormula": "=SUM(SMALL({1,2,3},{#REF!,2}))"
   },
   {
     "id": "statistics-pending-1829",
     "group": "statistics-pending",
-    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#REF!,2})))"
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},IF({TRUE,FALSE},#REF!,{0,2}))))",
+    "originalFormula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#REF!,2})))"
   },
   {
     "id": "statistics-pending-1830",
@@ -9157,12 +9213,14 @@
   {
     "id": "statistics-pending-1832",
     "group": "statistics-pending",
-    "formula": "=SUM(SMALL({1,2,3},{#NAME?,2}))"
+    "formula": "=SUM(SMALL({1,2,3},IF({TRUE,FALSE},#NAME?,{0,2})))",
+    "originalFormula": "=SUM(SMALL({1,2,3},{#NAME?,2}))"
   },
   {
     "id": "statistics-pending-1833",
     "group": "statistics-pending",
-    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#NAME?,2})))"
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},IF({TRUE,FALSE},#NAME?,{0,2}))))",
+    "originalFormula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#NAME?,2})))"
   },
   {
     "id": "statistics-pending-1834",
@@ -9177,11 +9235,13 @@
   {
     "id": "statistics-pending-1836",
     "group": "statistics-pending",
-    "formula": "=SUM(SMALL({1,2,3},{#NULL!,2}))"
+    "formula": "=SUM(SMALL({1,2,3},IF({TRUE,FALSE},#NULL!,{0,2})))",
+    "originalFormula": "=SUM(SMALL({1,2,3},{#NULL!,2}))"
   },
   {
     "id": "statistics-pending-1837",
     "group": "statistics-pending",
-    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#NULL!,2})))"
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3},IF({TRUE,FALSE},#NULL!,{0,2}))))",
+    "originalFormula": "=ERROR.TYPE(SUM(SMALL({1,2,3},{#NULL!,2})))"
   }
 ]

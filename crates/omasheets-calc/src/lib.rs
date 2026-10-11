@@ -132,7 +132,7 @@ impl CalcError {
     fn is_na(&self) -> bool {
         match self {
             Self::NotAvailable => true,
-            Self::Pending(error) => error.is_na(),
+            Self::Pending(_) => false,
             _ => false,
         }
     }
@@ -1789,6 +1789,9 @@ impl Workbook {
                 return Value::Error(CalcError::InvalidArguments);
             }
             let value = self.evaluate(&arguments[0]);
+            if function == Function::IfNa && matches!(value, Value::Error(CalcError::Pending(_))) {
+                return Value::Error(CalcError::IllegalParameter);
+            }
             return if matches!(&value, Value::Error(error) if function == Function::IfError || error.is_na())
             {
                 self.evaluate(&arguments[1])

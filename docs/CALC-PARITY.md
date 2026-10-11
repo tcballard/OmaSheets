@@ -313,3 +313,17 @@ errors and reference errors are distinct inputs. Array rank selectors also rejec
 text, retaining standard #VALUE! provenance. The previous 1,708-case workbook now
 matches every result locally. Fresh reference coverage grows to 1,837 cases,
 including cell publication, handlers, nested inspection and reference-valued INDEX.
+
+The first 1,837-case run matched 1,809 results. Four differences concerned inline
+ISNA/ISERR/IFNA over pending computed errors. Pending errors expose the internal
+parameter state to these inline consumers, then publish the original error at the
+cell boundary. The other 24 differences exposed invalid reference inputs: the
+FODS compiler rejects literal error members inside these inline arrays, producing
+uncatchable compilation errors whose XLSX projection is #N/A. Those results cannot
+specify runtime array-error semantics. The generator now builds equivalent typed
+arrays with IF masks, preserving every case and its `originalFormula` for audit.
+This corrects 60 inputs, including two earlier COUNT/COUNTA probes whose projected
+error labels had concealed the compilation failure. No mismatch waiver is added.
+The source boundary is `ScCompiler::CompileString` in pinned `compiler.cxx` and
+`BadArrayContent` in `include/formula/errorcodes.hxx`. A fresh run is required for
+all 1,837 valid inputs; previous passing counts do not validate the corrected cases.

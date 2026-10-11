@@ -322,6 +322,54 @@ for (const error of ['#N/A','#DIV/0!','#NUM!','#VALUE!','#REF!','#NAME?','#NULL!
     add('statistics-pending', '=ERROR.TYPE(' + expr + ')');
   }
 }
+// Calc's FODS parser rejects literal error members in inline arrays. Build
+// equivalent typed arrays with IF instead of measuring a compilation error.
+// Preserve the original expression for audit; no case is omitted from the gate.
+function validErrorArrays(formula) {
+  let output = '', start = 0, quoted = false;
+  for (let i = 0; i < formula.length; i++) {
+    if (formula[i] === '"') {
+      if (quoted && formula[i + 1] === '"') { i++; continue; }
+      quoted = !quoted;
+    }
+    if (quoted || formula[i] !== '{') continue;
+    let end = i + 1, quote = false;
+    for (; end < formula.length; end++) {
+      if (formula[end] === '"') {
+        if (quote && formula[end + 1] === '"') { end++; continue; }
+        quote = !quote;
+      } else if (!quote && formula[end] === '}') break;
+    }
+    if (end === formula.length) throw new Error('unterminated array fixture');
+    const body = formula.slice(i + 1, end), tokens = [], separators = [];
+    let from = 0; quote = false;
+    for (let j = 0; j <= body.length; j++) {
+      if (body[j] === '"') {
+        if (quote && body[j + 1] === '"') { j++; continue; }
+        quote = !quote;
+      }
+      if (j === body.length || (!quote && ',;'.includes(body[j]))) {
+        tokens.push(body.slice(from, j));
+        if (j < body.length) separators.push(body[j]);
+        from = j + 1;
+      }
+    }
+    const errors = [...new Set(tokens.map(t => t.trim()).filter(t => /^#(?:N\/A|DIV\/0!|NUM!|VALUE!|REF!|NAME\?|NULL!)$/.test(t)))];
+    const array = values => '{' + values.map((v, j) => v + (separators[j] ?? '')).join('') + '}';
+    let replacement = array(tokens.map(t => errors.includes(t.trim()) ? '0' : t));
+    for (const error of errors) replacement = 'IF(' + array(tokens.map(t => t.trim() === error ? 'TRUE' : 'FALSE')) + ',' + error + ',' + replacement + ')';
+    output += formula.slice(start, i) + (errors.length ? replacement : formula.slice(i, end + 1));
+    start = end + 1; i = end;
+  }
+  return output + formula.slice(start);
+}
+for (const entry of cases) {
+  const valid = validErrorArrays(entry.formula);
+  if (valid !== entry.formula) {
+    entry.originalFormula = entry.formula;
+    entry.formula = valid;
+  }
+}
 writeFileSync('tests/calc-parity/common.json',JSON.stringify(cases,null,2)+'\n');
 const counts={};for(const c of cases) counts[c.group]=(counts[c.group]??0)+1;
 console.log(JSON.stringify({cases:cases.length,groups:counts}));
