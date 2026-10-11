@@ -96,6 +96,8 @@ pub enum CalcError {
     /// Calc's internal illegal-argument error (502). It projects to `#VALUE!`
     /// in XLSX, but ERROR.TYPE returns #N/A rather than the literal's code 3.
     IllegalArgument,
+    /// Calc internal wrong-parameter-type error; projects to `#VALUE!`.
+    IllegalParameter,
     /// Excel `#NAME?`, only ever imported from a source workbook or written
     /// as a literal; unknown names fail to compile instead.
     InvalidName,
@@ -112,7 +114,7 @@ impl CalcError {
             Self::DivisionByZero => "#DIV/0!",
             Self::InvalidReference => "#REF!",
             Self::NotAvailable => "#N/A",
-            Self::InvalidValue | Self::IllegalArgument => "#VALUE!",
+            Self::InvalidValue | Self::IllegalArgument | Self::IllegalParameter => "#VALUE!",
             Self::InvalidNumber => "#NUM!",
             Self::InvalidName => "#NAME?",
             Self::NullIntersection => "#NULL!",
@@ -2271,21 +2273,27 @@ impl Workbook {
             11 => Function::VarP,
             _ => return Value::Error(CalcError::InvalidValue),
         };
-        let mut values = Vec::new();
+        let mut aggregate_arguments = Vec::new();
         for argument in &arguments[1..] {
+            let mut values = Vec::new();
             self.flatten_values_skipping_subtotals(argument, &mut values);
+            if matches!(argument, Expr::Reference(_) | Expr::RangeNode { .. })
+                || contains_array_operand(argument)
+            {
+                // Preserve collection semantics after excluding nested subtotals:
+                // text cells must not become direct scalar text arguments.
+                if !values.is_empty() {
+                    aggregate_arguments.push(Expr::Array(ArrayValue::from_parts(
+                        1,
+                        values.len(),
+                        values,
+                    )));
+                }
+            } else {
+                aggregate_arguments.extend(values.into_iter().map(literal));
+            }
         }
-        let literals: Vec<Expr<usize>> = values
-            .into_iter()
-            .map(|value| match value {
-                Value::Number(number) => Expr::Number(number),
-                Value::Boolean(flag) => Expr::Boolean(flag),
-                Value::Text(text) => Expr::Text(text),
-                Value::Error(error) => Expr::Error(error),
-                Value::Blank => Expr::Empty,
-            })
-            .collect();
-        self.evaluate_function(function, &literals)
+        self.evaluate_function(function, &aggregate_arguments)
     }
 
     fn flatten_values_skipping_subtotals(&self, expression: &Expr<usize>, output: &mut Vec<Value>) {
@@ -2354,9 +2362,9 @@ impl Workbook {
                     CalcError::InvalidName => Value::Number(5.0),
                     CalcError::InvalidNumber => Value::Number(6.0),
                     CalcError::NotAvailable => Value::Number(7.0),
-                    CalcError::InvalidArguments | CalcError::IllegalArgument => {
-                        Value::Error(CalcError::NotAvailable)
-                    }
+                    CalcError::InvalidArguments
+                    | CalcError::IllegalArgument
+                    | CalcError::IllegalParameter => Value::Error(CalcError::NotAvailable),
                 },
                 _ => Value::Error(CalcError::NotAvailable),
             },
@@ -2767,7 +2775,12 @@ impl Workbook {
                 nonblank += 1;
             }
             match value {
-                Value::Error(value) if error.is_none() => error = Some(value.clone()),
+                Value::Error(value)
+                    if error.is_none()
+                        && !matches!(function, Function::Count | Function::CountA) =>
+                {
+                    error = Some(value.clone());
+                }
                 Value::Number(number) => {
                     accumulator = match function {
                         Function::Sum | Function::Average => accumulator + number,
@@ -2815,7 +2828,30 @@ impl Workbook {
                     Ok(array) => array.values.iter().for_each(&mut visit),
                     Err(error) => visit(&Value::Error(error)),
                 },
-                other => visit(&self.evaluate(other)),
+                Expr::Reference(_) => visit(&self.evaluate(argument)),
+                other => {
+                    let value = self.evaluate(other);
+                    // Scalar booleans count as numbers. Text in a reference or
+                    // array is ignored; direct text is rejected by arithmetic
+                    // aggregates. COUNT alone accepts numeric scalar text.
+                    let value = match value {
+                        Value::Boolean(flag) => Value::Number(f64::from(flag)),
+                        Value::Text(text) if function == Function::Count => {
+                            match text.trim().parse::<f64>() {
+                                Ok(number) if number.is_finite() => Value::Number(number),
+                                _ => Value::Text(text),
+                            }
+                        }
+                        Value::Text(_) if matches!(function, Function::Min | Function::Max) => {
+                            Value::Error(CalcError::IllegalParameter)
+                        }
+                        Value::Text(_) if function != Function::CountA => {
+                            Value::Error(CalcError::InvalidValue)
+                        }
+                        other => other,
+                    };
+                    visit(&value);
+                }
             }
         }
         if let Some(error) = error {
@@ -7073,10 +7109,12 @@ mod tests {
         workbook.set_error(cell(5, 0), CalcError::NotAvailable);
         workbook.set_error(cell(4, 0), CalcError::DivisionByZero);
         for column in 1..=7 {
-            assert_eq!(
-                workbook.value(cell(0, column)),
-                Value::Error(CalcError::DivisionByZero)
-            );
+            let expected = match column {
+                5 => Value::Number(2.0), // COUNT ignores errors.
+                6 => Value::Number(6.0), // COUNTA counts errors as occupied.
+                _ => Value::Error(CalcError::DivisionByZero),
+            };
+            assert_eq!(workbook.value(cell(0, column)), expected);
         }
         for (formula, expected) in [
             ("=SUM(Z1:Z2)", Value::Number(0.0)),
@@ -9018,6 +9056,36 @@ mod tests {
 #[cfg(test)]
 mod information_parity_tests {
     use super::*;
+
+    #[test]
+    fn aggregates_distinguish_scalar_text_and_booleans_from_collections() {
+        let mut book = Workbook::default();
+        book.set_text(CellId::new(0, 0, 0), "3");
+        book.set_number(CellId::new(0, 1, 0), 2.0);
+        let output = CellId::new(0, 0, 1);
+        for (formula, expected) in [
+            ("=SUM(TRUE(),2)", Value::Number(3.0)),
+            ("=AVERAGE(TRUE(),2)", Value::Number(1.5)),
+            ("=MIN(TRUE(),2)", Value::Number(1.0)),
+            ("=SUM(\"3\",2)", Value::Error(CalcError::InvalidValue)),
+            ("=SUM(A1,2)", Value::Number(2.0)),
+            ("=SUM({\"3\",2})", Value::Number(2.0)),
+            ("=SUM(INDEX(A1:A2,1),2)", Value::Number(2.0)),
+            ("=SUBTOTAL(9,A1:A2)", Value::Number(2.0)),
+            ("=COUNT(\"3\",2)", Value::Number(2.0)),
+            ("=COUNT(\"bad\",2)", Value::Number(1.0)),
+            ("=COUNT(NA(),2)", Value::Number(1.0)),
+            ("=COUNTA(NA(),2)", Value::Number(2.0)),
+            (
+                "=ERROR.TYPE(MIN(\"bad\",2))",
+                Value::Error(CalcError::NotAvailable),
+            ),
+            ("=ERROR.TYPE(SUM(\"bad\",2))", Value::Number(3.0)),
+        ] {
+            book.set_formula(output, formula).unwrap();
+            assert_eq!(book.value(output), expected, "{formula}");
+        }
+    }
 
     #[test]
     fn internal_argument_errors_keep_their_origin_through_dependencies_and_arrays() {

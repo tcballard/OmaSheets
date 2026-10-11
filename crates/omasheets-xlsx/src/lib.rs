@@ -1684,6 +1684,19 @@ fn values_match(stored: &Value, calculated: &Value) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn error_cache_comparison_uses_the_interchange_label_without_erasing_origin() {
+        let internal = Value::Error(CalcError::IllegalArgument);
+        let standard = Value::Error(CalcError::InvalidValue);
+        assert_ne!(internal, standard);
+        assert!(values_match(&standard, &internal));
+        assert!(!values_match(
+            &Value::Error(CalcError::InvalidNumber),
+            &internal
+        ));
+        assert!(!values_match(&Value::Text("#VALUE!".into()), &internal));
+    }
+
     fn workbook_name(name: &str, definition: &str) -> DefinedName {
         DefinedName {
             sheet: None,

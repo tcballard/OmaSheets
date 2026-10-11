@@ -327,6 +327,25 @@ fn internal_error_origins_survive_edits_and_native_and_xlsx_reopening() {
 }
 
 #[test]
+fn error_caches_do_not_bypass_formula_admission_or_hide_error_literals() {
+    let fixture = Fixture::new();
+    for (index, cells) in [
+        r#"<row r="1"><c r="A1" t="e"><f>UNSUPPORTED(1)</f><v>#NAME?</v></c></row>"#,
+        r#"<row r="1"><c r="A1" t="e"><f/><v>#VALUE!</v></c></row>"#,
+        r#"<row r="1"><c r="A1" t="e"><f>1/0</f><v>#DIV/0!</v></c><c r="B1" t="e"><v>#VALUE!</v></c></row>"#,
+    ].into_iter().enumerate() {
+        let source = fixture.path(&format!("refused-error-{index}.xlsx"));
+        let working = fixture.path(&format!("refused-error-{index}.omasheets"));
+        write_xlsx(&source, cells, "", "", &[]);
+        let original = fs::read(&source).unwrap();
+        assert!(!probe(&source).unwrap().can_import, "case {index}");
+        assert!(import_xlsx(&source, &working).is_err(), "case {index}");
+        assert!(!working.exists());
+        assert_eq!(fs::read(&source).unwrap(), original);
+    }
+}
+
+#[test]
 fn revision_guard_undo_redo_and_no_clobber_preserve_saved_state() {
     let f = Fixture::new();
     let source = f.path("source.xlsx");

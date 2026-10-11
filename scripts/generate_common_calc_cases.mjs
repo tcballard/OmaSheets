@@ -146,9 +146,17 @@ for (const formula of [
 ]) add('errors', formula);
 // Scalar arguments and cells/arrays follow different aggregate coercion rules.
 for (const name of ['SUM','AVERAGE','MIN','MAX','PRODUCT','COUNT']) {
-  for (const args of ['TRUE(),2', '"3",2', '"bad",2', '{TRUE(),2}', '{"3",2}', 'Inputs!A1:A5']) {
+  for (const args of ['TRUE(),2', '"3",2', '"bad",2', '{TRUE,2}', '{"3",2}', 'Inputs!A1:A5']) {
     add('coercion', `=${name}(${args})`);
   }
+}
+for (const name of ['COUNT','COUNTA']) {
+  for (const args of ['NA(),2', '#VALUE!,2', '{#N/A,2}', 'SQRT(-1),2', '"bad",2', 'TRUE(),2']) {
+    add('coercion', `=${name}(${args})`);
+  }
+}
+for (const name of ['SUM','AVERAGE','MIN','MAX','PRODUCT']) {
+  add('coercion', `=ERROR.TYPE(${name}("bad",2))`);
 }
 writeFileSync('tests/calc-parity/common.json',JSON.stringify(cases,null,2)+'\n');
 const counts={};for(const c of cases) counts[c.group]=(counts[c.group]??0)+1;

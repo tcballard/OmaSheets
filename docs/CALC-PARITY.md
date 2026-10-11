@@ -87,14 +87,27 @@ miscalculated. `TRUE()`/`FALSE()` support is now added, along with lazy `IFNA`.
 The reference suite has expanded to 34 expressions and is still required to
 report every one.
 
-The remaining observed differences are `ERROR.TYPE(SQRT(-1))` and
+The initial error-inspection differences were `ERROR.TYPE(SQRT(-1))` and
 `ERROR.TYPE(VALUE("bad"))`: Calc returned `#N/A`; the owned engine produced
-6 and 3 respectively. The reference's `SQRT(-1)` uses an internal illegal
-argument error, which differs from a standard `#NUM!` for error inspection.
-Fixing this requires deliberate dialect/internal-error provenance rather than
-changing Excel error classification globally. These cases remain in the strict
-reference suite; it fails while these differences remain. They are tracked in [issue #98](https://github.com/tcballard/OmaSheets/issues/98),
-and are not removed or accepted as matching results. Per-cell typed diagnostics identify blockers.
+6 and 3 respectively. The engine now retains Calc's internal illegal-argument
+origin instead of flattening it to a standard error. `ERROR.TYPE` returns
+`#N/A` for that origin; literal/imported standard errors still return codes 1–7.
+The original reference workbook now recalculates with all 653 results matching.
+Fresh expanded reference evidence is required before closing [issue #98](https://github.com/tcballard/OmaSheets/issues/98).
+
+`ScSqrt`, `ScValue`, and `ScErrorType_ODF` in the pinned `interpr1.cxx`, plus
+`XclTools::GetXclErrorCode` in
+[`sc/source/filter/excel/xltools.cxx`](https://github.com/LibreOffice/core/blob/1746b16a564f59fcaf8c5670bb292748408da54e/sc/source/filter/excel/xltools.cxx),
+provide the source contract: illegal argument (502) exports as `#VALUE!` but
+is not standard `#VALUE!` internally. XLSX caches only contain the projected
+error label, so the importer compares that label while retaining origin during
+recalculation. Dependent inspection formulas are compared independently.
+Supported formulas with error caches can now pass native admission: formula
+replay regenerates their values and origins. Literal error cells, unsupported
+formulas and empty formula records remain refused. Integration tests cover
+source import, edits, native replay, XLSX export caches and reimport.
+Other functions' internal error origins remain to be audited; this is not a
+claim that every Calc domain error now has identical provenance.
 
 A reproducible source catalogue is retained in
 `tests/calc-parity/calc-catalogue.json`, generated with
@@ -106,20 +119,20 @@ a name does not establish coercion, reference, error, array or locale semantics.
 
 ## Common calculation target — 2026-10-10
 
-The maintainer has requested an iterative implementation until a reasonable
-common-calculation target is reached. The gate was declared before measuring
-the expansion: at least 400 scenarios, at least 99% fresh Calc agreement, zero
-unsupported formulas, and no unexplained mismatches. The only permitted known
-differences are the two typed internal-error inspection cases in issue #98;
-those continue to count as mismatches. Strict information mode still fails on
-them. Common mode reports both its target result and whether all cases match.
+The maintainer requested an iterative implementation until a reasonable
+common-calculation target was reached. The original gate required at least
+400 scenarios, 99% fresh Calc agreement, zero unsupported formulas and only
+the two documented internal-error differences. That target reached 651/653.
+The next increment removes the exception list: **every case must match**, with
+zero refusals, in both common and strict information modes. The case count
+still has a minimum of 400. No failing case was removed.
 Numeric comparisons use the existing XLSX scorer's tolerance:
 `|owned-reference| <= 1e-9 * max(|reference|, 1)`. Typed strings, booleans and
 errors must match. This is not a bit-for-bit floating-point equality claim.
 
-`tests/calc-parity/common.json` contains 653 deterministic scenarios
-in information, mathematics, rounding, statistics, text, dates, finance and
-references/arrays. `scripts/generate_common_calc_cases.mjs` reproduces them.
+`tests/calc-parity/common.json` contains 772 deterministic scenarios
+in information, mathematics, rounding, statistics, text, dates, finance,
+references/arrays, error origins and aggregate coercion. `scripts/generate_common_calc_cases.mjs` reproduces them.
 The denominator is this declared suite, not the percentage of real workbooks
 or of all Calc features. The owned registry expands to 180 names.
 
@@ -168,3 +181,25 @@ input, checks dependent recalculation, saves with all nine formulas preserved,
 and reopens both the native document and exported XLSX. Independent ZIP checks
 verify selected formula caches. This exercises the product path as well as
 the differential calculation scorer.
+
+## Error origin and aggregate follow-up — 2026-10-11
+
+The first fresh 755-case pass confirmed all 653 previous cases and all 66
+new error-origin cases. The 36 aggregate probes exposed 15 numeric/type
+mismatches and six malformed fixtures: `TRUE()` was incorrectly used inside
+an array constant. Those six inputs now use the valid `TRUE` literal; no
+formula-call syntax was added to the array-constant parser.
+
+The aggregate implementation now distinguishes direct arguments from
+reference/array members. Direct booleans count numerically; direct text causes
+`#VALUE!` in SUM/AVERAGE/MIN/MAX/PRODUCT under the measured Calc settings.
+COUNT accepts numeric scalar text and ignores errors; COUNTA counts errors.
+MIN/MAX retain the internal parameter-error origin, which differs from the
+standard error used by SUM/AVERAGE/PRODUCT. SUBTOTAL preserves collection
+semantics after filtering nested subtotals. Seventeen more probes cover error
+counting and inspection, bringing the next reference run to 772 cases.
+
+The imported FODS boolean input is serialized by Calc as numeric 1 in XLSX;
+its range cases must not be cited as proof of native boolean-reference parity.
+Locale-sensitive text conversion and other aggregate/function coercion rules
+remain separate acceptance work.
