@@ -202,6 +202,19 @@ for (const formula of [
   '=STDEV({10000000001,10000000002,10000000003})',
   '=VAR({10000000001,10000000002,10000000003})',
 ]) add('aggregate-edges', formula);
+for (const expr of [`MIN(A${logicalRow},2)`, `MIN(2,A${logicalRow})`, `MIN(A${logicalRow}:A${logicalRow + 1},2)`, `MAX(A${logicalRow},0)`]) {
+  add('aggregate-edges', `=${expr}`);
+  add('aggregate-edges', `=ISNUMBER(${expr})`);
+  add('aggregate-edges', `=ISLOGICAL(${expr})`);
+}
+for (const name of ['GCD','LCM']) {
+  for (const arg of ['"bad",2', '{"3",2}', '-1,2', '{2,TRUE}', '{2,FALSE}', '{FALSE,2}', 'Inputs!A3', 'Inputs!A3:A5', 'Inputs!A5', 'IF({0,1},{10,20},0)']) {
+    add('aggregate-edges', `=${name}(${arg})`);
+  }
+  for (const arg of ['"bad",2', '{"3",2}', '-1,2', 'IF({0,1},{10,20})']) {
+    add('aggregate-edges', `=ERROR.TYPE(${name}(${arg}))`);
+  }
+}
 writeFileSync('tests/calc-parity/common.json',JSON.stringify(cases,null,2)+'\n');
 const counts={};for(const c of cases) counts[c.group]=(counts[c.group]??0)+1;
 console.log(JSON.stringify({cases:cases.length,groups:counts}));

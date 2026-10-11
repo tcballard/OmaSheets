@@ -55,6 +55,29 @@ impl Workbook {
         function: Function,
         arguments: &[Expr<usize>],
     ) -> Option<Value> {
+        if matches!(function, Function::Gcd | Function::Lcm) {
+            return Some(self.evaluate_integer_aggregate(function, arguments));
+        }
+        if function == Function::CountBlank
+            && arguments.len() == 1
+            && contains_array_operand(&arguments[0])
+        {
+            return Some(match self.evaluate_array(&arguments[0]) {
+                Ok(array) => Value::Number(
+                    array
+                        .values
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, v)| {
+                            array.empty_path_at(i / array.columns, i % array.columns)
+                                || matches!(v, Value::Blank)
+                                || matches!(v, Value::Text(s) if s.is_empty())
+                        })
+                        .count() as f64,
+                ),
+                Err(error) => Value::Error(error),
+            });
+        }
         if matches!(
             function,
             Function::Large
@@ -69,7 +92,7 @@ impl Workbook {
         }
         if matches!(
             function,
-            Function::SumSq | Function::CountBlank | Function::Gcd | Function::Lcm | Function::Xor
+            Function::CountBlank | Function::Gcd | Function::Lcm | Function::Xor
         ) {
             let mut values = Vec::new();
             for arg in arguments {
@@ -347,17 +370,6 @@ fn common_aggregate(function: Function, values: &[Value], arguments: usize) -> V
     if let Some(e) = first_error(values) {
         return Value::Error(e);
     }
-    if function == Function::SumSq {
-        return finite(
-            values
-                .iter()
-                .filter_map(|v| match v {
-                    Value::Number(n) => Some(n * n),
-                    _ => None,
-                })
-                .sum(),
-        );
-    }
     if function == Function::Xor {
         let mut count = 0;
         let mut result = false;
@@ -378,6 +390,13 @@ fn common_aggregate(function: Function, values: &[Value], arguments: usize) -> V
         } else {
             Value::Boolean(result)
         };
+    }
+    unreachable!("COUNTBLANK or XOR only")
+}
+
+pub(super) fn integer_aggregate(function: Function, values: &[Value]) -> Value {
+    if let Some(error) = first_error(values) {
+        return Value::Error(error);
     }
     let mut result = if function == Function::Gcd {
         0u64

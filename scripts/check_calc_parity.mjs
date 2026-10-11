@@ -55,7 +55,13 @@ function openFormula(formula) {
     else if (c === '}') { array--; result += c; }
     else if (c === ',') result += ';';
     else if (c === ';' && array) result += '|';
-    else if (/[A-Za-z_]/.test(c)) {
+    else if (/[0-9.]/.test(c) && formula.slice(i).match(/^(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?/)) {
+      // Consume a complete numeric token before looking for A1 references:
+      // the exponent in 1E16 is not a reference to cell E16.
+      const token = formula.slice(i).match(/^(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?/)[0];
+      result += token;
+      i += token.length - 1;
+    } else if (/[A-Za-z_]/.test(c)) {
       const match = formula.slice(i).match(/^[A-Za-z_][A-Za-z0-9_.]*/)[0];
       const next = formula[i + match.length];
       if (next === '(') result += odfNames.get(opcode.get(normalize(match))) ?? match;
@@ -73,6 +79,9 @@ function openFormula(formula) {
     } else result += c;
   }
   return result;
+}
+if (openFormula('=SUM(1E16,1,-1e+16,.5E-2,A16)') !== '=SUM(1E16;1;-1e+16;.5E-2;[.A16])') {
+  throw new Error('numeric/reference token translation regression');
 }
 const inputs = '<table:table table:name="Inputs"><table:table-row><table:table-cell office:value-type="float" office:value="2"/></table:table-row><table:table-row><table:table-cell office:value-type="float" office:value="3"/></table:table-row><table:table-row><table:table-cell office:value-type="string"><text:p>abc</text:p></table:table-cell></table:table-row><table:table-row><table:table-cell office:value-type="boolean" office:boolean-value="true"/></table:table-row><table:table-row><table:table-cell/></table:table-row></table:table>';
 const rows = formulas.map(formula => `<table:table-row><table:table-cell table:formula="of:${xml(openFormula(formula))}" office:value-type="float" office:value="0"><text:p>0</text:p></table:table-cell></table:table-row>`).join('\n');

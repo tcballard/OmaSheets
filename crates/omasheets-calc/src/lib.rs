@@ -7,6 +7,7 @@
 //! Dates are Excel 1900-system serial numbers; see [`serial_date`] for the
 //! boundary rules and the deliberately unsupported cases.
 
+mod aggregate;
 mod common;
 mod database;
 mod matrix;
@@ -1231,9 +1232,6 @@ impl Workbook {
             .map_or(Value::Blank, |cell| self.cells[cell].value.clone())
     }
 
-    /// Every position of the range in row-major order with the cell that
-    /// exists there, found by scanning the sheet index rather than by
-    /// probing each position.
     /// Visits every existing cell inside a rectangle as (row-major position,
     /// cell index), scanning the sheet index rather than probing positions.
     fn for_each_rectangle_cell(
@@ -1263,29 +1261,6 @@ impl Workbook {
                     visit(position(*row, *column), *index);
                 }
             }
-        }
-    }
-
-    /// Every position of the range in row-major order with the cell that
-    /// exists there.
-    fn range_cells(&self, node: usize) -> Vec<Option<usize>> {
-        match self.range_shape(node) {
-            RangeShape::Rectangle {
-                anchor,
-                rows,
-                columns,
-            } => {
-                let mut output = vec![None; rows * columns];
-                self.for_each_rectangle_cell(anchor, rows, columns, |position, index| {
-                    output[position] = Some(index);
-                });
-                output
-            }
-            RangeShape::Members { .. } => self.cells[node]
-                .dependencies
-                .iter()
-                .map(|member| Some(*member))
-                .collect(),
         }
     }
 
@@ -1866,8 +1841,16 @@ impl Workbook {
                 | Function::Count
                 | Function::CountA
                 | Function::Product
+                | Function::SumSq
+                | Function::AverageA
         ) {
             return self.evaluate_simple_aggregate(function, arguments, false);
+        }
+        if matches!(
+            function,
+            Function::Median | Function::StDev | Function::StDevP | Function::Var | Function::VarP
+        ) {
+            return self.evaluate_statistical_aggregate(function, arguments, false);
         }
         if function == Function::Hyperlink {
             return self.evaluate_hyperlink(arguments);
@@ -1926,7 +1909,6 @@ impl Workbook {
                     values.get(1).cloned().unwrap_or(Value::Boolean(true)),
                 ])
             }
-            Function::AverageA => average_a(&values),
             Function::StDev => deviation(&numbers, true, true),
             Function::StDevP => deviation(&numbers, false, true),
             Function::Var => deviation(&numbers, true, false),
@@ -2123,6 +2105,7 @@ impl Workbook {
             | Function::Ppmt
             | Function::Sln
             | Function::Syd
+            | Function::AverageA
             | Function::SumSq
             | Function::CountBlank
             | Function::Gcd
@@ -2285,27 +2268,7 @@ impl Workbook {
         ) {
             return self.evaluate_simple_aggregate(function, &arguments[1..], true);
         }
-        let mut aggregate_arguments = Vec::new();
-        for argument in &arguments[1..] {
-            let mut values = Vec::new();
-            self.flatten_values_skipping_subtotals(argument, &mut values);
-            if matches!(argument, Expr::Reference(_) | Expr::RangeNode { .. })
-                || contains_array_operand(argument)
-            {
-                // Preserve collection semantics after excluding nested subtotals:
-                // text cells must not become direct scalar text arguments.
-                if !values.is_empty() {
-                    aggregate_arguments.push(Expr::Array(ArrayValue::from_parts(
-                        1,
-                        values.len(),
-                        values,
-                    )));
-                }
-            } else {
-                aggregate_arguments.extend(values.into_iter().map(literal));
-            }
-        }
-        self.evaluate_function(function, &aggregate_arguments)
+        self.evaluate_statistical_aggregate(function, &arguments[1..], true)
     }
 
     fn cell_is_subtotal(&self, index: usize) -> bool {
@@ -2313,22 +2276,6 @@ impl Workbook {
             self.cells[index].input,
             Input::Formula(Expr::Function(Function::SubTotal, _))
         )
-    }
-
-    fn flatten_values_skipping_subtotals(&self, expression: &Expr<usize>, output: &mut Vec<Value>) {
-        match expression {
-            Expr::RangeNode { node, .. } => {
-                for member in self.range_cells(*node) {
-                    match member {
-                        Some(member) if self.cell_is_subtotal(member) => {}
-                        Some(member) => output.push(self.cells[member].value.clone()),
-                        None => output.push(Value::Blank),
-                    }
-                }
-            }
-            Expr::Empty => {}
-            other => self.flatten_values(other, output),
-        }
     }
 
     /// `ROW()` and `COLUMN()` report the evaluating cell; with a reference
@@ -2777,131 +2724,6 @@ impl Workbook {
     /// These aggregates ignore blanks and need no positional array. Visit
     /// existing range cells directly, borrowing values instead of cloning them.
     /// Array expressions still use the established broadcasting evaluator.
-    fn evaluate_simple_aggregate(
-        &self,
-        function: Function,
-        arguments: &[Expr<usize>],
-        skip_subtotals: bool,
-    ) -> Value {
-        let mut count = 0usize;
-        let mut nonblank = 0usize;
-        let mut accumulator = match function {
-            Function::Product => 1.0,
-            _ => 0.0,
-        };
-        let mut error = None;
-        let mut visit = |value: &Value, array_member: bool| {
-            if !matches!(value, Value::Blank) {
-                nonblank += 1;
-            }
-            let numeric = match value {
-                Value::Number(number) => Some(*number),
-                Value::Boolean(flag) if array_member => Some(f64::from(*flag)),
-                _ => None,
-            };
-            if let Some(number) = numeric {
-                accumulator = match function {
-                    Function::Sum | Function::Average => accumulator + number,
-                    Function::Product => accumulator * number,
-                    Function::Min if count != 0 => accumulator.min(number),
-                    Function::Max if count != 0 => accumulator.max(number),
-                    Function::Min | Function::Max => number,
-                    _ => accumulator,
-                };
-                count += 1;
-            } else if let Value::Error(value) = value {
-                // Calc counts/ignores error cells and scalar errors in COUNT/A,
-                // but errors in array arguments still propagate.
-                if error.is_none()
-                    && (array_member || !matches!(function, Function::Count | Function::CountA))
-                {
-                    error = Some(value.clone());
-                }
-            }
-        };
-        for argument in arguments {
-            match argument {
-                Expr::RangeNode { node, .. } => match self.range_shape(*node) {
-                    RangeShape::Rectangle {
-                        anchor,
-                        rows,
-                        columns,
-                    } => {
-                        self.for_each_rectangle_cell(anchor, rows, columns, |_, index| {
-                            if !skip_subtotals || !self.cell_is_subtotal(index) {
-                                visit(&self.cells[index].value, false);
-                            }
-                        });
-                    }
-                    RangeShape::Members { .. } => {
-                        for index in &self.cells[*node].dependencies {
-                            if !skip_subtotals || !self.cell_is_subtotal(*index) {
-                                visit(&self.cells[*index].value, false);
-                            }
-                        }
-                    }
-                },
-                Expr::Function(Function::ReferenceSpan | Function::Index, _) => {
-                    match self.reference_view(argument) {
-                        Ok(reference) => {
-                            reference.visit(self, &mut |value: &Value| visit(value, false))
-                        }
-                        Err(CalcError::InvalidArguments) => match self.evaluate_array(argument) {
-                            Ok(array) => array
-                                .aggregate_values()
-                                .for_each(|value| visit(value, true)),
-                            Err(error) => visit(&Value::Error(error), true),
-                        },
-                        Err(error) => visit(&Value::Error(error), true),
-                    }
-                }
-                Expr::Empty => {}
-                other if contains_array_operand(other) => match self.evaluate_array(other) {
-                    Ok(array) => array
-                        .aggregate_values()
-                        .for_each(|value| visit(value, true)),
-                    Err(error) => visit(&Value::Error(error), true),
-                },
-                Expr::Reference(_) => visit(&self.evaluate(argument), false),
-                other => {
-                    let value = self.evaluate(other);
-                    // Scalar booleans count as numbers. Text in a reference or
-                    // array is ignored; direct text is rejected by arithmetic
-                    // aggregates. COUNT alone accepts numeric scalar text.
-                    let value = match value {
-                        Value::Boolean(flag) => Value::Number(f64::from(flag)),
-                        Value::Text(text) if function == Function::Count => {
-                            match text.trim().parse::<f64>() {
-                                Ok(number) if number.is_finite() => Value::Number(number),
-                                _ => Value::Text(text),
-                            }
-                        }
-                        Value::Text(_) if matches!(function, Function::Min | Function::Max) => {
-                            Value::Error(CalcError::IllegalParameter)
-                        }
-                        Value::Text(_) if function != Function::CountA => {
-                            Value::Error(CalcError::InvalidValue)
-                        }
-                        other => other,
-                    };
-                    visit(&value, false);
-                }
-            }
-        }
-        if let Some(error) = error {
-            return Value::Error(error);
-        }
-        match function {
-            Function::Sum => number_value(accumulator),
-            Function::Average if count == 0 => Value::Error(CalcError::DivisionByZero),
-            Function::Average => number_value(accumulator / count as f64),
-            Function::Count => Value::Number(count as f64),
-            Function::CountA => Value::Number(nonblank as f64),
-            Function::Min | Function::Max | Function::Product => Value::Number(accumulator),
-            _ => unreachable!("simple aggregate only"),
-        }
-    }
-
     /// Flattens an aggregate argument. A range contributes its cells; an
     /// expression that combines ranges with operators or elementwise
     /// functions (`IF(A1:A5=0,0,B1:B5-A1:A5)`, `A1:A5*B1:B5`) contributes
@@ -3837,28 +3659,6 @@ fn numeric_only(values: &[Value]) -> Vec<f64> {
             _ => None,
         })
         .collect()
-}
-
-/// `AVERAGEA`: numbers as they are, `TRUE`/`FALSE` as 1/0, text as 0,
-/// blanks ignored.
-fn average_a(values: &[Value]) -> Value {
-    let mut sum = 0.0;
-    let mut count = 0_usize;
-    for value in values {
-        match value {
-            Value::Number(number) => sum += number,
-            Value::Boolean(true) => sum += 1.0,
-            Value::Boolean(false) | Value::Text(_) => {}
-            Value::Blank => continue,
-            Value::Error(error) => return Value::Error(error.clone()),
-        }
-        count += 1;
-    }
-    if count == 0 {
-        Value::Error(CalcError::DivisionByZero)
-    } else {
-        Value::Number(sum / count as f64)
-    }
 }
 
 /// `NORMDIST(x, mean, standard_dev, cumulative)`.
@@ -7167,11 +6967,11 @@ mod tests {
         workbook.set_boolean(cell(2, 0), true);
         workbook.set_number(cell(999_999, 0), 6.0);
         for (column, (name, expected)) in [
-            ("SUM", 8.0),
-            ("AVERAGE", 4.0),
-            ("MIN", 2.0),
+            ("SUM", 9.0),
+            ("AVERAGE", 3.0),
+            ("MIN", 1.0),
             ("MAX", 6.0),
-            ("COUNT", 2.0),
+            ("COUNT", 3.0),
             ("COUNTA", 4.0),
             ("PRODUCT", 12.0),
         ]
@@ -7190,7 +6990,7 @@ mod tests {
         workbook.set_error(cell(4, 0), CalcError::DivisionByZero);
         for column in 1..=7 {
             let expected = match column {
-                5 => Value::Number(2.0), // COUNT ignores errors.
+                5 => Value::Number(3.0), // COUNT ignores errors.
                 6 => Value::Number(6.0), // COUNTA counts errors as occupied.
                 _ => Value::Error(CalcError::DivisionByZero),
             };
@@ -7203,8 +7003,8 @@ mod tests {
             ("=MAX(Z1:Z2)", Value::Number(0.0)),
             ("=COUNT(Z1:Z2)", Value::Number(0.0)),
             ("=COUNTA(Z1:Z2)", Value::Number(0.0)),
-            ("=PRODUCT(Z1:Z2)", Value::Number(1.0)),
-            ("=SUM(1E16,1,-1E16)", Value::Number(0.0)),
+            ("=PRODUCT(Z1:Z2)", Value::Number(0.0)),
+            ("=SUM(1E16,1,-1E16)", Value::Number(1.0)),
         ] {
             workbook.set_formula(cell(0, 8), formula).unwrap();
             assert_eq!(workbook.value(cell(0, 8)), expected, "{formula}");
@@ -7706,7 +7506,7 @@ mod tests {
             ),
             (8, "=MEDIAN(B1:B4)", Value::Number(25.0)),
             (9, "=MEDIAN(A1:A4)", Value::Number(3.0)),
-            (10, "=MEDIAN(A4)", Value::Error(CalcError::InvalidArguments)),
+            (10, "=MEDIAN(A4)", Value::Error(CalcError::InvalidValue)),
         ] {
             workbook.set_formula(cell(0, column), formula).unwrap();
             assert_eq!(workbook.value(cell(0, column)), expected, "{formula}");
