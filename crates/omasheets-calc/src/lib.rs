@@ -13,6 +13,7 @@ mod database;
 mod matrix;
 mod reference;
 pub mod serial_date;
+mod statistics;
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
@@ -492,6 +493,31 @@ enum Function {
     QuartileInc,
     QuartileExc,
     RankAvg,
+    MinA,
+    MaxA,
+    StDevA,
+    StDevPA,
+    VarA,
+    VarPA,
+    AveDev,
+    DevSq,
+    GeoMean,
+    HarMean,
+    Mode,
+    ModeSingle,
+    ModeMulti,
+    Skew,
+    SkewP,
+    Kurt,
+    TrimMean,
+    PercentRankInc,
+    PercentRankExc,
+    Standardize,
+    Slope,
+    Intercept,
+    RSq,
+    StEyx,
+    Forecast,
 }
 
 /// A parsed formula whose cell references can be enumerated and rebound
@@ -1613,6 +1639,9 @@ impl Workbook {
     }
 
     fn evaluate_function(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+        if let Some(value) = self.evaluate_statistics(function, arguments) {
+            return value;
+        }
         if let Some(value) = self.evaluate_common_function(function, arguments) {
             return value;
         }
@@ -1827,13 +1856,6 @@ impl Workbook {
         }
         if matches!(
             function,
-            Function::Correl | Function::CovarianceP | Function::CovarianceS
-        ) {
-            return self.evaluate_paired_statistics(function, arguments);
-        }
-
-        if matches!(
-            function,
             Function::Sum
                 | Function::Average
                 | Function::Min
@@ -1856,7 +1878,7 @@ impl Workbook {
             return self.evaluate_hyperlink(arguments);
         }
         if function == Function::Rank {
-            return self.evaluate_rank(arguments);
+            return self.order_statistic(function, arguments);
         }
         if function == Function::Text {
             return self.evaluate_text(arguments);
@@ -2109,6 +2131,31 @@ impl Workbook {
             | Function::QuartileInc
             | Function::QuartileExc
             | Function::RankAvg
+            | Function::MinA
+            | Function::MaxA
+            | Function::StDevA
+            | Function::StDevPA
+            | Function::VarA
+            | Function::VarPA
+            | Function::AveDev
+            | Function::DevSq
+            | Function::GeoMean
+            | Function::HarMean
+            | Function::Mode
+            | Function::ModeSingle
+            | Function::ModeMulti
+            | Function::Skew
+            | Function::SkewP
+            | Function::Kurt
+            | Function::TrimMean
+            | Function::PercentRankInc
+            | Function::PercentRankExc
+            | Function::Standardize
+            | Function::Slope
+            | Function::Intercept
+            | Function::RSq
+            | Function::StEyx
+            | Function::Forecast
             | Function::Rri => Value::Error(CalcError::InvalidArguments),
         }
     }
@@ -2127,53 +2174,6 @@ impl Workbook {
             link
         } else {
             self.evaluate(&arguments[1])
-        }
-    }
-
-    /// `RANK(number, ref, [order])`: competition rank. Zero or omitted order
-    /// ranks the largest number first. Ties share a rank and the next rank
-    /// skips. Non-numbers in `ref` are ignored; an error there propagates.
-    fn evaluate_rank(&self, arguments: &[Expr<usize>]) -> Value {
-        if !matches!(arguments.len(), 2 | 3) {
-            return Value::Error(CalcError::InvalidArguments);
-        }
-        let target = match number(self.evaluate(&arguments[0])) {
-            Ok(value) => value,
-            Err(error) => return Value::Error(error),
-        };
-        let mut values = Vec::new();
-        self.flatten_values(&arguments[1], &mut values);
-        if let Some(error) = first_error(&values) {
-            return Value::Error(error);
-        }
-        let ascending = if arguments.len() == 3 {
-            match number(self.evaluate(&arguments[2])) {
-                Ok(value) => value != 0.0,
-                Err(error) => return Value::Error(error),
-            }
-        } else {
-            false
-        };
-        let mut rank = 1_usize;
-        let mut found_target = false;
-        for value in &values {
-            let Value::Number(candidate) = value else {
-                continue;
-            };
-            found_target |= compare_numbers(*candidate, target) == std::cmp::Ordering::Equal;
-            let ahead = match compare_numbers(*candidate, target) {
-                std::cmp::Ordering::Greater => !ascending,
-                std::cmp::Ordering::Less => ascending,
-                std::cmp::Ordering::Equal => false,
-            };
-            if ahead {
-                rank += 1;
-            }
-        }
-        if found_target {
-            Value::Number(rank as f64)
-        } else {
-            Value::Error(CalcError::NotAvailable)
         }
     }
 
@@ -2680,43 +2680,6 @@ impl Workbook {
         }
     }
 
-    /// Correlation or covariance over positions where both sides are numbers.
-    fn evaluate_paired_statistics(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
-        if arguments.len() != 2 {
-            return Value::Error(CalcError::InvalidArguments);
-        }
-        let mut left = Vec::new();
-        self.flatten_values(&arguments[0], &mut left);
-        let mut right = Vec::new();
-        self.flatten_values(&arguments[1], &mut right);
-        if let Some(error) = first_error(&left).or_else(|| first_error(&right)) {
-            return Value::Error(error);
-        }
-        if left.len() != right.len() {
-            return Value::Error(CalcError::NotAvailable);
-        }
-        let pairs: Vec<(f64, f64)> = left
-            .iter()
-            .zip(&right)
-            .filter_map(|(x, y)| match (x, y) {
-                (Value::Number(x), Value::Number(y)) => Some((*x, *y)),
-                _ => None,
-            })
-            .collect();
-        let result = if function == Function::Correl {
-            correlation(&pairs)
-        } else {
-            covariance(&pairs, function == Function::CovarianceS)
-        };
-        match result {
-            Ok(value) => Value::Number(value),
-            Err(error) => Value::Error(error),
-        }
-    }
-
-    /// These aggregates ignore blanks and need no positional array. Visit
-    /// existing range cells directly, borrowing values instead of cloning them.
-    /// Array expressions still use the established broadcasting evaluator.
     /// Flattens an aggregate argument. A range contributes its cells; an
     /// expression that combines ranges with operators or elementwise
     /// functions (`IF(A1:A5=0,0,B1:B5-A1:A5)`, `A1:A5*B1:B5`) contributes
@@ -2741,6 +2704,12 @@ impl Workbook {
     fn evaluate_array(&self, expression: &Expr<usize>) -> Result<ArrayValue, CalcError> {
         match expression {
             Expr::Array(array) => Ok(array.clone()),
+            Expr::Function(Function::ModeMulti, arguments) => self.mode_array(arguments),
+            Expr::Function(function @ (Function::Large | Function::Small), arguments)
+                if arguments.len() == 2 && contains_array_operand(&arguments[1]) =>
+            {
+                self.order_selection_array(*function, arguments)
+            }
             Expr::Function(function @ (Function::Transpose | Function::MMult), arguments) => {
                 self.matrix_array(*function, arguments)
             }
@@ -3210,6 +3179,9 @@ impl<'a> ArrayInput<'a> {
                 Err(error) => Err(error),
             },
             Expr::Error(error) => Err(error.clone()),
+            other if contains_array_operand(other) => {
+                workbook.evaluate_array(other).map(Self::Computed)
+            }
             _ => Err(CalcError::InvalidArguments),
         }
     }
@@ -3317,9 +3289,16 @@ fn contains_array_operand(expression: &Expr<usize>) -> bool {
         Expr::RangeNode { .. }
         | Expr::Array(_)
         | Expr::Function(
-            Function::Index | Function::ReferenceSpan | Function::Transpose | Function::MMult,
+            Function::Index
+            | Function::ReferenceSpan
+            | Function::Transpose
+            | Function::MMult
+            | Function::ModeMulti,
             _,
         ) => true,
+        Expr::Function(Function::Large | Function::Small, arguments) => {
+            arguments.get(1).is_some_and(contains_array_operand)
+        }
         Expr::UnaryMinus(inner) | Expr::Percent(inner) => contains_array_operand(inner),
         Expr::Binary(_, left, right) => {
             contains_array_operand(left) || contains_array_operand(right)
@@ -3809,25 +3788,6 @@ fn periodic_internal_rate_of_return(values: &[f64], guess: f64) -> Result<f64, C
     Err(CalcError::InvalidNumber)
 }
 
-fn covariance(pairs: &[(f64, f64)], sample: bool) -> Result<f64, CalcError> {
-    let correction = usize::from(sample);
-    if pairs.len() <= correction {
-        return Err(CalcError::DivisionByZero);
-    }
-    let mean_x = pairs.iter().map(|(x, _)| x).sum::<f64>() / pairs.len() as f64;
-    let mean_y = pairs.iter().map(|(_, y)| y).sum::<f64>() / pairs.len() as f64;
-    let value = pairs
-        .iter()
-        .map(|(x, y)| (x - mean_x) * (y - mean_y))
-        .sum::<f64>()
-        / (pairs.len() - correction) as f64;
-    if value.is_finite() {
-        Ok(value)
-    } else {
-        Err(CalcError::InvalidNumber)
-    }
-}
-
 /// `NPV`: cash flows discounted from the end of the first period.
 fn net_present_value(rate: f64, values: &[f64]) -> Result<f64, CalcError> {
     if rate == -1.0 {
@@ -3924,26 +3884,6 @@ fn internal_rate_of_return(cash_flows: &[(f64, f64)], guess: f64) -> Result<f64,
         rate = next;
     }
     Err(CalcError::InvalidNumber)
-}
-
-/// Pearson correlation of numeric pairs.
-fn correlation(pairs: &[(f64, f64)]) -> Result<f64, CalcError> {
-    if pairs.len() < 2 {
-        return Err(CalcError::DivisionByZero);
-    }
-    let count = pairs.len() as f64;
-    let mean_x = pairs.iter().map(|(x, _)| x).sum::<f64>() / count;
-    let mean_y = pairs.iter().map(|(_, y)| y).sum::<f64>() / count;
-    let (mut covariance, mut variance_x, mut variance_y) = (0.0, 0.0, 0.0);
-    for (x, y) in pairs {
-        covariance += (x - mean_x) * (y - mean_y);
-        variance_x += (x - mean_x) * (x - mean_x);
-        variance_y += (y - mean_y) * (y - mean_y);
-    }
-    if variance_x == 0.0 || variance_y == 0.0 {
-        return Err(CalcError::DivisionByZero);
-    }
-    Ok(covariance / (variance_x * variance_y).sqrt())
 }
 
 fn median(mut numbers: Vec<f64>) -> Value {
@@ -5958,6 +5898,35 @@ fn literal_offset(args: &[Expr]) -> Result<Expr, FormulaError> {
 }
 
 const FUNCTION_REGISTRY: &[(&str, Function)] = &[
+    ("MINA", Function::MinA),
+    ("MAXA", Function::MaxA),
+    ("STDEVA", Function::StDevA),
+    ("STDEVPA", Function::StDevPA),
+    ("VARA", Function::VarA),
+    ("VARPA", Function::VarPA),
+    ("AVEDEV", Function::AveDev),
+    ("DEVSQ", Function::DevSq),
+    ("GEOMEAN", Function::GeoMean),
+    ("HARMEAN", Function::HarMean),
+    ("MODE", Function::Mode),
+    ("MODE.SNGL", Function::ModeSingle),
+    ("MODE.MULT", Function::ModeMulti),
+    ("SKEW", Function::Skew),
+    ("SKEW.P", Function::SkewP),
+    ("KURT", Function::Kurt),
+    ("TRIMMEAN", Function::TrimMean),
+    ("PERCENTRANK", Function::PercentRankInc),
+    ("PERCENTRANK.INC", Function::PercentRankInc),
+    ("PERCENTRANK.EXC", Function::PercentRankExc),
+    ("RANK.EQ", Function::Rank),
+    ("STANDARDIZE", Function::Standardize),
+    ("SLOPE", Function::Slope),
+    ("INTERCEPT", Function::Intercept),
+    ("RSQ", Function::RSq),
+    ("STEYX", Function::StEyx),
+    ("PEARSON", Function::Correl),
+    ("FORECAST", Function::Forecast),
+    ("FORECAST.LINEAR", Function::Forecast),
     ("SIN", Function::Sin),
     ("COS", Function::Cos),
     ("TAN", Function::Tan),
@@ -6560,8 +6529,8 @@ mod tests {
             ("=IRR({-1,#N/A,2})", CalcError::NotAvailable),
             ("=PV(-1,1,1)", CalcError::DivisionByZero),
             ("=PV(0,1,#REF!)", CalcError::InvalidReference),
-            ("=COVARIANCE.S({1},{2})", CalcError::DivisionByZero),
-            ("=COVAR({1,2},{3})", CalcError::NotAvailable),
+            ("=COVARIANCE.S({1},{2})", CalcError::InvalidValue),
+            ("=COVAR({1,2},{3})", CalcError::IllegalArgument),
             ("=COVAR({1,#N/A},{3,4})", CalcError::NotAvailable),
             ("=NORMSDIST(0,FALSE)", CalcError::InvalidArguments),
             ("=NORM.S.DIST(0)", CalcError::InvalidArguments),
@@ -8321,20 +8290,20 @@ mod tests {
             (23, "=RANK(30,A1:A7)", Value::Number(1.0)),
             (24, "=RANK(20,A1:A7)", Value::Number(3.0)),
             (25, "=RANK(10,A1:A7,0)", Value::Number(4.0)),
-            (26, "=RANK(10,A1:A7,1)", Value::Number(1.0)),
+            (26, "=RANK(10,A1:A7,1)", Value::Number(2.0)),
             (27, "=RANK(0,A1:A7)", Value::Error(CalcError::NotAvailable)),
             (
                 28,
                 "=RANK(2,{10,20,30})",
                 Value::Error(CalcError::NotAvailable),
             ),
-            (29, "=RANK(0.3,A9:A10)", Value::Number(1.0)),
+            (29, "=RANK(0.3,A9:A10)", Value::Number(2.0)),
             (
                 30,
                 "=RANK(1,A8:A8)",
                 Value::Error(CalcError::DivisionByZero),
             ),
-            (31, "=RANK(1,A5:A6)", Value::Error(CalcError::NotAvailable)),
+            (31, "=RANK(1,A5:A6)", Value::Error(CalcError::InvalidValue)),
             (
                 32,
                 "=RANK(\"x\",A1:A3)",
@@ -8745,7 +8714,7 @@ mod tests {
             ("=XNPV(0.09,A1:A5,B1:B4)", CalcError::InvalidNumber),
             ("=XNPV(-1,A1:A5,B1:B5)", CalcError::InvalidNumber),
             ("=XIRR(A2:A5,B2:B5)", CalcError::InvalidNumber),
-            ("=CORREL(C1:C5,D1:D4)", CalcError::NotAvailable),
+            ("=CORREL(C1:C5,D1:D4)", CalcError::IllegalArgument),
             ("=CORREL(C1:C1,D1:D1)", CalcError::DivisionByZero),
             ("=AVERAGEA(E5:E6)", CalcError::DivisionByZero),
         ] {

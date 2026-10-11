@@ -32,16 +32,28 @@ impl Workbook {
             let numeric = match value {
                 Value::Number(n) => Some(*n),
                 Value::Boolean(b) => Some(f64::from(*b)),
-                Value::Text(_) if function == Function::AverageA => Some(0.0),
+                Value::Text(_)
+                    if matches!(
+                        function,
+                        Function::AverageA | Function::MinA | Function::MaxA
+                    ) =>
+                {
+                    Some(0.0)
+                }
                 Value::Text(text) if kind == ArgumentKind::Scalar => match function {
                     Function::Count => text.trim().parse::<f64>().ok().filter(|n| n.is_finite()),
                     Function::CountA => None,
                     _ => {
-                        error.get_or_insert(if matches!(function, Function::Min | Function::Max) {
-                            CalcError::IllegalParameter
-                        } else {
-                            CalcError::InvalidValue
-                        });
+                        error.get_or_insert(
+                            if matches!(
+                                function,
+                                Function::Min | Function::Max | Function::MinA | Function::MaxA
+                            ) {
+                                CalcError::IllegalParameter
+                            } else {
+                                CalcError::InvalidValue
+                            },
+                        );
                         None
                     }
                 },
@@ -63,9 +75,15 @@ impl Workbook {
                     Function::Sum | Function::Average | Function::AverageA => sum.add(n),
                     Function::SumSq => sum.add(n * n),
                     Function::Product => accumulator *= n,
-                    Function::Min if count != 0 => accumulator = accumulator.min(n),
-                    Function::Max if count != 0 => accumulator = accumulator.max(n),
-                    Function::Min | Function::Max => accumulator = n,
+                    Function::Min | Function::MinA if count != 0 => {
+                        accumulator = accumulator.min(n)
+                    }
+                    Function::Max | Function::MaxA if count != 0 => {
+                        accumulator = accumulator.max(n)
+                    }
+                    Function::Min | Function::Max | Function::MinA | Function::MaxA => {
+                        accumulator = n
+                    }
                     _ => {}
                 }
                 count += 1;
@@ -84,6 +102,8 @@ impl Workbook {
                     &mut visit,
                 );
             }
+        } else if matches!(function, Function::MinA | Function::MaxA) {
+            self.visit_statistical_arguments(arguments, true, false, &mut visit);
         } else {
             self.visit_aggregate_arguments(arguments, skip_subtotals, &mut visit);
         }
@@ -99,12 +119,14 @@ impl Workbook {
             Function::Count => Value::Number(count as f64),
             Function::CountA => Value::Number(nonblank as f64),
             Function::Product if count == 0 => Value::Number(0.0),
-            Function::Min | Function::Max
+            Function::Min | Function::Max | Function::MinA | Function::MaxA
                 if logical_format == Some(true) && (accumulator == 0.0 || accumulator == 1.0) =>
             {
                 Value::Boolean(accumulator != 0.0)
             }
-            Function::Min | Function::Max | Function::Product => number_value(accumulator),
+            Function::Min | Function::Max | Function::MinA | Function::MaxA | Function::Product => {
+                number_value(accumulator)
+            }
             _ => unreachable!("simple aggregate only"),
         }
     }

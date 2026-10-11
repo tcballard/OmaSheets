@@ -273,6 +273,33 @@ for (const expr of ['MODE({4,4,2,2})','MODE.SNGL({4,4,2,2})','MODE.SNGL({4,2;2,4
   'GEOMEAN(0,NA())','GEOMEAN(NA(),0)','GEOMEAN({0,-1})','GEOMEAN({-1,0})','GEOMEAN({0,#N/A})']) {
   add('statistics-expanded', '=' + expr);
 }
+// Distinguish direct, reference and matrix errors before changing origins.
+const statisticalErrorRow = cases.length + 1;
+add('statistics-origins', '=NA()');
+for (const name of ['AVEDEV','GEOMEAN','HARMEAN','SKEW','SKEW.P','KURT']) {
+  for (const args of ['NA(),2','2,NA()','{1,#N/A,3}','A' + statisticalErrorRow + ',2','#NUM!,2','1/0,2']) {
+    add('statistics-origins', '=' + name + '(' + args + ')');
+    add('statistics-origins', '=ERROR.TYPE(' + name + '(' + args + '))');
+  }
+}
+for (const args of ['0,NA()','NA(),0','{0,#N/A}','{#N/A,0}','0,"bad"','"bad",0','0,-1','-1,0']) {
+  add('statistics-origins', '=GEOMEAN(' + args + ')');
+  add('statistics-origins', '=ERROR.TYPE(GEOMEAN(' + args + '))');
+}
+for (const name of ['SLOPE','INTERCEPT','RSQ','STEYX','PEARSON','CORREL','COVARIANCE.P','COVARIANCE.S']) {
+  for (const args of ['{1,2,3},{3,4}','{1},{2}','{1;2},{3,4}','{2,2,2},{1,2,3}']) {
+    add('statistics-origins', '=' + name + '(' + args + ')');
+    add('statistics-origins', '=ERROR.TYPE(' + name + '(' + args + '))');
+  }
+}
+for (const arg of ['"bad"','" 3 "','Inputs!A3','NA()']) add('statistics-origins', '=STANDARDIZE(' + arg + ',0,1)');
+for (const expr of ['MODE.MULT({4,4,2,2})','SUM(MODE.MULT({4,4,2,2}))','INDEX(MODE.MULT({4,4,2,2}),2)',
+  'SUM(MODE.MULT({1,2,3}))','SUM(MODE.MULT({4,2;2,4}))','SUM(MODE.MULT({TRUE,1,FALSE,0,2}))']) add('statistics-arrays', '=' + expr);
+for (const name of ['LARGE','SMALL']) for (const ranks of ['{1,2,3}','{1;2;3}','{1,3;2,4}','{1.2,2.8}',
+    '{0,2}','{5,2}','{TRUE,2}','{"1",2}','{"bad",2}','{#N/A,2}']) {
+  add('statistics-arrays', '=SUM(' + name + '({1,2,3,4},' + ranks + '))');
+  add('statistics-arrays', '=ERROR.TYPE(SUM(' + name + '({1,2,3,4},' + ranks + ')))');
+}
 writeFileSync('tests/calc-parity/common.json',JSON.stringify(cases,null,2)+'\n');
 const counts={};for(const c of cases) counts[c.group]=(counts[c.group]??0)+1;
 console.log(JSON.stringify({cases:cases.length,groups:counts}));

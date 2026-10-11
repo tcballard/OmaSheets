@@ -7523,5 +7523,1020 @@
     "id": "statistics-expanded-1505",
     "group": "statistics-expanded",
     "formula": "=GEOMEAN({0,#N/A})"
+  },
+  {
+    "id": "statistics-origins-1506",
+    "group": "statistics-origins",
+    "formula": "=NA()"
+  },
+  {
+    "id": "statistics-origins-1507",
+    "group": "statistics-origins",
+    "formula": "=AVEDEV(NA(),2)"
+  },
+  {
+    "id": "statistics-origins-1508",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(AVEDEV(NA(),2))"
+  },
+  {
+    "id": "statistics-origins-1509",
+    "group": "statistics-origins",
+    "formula": "=AVEDEV(2,NA())"
+  },
+  {
+    "id": "statistics-origins-1510",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(AVEDEV(2,NA()))"
+  },
+  {
+    "id": "statistics-origins-1511",
+    "group": "statistics-origins",
+    "formula": "=AVEDEV({1,#N/A,3})"
+  },
+  {
+    "id": "statistics-origins-1512",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(AVEDEV({1,#N/A,3}))"
+  },
+  {
+    "id": "statistics-origins-1513",
+    "group": "statistics-origins",
+    "formula": "=AVEDEV(A1506,2)"
+  },
+  {
+    "id": "statistics-origins-1514",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(AVEDEV(A1506,2))"
+  },
+  {
+    "id": "statistics-origins-1515",
+    "group": "statistics-origins",
+    "formula": "=AVEDEV(#NUM!,2)"
+  },
+  {
+    "id": "statistics-origins-1516",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(AVEDEV(#NUM!,2))"
+  },
+  {
+    "id": "statistics-origins-1517",
+    "group": "statistics-origins",
+    "formula": "=AVEDEV(1/0,2)"
+  },
+  {
+    "id": "statistics-origins-1518",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(AVEDEV(1/0,2))"
+  },
+  {
+    "id": "statistics-origins-1519",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN(NA(),2)"
+  },
+  {
+    "id": "statistics-origins-1520",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN(NA(),2))"
+  },
+  {
+    "id": "statistics-origins-1521",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN(2,NA())"
+  },
+  {
+    "id": "statistics-origins-1522",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN(2,NA()))"
+  },
+  {
+    "id": "statistics-origins-1523",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN({1,#N/A,3})"
+  },
+  {
+    "id": "statistics-origins-1524",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN({1,#N/A,3}))"
+  },
+  {
+    "id": "statistics-origins-1525",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN(A1506,2)"
+  },
+  {
+    "id": "statistics-origins-1526",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN(A1506,2))"
+  },
+  {
+    "id": "statistics-origins-1527",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN(#NUM!,2)"
+  },
+  {
+    "id": "statistics-origins-1528",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN(#NUM!,2))"
+  },
+  {
+    "id": "statistics-origins-1529",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN(1/0,2)"
+  },
+  {
+    "id": "statistics-origins-1530",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN(1/0,2))"
+  },
+  {
+    "id": "statistics-origins-1531",
+    "group": "statistics-origins",
+    "formula": "=HARMEAN(NA(),2)"
+  },
+  {
+    "id": "statistics-origins-1532",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(HARMEAN(NA(),2))"
+  },
+  {
+    "id": "statistics-origins-1533",
+    "group": "statistics-origins",
+    "formula": "=HARMEAN(2,NA())"
+  },
+  {
+    "id": "statistics-origins-1534",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(HARMEAN(2,NA()))"
+  },
+  {
+    "id": "statistics-origins-1535",
+    "group": "statistics-origins",
+    "formula": "=HARMEAN({1,#N/A,3})"
+  },
+  {
+    "id": "statistics-origins-1536",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(HARMEAN({1,#N/A,3}))"
+  },
+  {
+    "id": "statistics-origins-1537",
+    "group": "statistics-origins",
+    "formula": "=HARMEAN(A1506,2)"
+  },
+  {
+    "id": "statistics-origins-1538",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(HARMEAN(A1506,2))"
+  },
+  {
+    "id": "statistics-origins-1539",
+    "group": "statistics-origins",
+    "formula": "=HARMEAN(#NUM!,2)"
+  },
+  {
+    "id": "statistics-origins-1540",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(HARMEAN(#NUM!,2))"
+  },
+  {
+    "id": "statistics-origins-1541",
+    "group": "statistics-origins",
+    "formula": "=HARMEAN(1/0,2)"
+  },
+  {
+    "id": "statistics-origins-1542",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(HARMEAN(1/0,2))"
+  },
+  {
+    "id": "statistics-origins-1543",
+    "group": "statistics-origins",
+    "formula": "=SKEW(NA(),2)"
+  },
+  {
+    "id": "statistics-origins-1544",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SKEW(NA(),2))"
+  },
+  {
+    "id": "statistics-origins-1545",
+    "group": "statistics-origins",
+    "formula": "=SKEW(2,NA())"
+  },
+  {
+    "id": "statistics-origins-1546",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SKEW(2,NA()))"
+  },
+  {
+    "id": "statistics-origins-1547",
+    "group": "statistics-origins",
+    "formula": "=SKEW({1,#N/A,3})"
+  },
+  {
+    "id": "statistics-origins-1548",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SKEW({1,#N/A,3}))"
+  },
+  {
+    "id": "statistics-origins-1549",
+    "group": "statistics-origins",
+    "formula": "=SKEW(A1506,2)"
+  },
+  {
+    "id": "statistics-origins-1550",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SKEW(A1506,2))"
+  },
+  {
+    "id": "statistics-origins-1551",
+    "group": "statistics-origins",
+    "formula": "=SKEW(#NUM!,2)"
+  },
+  {
+    "id": "statistics-origins-1552",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SKEW(#NUM!,2))"
+  },
+  {
+    "id": "statistics-origins-1553",
+    "group": "statistics-origins",
+    "formula": "=SKEW(1/0,2)"
+  },
+  {
+    "id": "statistics-origins-1554",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SKEW(1/0,2))"
+  },
+  {
+    "id": "statistics-origins-1555",
+    "group": "statistics-origins",
+    "formula": "=SKEW.P(NA(),2)"
+  },
+  {
+    "id": "statistics-origins-1556",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SKEW.P(NA(),2))"
+  },
+  {
+    "id": "statistics-origins-1557",
+    "group": "statistics-origins",
+    "formula": "=SKEW.P(2,NA())"
+  },
+  {
+    "id": "statistics-origins-1558",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SKEW.P(2,NA()))"
+  },
+  {
+    "id": "statistics-origins-1559",
+    "group": "statistics-origins",
+    "formula": "=SKEW.P({1,#N/A,3})"
+  },
+  {
+    "id": "statistics-origins-1560",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SKEW.P({1,#N/A,3}))"
+  },
+  {
+    "id": "statistics-origins-1561",
+    "group": "statistics-origins",
+    "formula": "=SKEW.P(A1506,2)"
+  },
+  {
+    "id": "statistics-origins-1562",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SKEW.P(A1506,2))"
+  },
+  {
+    "id": "statistics-origins-1563",
+    "group": "statistics-origins",
+    "formula": "=SKEW.P(#NUM!,2)"
+  },
+  {
+    "id": "statistics-origins-1564",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SKEW.P(#NUM!,2))"
+  },
+  {
+    "id": "statistics-origins-1565",
+    "group": "statistics-origins",
+    "formula": "=SKEW.P(1/0,2)"
+  },
+  {
+    "id": "statistics-origins-1566",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SKEW.P(1/0,2))"
+  },
+  {
+    "id": "statistics-origins-1567",
+    "group": "statistics-origins",
+    "formula": "=KURT(NA(),2)"
+  },
+  {
+    "id": "statistics-origins-1568",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(KURT(NA(),2))"
+  },
+  {
+    "id": "statistics-origins-1569",
+    "group": "statistics-origins",
+    "formula": "=KURT(2,NA())"
+  },
+  {
+    "id": "statistics-origins-1570",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(KURT(2,NA()))"
+  },
+  {
+    "id": "statistics-origins-1571",
+    "group": "statistics-origins",
+    "formula": "=KURT({1,#N/A,3})"
+  },
+  {
+    "id": "statistics-origins-1572",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(KURT({1,#N/A,3}))"
+  },
+  {
+    "id": "statistics-origins-1573",
+    "group": "statistics-origins",
+    "formula": "=KURT(A1506,2)"
+  },
+  {
+    "id": "statistics-origins-1574",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(KURT(A1506,2))"
+  },
+  {
+    "id": "statistics-origins-1575",
+    "group": "statistics-origins",
+    "formula": "=KURT(#NUM!,2)"
+  },
+  {
+    "id": "statistics-origins-1576",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(KURT(#NUM!,2))"
+  },
+  {
+    "id": "statistics-origins-1577",
+    "group": "statistics-origins",
+    "formula": "=KURT(1/0,2)"
+  },
+  {
+    "id": "statistics-origins-1578",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(KURT(1/0,2))"
+  },
+  {
+    "id": "statistics-origins-1579",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN(0,NA())"
+  },
+  {
+    "id": "statistics-origins-1580",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN(0,NA()))"
+  },
+  {
+    "id": "statistics-origins-1581",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN(NA(),0)"
+  },
+  {
+    "id": "statistics-origins-1582",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN(NA(),0))"
+  },
+  {
+    "id": "statistics-origins-1583",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN({0,#N/A})"
+  },
+  {
+    "id": "statistics-origins-1584",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN({0,#N/A}))"
+  },
+  {
+    "id": "statistics-origins-1585",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN({#N/A,0})"
+  },
+  {
+    "id": "statistics-origins-1586",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN({#N/A,0}))"
+  },
+  {
+    "id": "statistics-origins-1587",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN(0,\"bad\")"
+  },
+  {
+    "id": "statistics-origins-1588",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN(0,\"bad\"))"
+  },
+  {
+    "id": "statistics-origins-1589",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN(\"bad\",0)"
+  },
+  {
+    "id": "statistics-origins-1590",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN(\"bad\",0))"
+  },
+  {
+    "id": "statistics-origins-1591",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN(0,-1)"
+  },
+  {
+    "id": "statistics-origins-1592",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN(0,-1))"
+  },
+  {
+    "id": "statistics-origins-1593",
+    "group": "statistics-origins",
+    "formula": "=GEOMEAN(-1,0)"
+  },
+  {
+    "id": "statistics-origins-1594",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(GEOMEAN(-1,0))"
+  },
+  {
+    "id": "statistics-origins-1595",
+    "group": "statistics-origins",
+    "formula": "=SLOPE({1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1596",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SLOPE({1,2,3},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1597",
+    "group": "statistics-origins",
+    "formula": "=SLOPE({1},{2})"
+  },
+  {
+    "id": "statistics-origins-1598",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SLOPE({1},{2}))"
+  },
+  {
+    "id": "statistics-origins-1599",
+    "group": "statistics-origins",
+    "formula": "=SLOPE({1;2},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1600",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SLOPE({1;2},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1601",
+    "group": "statistics-origins",
+    "formula": "=SLOPE({2,2,2},{1,2,3})"
+  },
+  {
+    "id": "statistics-origins-1602",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(SLOPE({2,2,2},{1,2,3}))"
+  },
+  {
+    "id": "statistics-origins-1603",
+    "group": "statistics-origins",
+    "formula": "=INTERCEPT({1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1604",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(INTERCEPT({1,2,3},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1605",
+    "group": "statistics-origins",
+    "formula": "=INTERCEPT({1},{2})"
+  },
+  {
+    "id": "statistics-origins-1606",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(INTERCEPT({1},{2}))"
+  },
+  {
+    "id": "statistics-origins-1607",
+    "group": "statistics-origins",
+    "formula": "=INTERCEPT({1;2},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1608",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(INTERCEPT({1;2},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1609",
+    "group": "statistics-origins",
+    "formula": "=INTERCEPT({2,2,2},{1,2,3})"
+  },
+  {
+    "id": "statistics-origins-1610",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(INTERCEPT({2,2,2},{1,2,3}))"
+  },
+  {
+    "id": "statistics-origins-1611",
+    "group": "statistics-origins",
+    "formula": "=RSQ({1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1612",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(RSQ({1,2,3},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1613",
+    "group": "statistics-origins",
+    "formula": "=RSQ({1},{2})"
+  },
+  {
+    "id": "statistics-origins-1614",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(RSQ({1},{2}))"
+  },
+  {
+    "id": "statistics-origins-1615",
+    "group": "statistics-origins",
+    "formula": "=RSQ({1;2},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1616",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(RSQ({1;2},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1617",
+    "group": "statistics-origins",
+    "formula": "=RSQ({2,2,2},{1,2,3})"
+  },
+  {
+    "id": "statistics-origins-1618",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(RSQ({2,2,2},{1,2,3}))"
+  },
+  {
+    "id": "statistics-origins-1619",
+    "group": "statistics-origins",
+    "formula": "=STEYX({1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1620",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(STEYX({1,2,3},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1621",
+    "group": "statistics-origins",
+    "formula": "=STEYX({1},{2})"
+  },
+  {
+    "id": "statistics-origins-1622",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(STEYX({1},{2}))"
+  },
+  {
+    "id": "statistics-origins-1623",
+    "group": "statistics-origins",
+    "formula": "=STEYX({1;2},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1624",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(STEYX({1;2},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1625",
+    "group": "statistics-origins",
+    "formula": "=STEYX({2,2,2},{1,2,3})"
+  },
+  {
+    "id": "statistics-origins-1626",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(STEYX({2,2,2},{1,2,3}))"
+  },
+  {
+    "id": "statistics-origins-1627",
+    "group": "statistics-origins",
+    "formula": "=PEARSON({1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1628",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(PEARSON({1,2,3},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1629",
+    "group": "statistics-origins",
+    "formula": "=PEARSON({1},{2})"
+  },
+  {
+    "id": "statistics-origins-1630",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(PEARSON({1},{2}))"
+  },
+  {
+    "id": "statistics-origins-1631",
+    "group": "statistics-origins",
+    "formula": "=PEARSON({1;2},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1632",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(PEARSON({1;2},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1633",
+    "group": "statistics-origins",
+    "formula": "=PEARSON({2,2,2},{1,2,3})"
+  },
+  {
+    "id": "statistics-origins-1634",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(PEARSON({2,2,2},{1,2,3}))"
+  },
+  {
+    "id": "statistics-origins-1635",
+    "group": "statistics-origins",
+    "formula": "=CORREL({1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1636",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(CORREL({1,2,3},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1637",
+    "group": "statistics-origins",
+    "formula": "=CORREL({1},{2})"
+  },
+  {
+    "id": "statistics-origins-1638",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(CORREL({1},{2}))"
+  },
+  {
+    "id": "statistics-origins-1639",
+    "group": "statistics-origins",
+    "formula": "=CORREL({1;2},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1640",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(CORREL({1;2},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1641",
+    "group": "statistics-origins",
+    "formula": "=CORREL({2,2,2},{1,2,3})"
+  },
+  {
+    "id": "statistics-origins-1642",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(CORREL({2,2,2},{1,2,3}))"
+  },
+  {
+    "id": "statistics-origins-1643",
+    "group": "statistics-origins",
+    "formula": "=COVARIANCE.P({1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1644",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(COVARIANCE.P({1,2,3},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1645",
+    "group": "statistics-origins",
+    "formula": "=COVARIANCE.P({1},{2})"
+  },
+  {
+    "id": "statistics-origins-1646",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(COVARIANCE.P({1},{2}))"
+  },
+  {
+    "id": "statistics-origins-1647",
+    "group": "statistics-origins",
+    "formula": "=COVARIANCE.P({1;2},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1648",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(COVARIANCE.P({1;2},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1649",
+    "group": "statistics-origins",
+    "formula": "=COVARIANCE.P({2,2,2},{1,2,3})"
+  },
+  {
+    "id": "statistics-origins-1650",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(COVARIANCE.P({2,2,2},{1,2,3}))"
+  },
+  {
+    "id": "statistics-origins-1651",
+    "group": "statistics-origins",
+    "formula": "=COVARIANCE.S({1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1652",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(COVARIANCE.S({1,2,3},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1653",
+    "group": "statistics-origins",
+    "formula": "=COVARIANCE.S({1},{2})"
+  },
+  {
+    "id": "statistics-origins-1654",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(COVARIANCE.S({1},{2}))"
+  },
+  {
+    "id": "statistics-origins-1655",
+    "group": "statistics-origins",
+    "formula": "=COVARIANCE.S({1;2},{3,4})"
+  },
+  {
+    "id": "statistics-origins-1656",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(COVARIANCE.S({1;2},{3,4}))"
+  },
+  {
+    "id": "statistics-origins-1657",
+    "group": "statistics-origins",
+    "formula": "=COVARIANCE.S({2,2,2},{1,2,3})"
+  },
+  {
+    "id": "statistics-origins-1658",
+    "group": "statistics-origins",
+    "formula": "=ERROR.TYPE(COVARIANCE.S({2,2,2},{1,2,3}))"
+  },
+  {
+    "id": "statistics-origins-1659",
+    "group": "statistics-origins",
+    "formula": "=STANDARDIZE(\"bad\",0,1)"
+  },
+  {
+    "id": "statistics-origins-1660",
+    "group": "statistics-origins",
+    "formula": "=STANDARDIZE(\" 3 \",0,1)"
+  },
+  {
+    "id": "statistics-origins-1661",
+    "group": "statistics-origins",
+    "formula": "=STANDARDIZE(Inputs!A3,0,1)"
+  },
+  {
+    "id": "statistics-origins-1662",
+    "group": "statistics-origins",
+    "formula": "=STANDARDIZE(NA(),0,1)"
+  },
+  {
+    "id": "statistics-arrays-1663",
+    "group": "statistics-arrays",
+    "formula": "=MODE.MULT({4,4,2,2})"
+  },
+  {
+    "id": "statistics-arrays-1664",
+    "group": "statistics-arrays",
+    "formula": "=SUM(MODE.MULT({4,4,2,2}))"
+  },
+  {
+    "id": "statistics-arrays-1665",
+    "group": "statistics-arrays",
+    "formula": "=INDEX(MODE.MULT({4,4,2,2}),2)"
+  },
+  {
+    "id": "statistics-arrays-1666",
+    "group": "statistics-arrays",
+    "formula": "=SUM(MODE.MULT({1,2,3}))"
+  },
+  {
+    "id": "statistics-arrays-1667",
+    "group": "statistics-arrays",
+    "formula": "=SUM(MODE.MULT({4,2;2,4}))"
+  },
+  {
+    "id": "statistics-arrays-1668",
+    "group": "statistics-arrays",
+    "formula": "=SUM(MODE.MULT({TRUE,1,FALSE,0,2}))"
+  },
+  {
+    "id": "statistics-arrays-1669",
+    "group": "statistics-arrays",
+    "formula": "=SUM(LARGE({1,2,3,4},{1,2,3}))"
+  },
+  {
+    "id": "statistics-arrays-1670",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3,4},{1,2,3})))"
+  },
+  {
+    "id": "statistics-arrays-1671",
+    "group": "statistics-arrays",
+    "formula": "=SUM(LARGE({1,2,3,4},{1;2;3}))"
+  },
+  {
+    "id": "statistics-arrays-1672",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3,4},{1;2;3})))"
+  },
+  {
+    "id": "statistics-arrays-1673",
+    "group": "statistics-arrays",
+    "formula": "=SUM(LARGE({1,2,3,4},{1,3;2,4}))"
+  },
+  {
+    "id": "statistics-arrays-1674",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3,4},{1,3;2,4})))"
+  },
+  {
+    "id": "statistics-arrays-1675",
+    "group": "statistics-arrays",
+    "formula": "=SUM(LARGE({1,2,3,4},{1.2,2.8}))"
+  },
+  {
+    "id": "statistics-arrays-1676",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3,4},{1.2,2.8})))"
+  },
+  {
+    "id": "statistics-arrays-1677",
+    "group": "statistics-arrays",
+    "formula": "=SUM(LARGE({1,2,3,4},{0,2}))"
+  },
+  {
+    "id": "statistics-arrays-1678",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3,4},{0,2})))"
+  },
+  {
+    "id": "statistics-arrays-1679",
+    "group": "statistics-arrays",
+    "formula": "=SUM(LARGE({1,2,3,4},{5,2}))"
+  },
+  {
+    "id": "statistics-arrays-1680",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3,4},{5,2})))"
+  },
+  {
+    "id": "statistics-arrays-1681",
+    "group": "statistics-arrays",
+    "formula": "=SUM(LARGE({1,2,3,4},{TRUE,2}))"
+  },
+  {
+    "id": "statistics-arrays-1682",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3,4},{TRUE,2})))"
+  },
+  {
+    "id": "statistics-arrays-1683",
+    "group": "statistics-arrays",
+    "formula": "=SUM(LARGE({1,2,3,4},{\"1\",2}))"
+  },
+  {
+    "id": "statistics-arrays-1684",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3,4},{\"1\",2})))"
+  },
+  {
+    "id": "statistics-arrays-1685",
+    "group": "statistics-arrays",
+    "formula": "=SUM(LARGE({1,2,3,4},{\"bad\",2}))"
+  },
+  {
+    "id": "statistics-arrays-1686",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3,4},{\"bad\",2})))"
+  },
+  {
+    "id": "statistics-arrays-1687",
+    "group": "statistics-arrays",
+    "formula": "=SUM(LARGE({1,2,3,4},{#N/A,2}))"
+  },
+  {
+    "id": "statistics-arrays-1688",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(LARGE({1,2,3,4},{#N/A,2})))"
+  },
+  {
+    "id": "statistics-arrays-1689",
+    "group": "statistics-arrays",
+    "formula": "=SUM(SMALL({1,2,3,4},{1,2,3}))"
+  },
+  {
+    "id": "statistics-arrays-1690",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},{1,2,3})))"
+  },
+  {
+    "id": "statistics-arrays-1691",
+    "group": "statistics-arrays",
+    "formula": "=SUM(SMALL({1,2,3,4},{1;2;3}))"
+  },
+  {
+    "id": "statistics-arrays-1692",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},{1;2;3})))"
+  },
+  {
+    "id": "statistics-arrays-1693",
+    "group": "statistics-arrays",
+    "formula": "=SUM(SMALL({1,2,3,4},{1,3;2,4}))"
+  },
+  {
+    "id": "statistics-arrays-1694",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},{1,3;2,4})))"
+  },
+  {
+    "id": "statistics-arrays-1695",
+    "group": "statistics-arrays",
+    "formula": "=SUM(SMALL({1,2,3,4},{1.2,2.8}))"
+  },
+  {
+    "id": "statistics-arrays-1696",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},{1.2,2.8})))"
+  },
+  {
+    "id": "statistics-arrays-1697",
+    "group": "statistics-arrays",
+    "formula": "=SUM(SMALL({1,2,3,4},{0,2}))"
+  },
+  {
+    "id": "statistics-arrays-1698",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},{0,2})))"
+  },
+  {
+    "id": "statistics-arrays-1699",
+    "group": "statistics-arrays",
+    "formula": "=SUM(SMALL({1,2,3,4},{5,2}))"
+  },
+  {
+    "id": "statistics-arrays-1700",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},{5,2})))"
+  },
+  {
+    "id": "statistics-arrays-1701",
+    "group": "statistics-arrays",
+    "formula": "=SUM(SMALL({1,2,3,4},{TRUE,2}))"
+  },
+  {
+    "id": "statistics-arrays-1702",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},{TRUE,2})))"
+  },
+  {
+    "id": "statistics-arrays-1703",
+    "group": "statistics-arrays",
+    "formula": "=SUM(SMALL({1,2,3,4},{\"1\",2}))"
+  },
+  {
+    "id": "statistics-arrays-1704",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},{\"1\",2})))"
+  },
+  {
+    "id": "statistics-arrays-1705",
+    "group": "statistics-arrays",
+    "formula": "=SUM(SMALL({1,2,3,4},{\"bad\",2}))"
+  },
+  {
+    "id": "statistics-arrays-1706",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},{\"bad\",2})))"
+  },
+  {
+    "id": "statistics-arrays-1707",
+    "group": "statistics-arrays",
+    "formula": "=SUM(SMALL({1,2,3,4},{#N/A,2}))"
+  },
+  {
+    "id": "statistics-arrays-1708",
+    "group": "statistics-arrays",
+    "formula": "=ERROR.TYPE(SUM(SMALL({1,2,3,4},{#N/A,2})))"
   }
 ]

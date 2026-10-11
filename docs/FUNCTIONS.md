@@ -1,7 +1,7 @@
 # Supported formula functions
 
 The owned M0 engine (`crates/omasheets-calc`) accepts exactly the
-180 function names listed below, grouped for reading.
+209 function names listed below, grouped for reading.
 A test in the calc crate fails when this file and the registry disagree, so
 the count here is never edited by hand: add the function to the registry and
 regenerate this list.
@@ -354,3 +354,39 @@ and matrix arguments use numeric results. SUM/SUMSQ and averages use Kahan
 accumulation with reverse scalar-argument order. Extreme cancellation can
 therefore differ between separate arguments and an array; this does not
 establish bit-identical precision across all input shapes and magnitudes.
+
+### Extended statistics
+
+- `MINA`
+- `MAXA`
+- `STDEVA`
+- `STDEVPA`
+- `VARA`
+- `VARPA`
+- `AVEDEV`
+- `DEVSQ`
+- `GEOMEAN`
+- `HARMEAN`
+- `MODE`
+- `MODE.SNGL`
+- `MODE.MULT`
+- `SKEW`
+- `SKEW.P`
+- `KURT`
+- `TRIMMEAN`
+- `PERCENTRANK`
+- `PERCENTRANK.INC`
+- `PERCENTRANK.EXC`
+- `RANK.EQ`
+- `STANDARDIZE`
+- `SLOPE`
+- `INTERCEPT`
+- `RSQ`
+- `STEYX`
+- `PEARSON`
+- `FORECAST`
+- `FORECAST.LINEAR`
+
+These functions share the owned evaluator and reference binding. Calc reference
+fixtures cover typed inputs, domains and empty collections. This inventory is
+not a claim of complete Calc semantics or workbook feature parity.

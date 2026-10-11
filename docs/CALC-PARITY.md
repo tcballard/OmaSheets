@@ -276,3 +276,29 @@ both original expressions and their independently observed 1/0 results. This
 known Calc export normalization is recorded rather than consulting the cache
 to choose calculation semantics. Five explicit logical ISNUMBER probes bring
 the next fresh reference suite to 949 cases.
+
+## Statistical families and arrays — 2026-10-11
+
+The next owned-engine increment adds text-inclusive extrema and dispersion,
+absolute/squared deviations, geometric/harmonic means, modes, skewness/kurtosis,
+percent ranks, trimmed means, standardization and linear regression. The registry
+has 209 accepted names including aliases; MODE.MULT and LARGE/SMALL selectors
+produce bounded intermediate arrays consumed by SUM, INDEX and other formulas.
+They do not spill into adjacent sheet cells.
+
+The reference suite now declares 1,708 cases. The first new 1,505-case reference
+workbook exposed 24 differences after the initial implementation. Fixes include
+logical observations in order statistics, exact rank equality, invalid percentile
+and rank domains, MINA empty paths, significant-digit rounding in PERCENTRANK,
+paired-array shape checks and empty/insufficient regression inputs. The current
+local scorer matches 1,504 of those 1,505 results; a GEOMEAN error-origin difference
+is under investigation. Additional direct/reference/array error probes and array
+result cases require a fresh reference run. These are not yet passing evidence.
+
+Source contracts are pinned `interpr1.cxx` (text-inclusive extrema/dispersion) and
+`interpr3.cxx` (number-sequence collection, ranking, percentiles, modes, moments
+and regression). The Rust implementation uses standard statistical algorithms;
+no LibreOffice implementation is copied or added to the product dependencies.
+A new owned session test imports 15 formulas, edits a precedent, checks dependent
+results, saves without flattening, and reopens native and XLSX documents; ZIP
+inspection independently checks updated formula caches and source preservation.

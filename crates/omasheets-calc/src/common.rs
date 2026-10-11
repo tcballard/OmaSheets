@@ -46,6 +46,7 @@ pub(super) fn elementwise(function: Function) -> bool {
             | Function::Ppmt
             | Function::Sln
             | Function::Syd
+            | Function::Standardize
     )
 }
 
@@ -88,7 +89,7 @@ impl Workbook {
                 | Function::QuartileExc
                 | Function::RankAvg
         ) {
-            return Some(self.common_statistic(function, arguments));
+            return Some(self.order_statistic(function, arguments));
         }
         if matches!(function, Function::CountBlank | Function::Xor) {
             let mut values = Vec::new();
@@ -105,91 +106,6 @@ impl Workbook {
             Some(error) => Value::Error(error),
             None => common_scalar(function, &values),
         })
-    }
-
-    fn common_statistic(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
-        let rank = function == Function::RankAvg;
-        if !(arguments.len() == 2 || (rank && arguments.len() == 3)) {
-            return Value::Error(CalcError::InvalidArguments);
-        }
-        let data_arg = if rank { &arguments[1] } else { &arguments[0] };
-        let mut values = Vec::new();
-        self.flatten_values(data_arg, &mut values);
-        if let Some(error) = first_error(&values) {
-            return Value::Error(error);
-        }
-        let mut data: Vec<_> = values
-            .iter()
-            .filter_map(|v| match v {
-                Value::Number(n) => Some(*n),
-                _ => None,
-            })
-            .collect();
-        if data.is_empty() {
-            return Value::Error(CalcError::InvalidNumber);
-        }
-        data.sort_by(f64::total_cmp);
-        let argument = if rank { &arguments[0] } else { &arguments[1] };
-        let n = match number(self.evaluate(argument)) {
-            Ok(n) => n,
-            Err(e) => return Value::Error(e),
-        };
-        let result = match function {
-            Function::Large | Function::Small => {
-                // Calc floors SMALL ranks and rounds LARGE ranks upward.
-                let k = if function == Function::Small {
-                    n.floor()
-                } else {
-                    n.ceil()
-                };
-                if k < 1.0 || k > data.len() as f64 {
-                    return Value::Error(CalcError::InvalidNumber);
-                }
-                data[if function == Function::Large {
-                    data.len() - k as usize
-                } else {
-                    k as usize - 1
-                }]
-            }
-            Function::RankAvg => {
-                if !data.contains(&n) {
-                    return Value::Error(CalcError::NotAvailable);
-                }
-                let ascending = match arguments.get(2) {
-                    None => false,
-                    Some(a) => match number(self.evaluate(a)) {
-                        Ok(n) => n != 0.0,
-                        Err(e) => return Value::Error(e),
-                    },
-                };
-                let before = data
-                    .iter()
-                    .filter(|&&v| if ascending { v < n } else { v > n })
-                    .count();
-                let equal = data.iter().filter(|&&v| v == n).count();
-                before as f64 + (equal as f64 + 1.0) / 2.0
-            }
-            _ => {
-                let quartile = matches!(function, Function::QuartileInc | Function::QuartileExc);
-                let fraction = if quartile { n.trunc() / 4.0 } else { n };
-                if !(0.0..=1.0).contains(&fraction) {
-                    return Value::Error(CalcError::InvalidNumber);
-                }
-                let exclusive = matches!(function, Function::PercentileExc | Function::QuartileExc);
-                let position = if exclusive {
-                    fraction * (data.len() + 1) as f64 - 1.0
-                } else {
-                    fraction * (data.len() - 1) as f64
-                };
-                if position < 0.0 || position > (data.len() - 1) as f64 {
-                    return Value::Error(CalcError::InvalidNumber);
-                }
-                let lo = position.floor() as usize;
-                let hi = position.ceil() as usize;
-                data[lo] + (data[hi] - data[lo]) * (position - lo as f64)
-            }
-        };
-        finite(result)
     }
 }
 
@@ -208,6 +124,34 @@ fn nums(values: &[Value], count: std::ops::RangeInclusive<usize>) -> Result<Vec<
 }
 fn common_scalar(function: Function, values: &[Value]) -> Value {
     match function {
+        Function::Standardize => {
+            if values.len() != 3 {
+                return Value::Error(CalcError::InvalidArguments);
+            }
+            let numbers = match values
+                .iter()
+                .map(|value| match value {
+                    Value::Text(text) => text
+                        .trim()
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|n| n.is_finite())
+                        .ok_or(CalcError::InvalidValue),
+                    value => number(value.clone()),
+                })
+                .collect::<Result<Vec<_>, _>>()
+            {
+                Ok(numbers) => numbers,
+                Err(error) => return Value::Error(error),
+            };
+            if numbers[2] < 0.0 {
+                Value::Error(CalcError::IllegalArgument)
+            } else if numbers[2] == 0.0 {
+                Value::Error(CalcError::DivisionByZero)
+            } else {
+                finite((numbers[0] - numbers[1]) / numbers[2])
+            }
+        }
         Function::Sin => unary_number(values, f64::sin),
         Function::Cos => unary_number(values, f64::cos),
         Function::Tan => unary_number(values, f64::tan),

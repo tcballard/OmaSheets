@@ -815,3 +815,97 @@ fn disabled_style_application_flags_with_conflicting_records_are_refused() {
     assert!(!working.exists());
     assert_eq!(fs::read(&source).unwrap(), original);
 }
+
+#[test]
+fn statistical_arrays_and_regression_survive_owned_edit_save_and_reopen() {
+    let fixture = Fixture::new();
+    let source = fixture.path("statistics.xlsx");
+    let working = fixture.path("statistics.omasheets");
+    let saved = fixture.path("statistics-saved.xlsx");
+    let formulas = [
+        ("C", "SLOPE(B1:B3,A1:A3)", 2.0),
+        ("D", "FORECAST.LINEAR(5,B1:B3,A1:A3)", 10.0),
+        ("E", "RANK.EQ(B2,B1:B3)", 2.0),
+        ("F", "PERCENTILE.INC(B1:B3,0.5)", 4.0),
+        ("G", "VARA(B1:B3)", 4.0),
+        ("H", "GEOMEAN(A1:A3)", 6.0_f64.cbrt()),
+        ("I", "HARMEAN(A1:A3)", 18.0 / 11.0),
+        ("J", "MINA(A1:A3,\"text\")", 0.0),
+        ("K", "SUM(MODE.MULT({4,4,2,2}))", 6.0),
+        ("L", "SUM(LARGE(B1:B3,{1,2}))", 10.0),
+        ("M", "TRIMMEAN(B1:B3,0)", 4.0),
+        ("N", "STANDARDIZE(B2,0,2)", 2.0),
+    ];
+    let mut cells =
+        String::from(r#"<row r="1"><c r="A1"><v>1</v></c><c r="B1"><f>A1*2</f><v>2</v></c>"#);
+    for (column, formula, value) in formulas {
+        cells.push_str(&format!(
+            "<c r=\"{column}1\"><f>{formula}</f><v>{value}</v></c>"
+        ));
+    }
+    cells.push_str(r#"</row><row r="2"><c r="A2"><v>2</v></c><c r="B2"><f>A2*2</f><v>4</v></c></row><row r="3"><c r="A3"><v>3</v></c><c r="B3"><f>A3*2</f><v>6</v></c></row>"#);
+    write_xlsx(&source, &cells, "", "", &[]);
+    let original = fs::read(&source).unwrap();
+    let admission = probe(&source).unwrap();
+    assert!(admission.can_import, "{:?}", admission.reasons);
+    let mut session = WorkbookSession::open_xlsx(&source, &working).unwrap();
+    let sheet = session.sheets().unwrap()[0].id.to_string();
+    let check = |session: &mut WorkbookSession, sheet: &str, expected: [f64; 12]| {
+        for (column, expected) in expected.into_iter().enumerate() {
+            assert!(
+                (number(session, sheet, 0, column + 2) - expected).abs() < 1e-12,
+                "column {column}"
+            );
+        }
+    };
+    check(&mut session, &sheet, formulas.map(|(_, _, value)| value));
+    let revision = session.revision().unwrap();
+    session
+        .edit(
+            &sheet,
+            &revision,
+            Action::SetCells {
+                row: 2,
+                column: 0,
+                values: vec![vec!["4".into()]],
+            },
+        )
+        .unwrap();
+    let expected = [
+        2.0,
+        10.0,
+        2.0,
+        4.0,
+        28.0 / 3.0,
+        2.0,
+        12.0 / 7.0,
+        0.0,
+        6.0,
+        12.0,
+        14.0 / 3.0,
+        2.0,
+    ];
+    check(&mut session, &sheet, expected);
+    let manifest = session.save_xlsx_copy(&saved).unwrap();
+    assert_eq!(manifest.formula_cells_preserved, 15);
+    assert_eq!(manifest.formula_cells_flattened, 0);
+    session.close().unwrap();
+    for mut reopened in [
+        WorkbookSession::open_native(&working).unwrap(),
+        WorkbookSession::open_xlsx(&saved, fixture.path("statistics-reimport.omasheets")).unwrap(),
+    ] {
+        let sheet = reopened.sheets().unwrap()[0].id.to_string();
+        check(&mut reopened, &sheet, expected);
+        reopened.close().unwrap();
+    }
+    let mut archive = zip::ZipArchive::new(File::open(&saved).unwrap()).unwrap();
+    let mut xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .unwrap()
+        .read_to_string(&mut xml)
+        .unwrap();
+    assert!(xml.contains("<f>A3*2</f><v>8</v>"));
+    assert!(xml.contains("<f>SUM(LARGE(B1:B3,{1,2}))</f><v>12</v>"));
+    assert_eq!(fs::read(&source).unwrap(), original);
+}
