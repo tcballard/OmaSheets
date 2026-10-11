@@ -4187,7 +4187,7 @@
   {
     "id": "aggregate-edges-0838",
     "group": "aggregate-edges",
-    "formula": "=LCM(Inputs!A5:A5)"
+    "formula": "=LCM(Inputs!A5:A6)"
   },
   {
     "id": "aggregate-edges-0839",
@@ -4718,5 +4718,30 @@
     "id": "aggregate-edges-0944",
     "group": "aggregate-edges",
     "formula": "=ERROR.TYPE(LCM(IF({0,1},{10,20})))"
+  },
+  {
+    "id": "aggregate-edges-0945",
+    "group": "aggregate-edges",
+    "formula": "=ISNUMBER(TRUE())"
+  },
+  {
+    "id": "aggregate-edges-0946",
+    "group": "aggregate-edges",
+    "formula": "=ISNUMBER(FALSE())"
+  },
+  {
+    "id": "aggregate-edges-0947",
+    "group": "aggregate-edges",
+    "formula": "=ISNUMBER(A797)"
+  },
+  {
+    "id": "aggregate-edges-0948",
+    "group": "aggregate-edges",
+    "formula": "=ISNUMBER(A798)"
+  },
+  {
+    "id": "aggregate-edges-0949",
+    "group": "aggregate-edges",
+    "formula": "=SUMPRODUCT(ISNUMBER({TRUE,FALSE,1,\"x\"})*1)"
   }
 ]

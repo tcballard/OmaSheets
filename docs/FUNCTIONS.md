@@ -323,7 +323,8 @@ standard codes 3 and 6; references, nested formulas and array evaluation
 propagate the origin until a formula handles it. This is a Calc compatibility
 boundary, not a claim of identical Excel error semantics.
 
-SUM, AVERAGE, MIN, MAX and PRODUCT count direct and array boolean arguments as 1/0 and
+SUM, AVERAGE, MIN, MAX, PRODUCT, SUMSQ and the dispersion aggregates count
+direct, reference and array boolean arguments as 1/0 and
 reject direct text under the measured Calc settings. Text members in arrays
 or references are ignored. COUNT accepts finite numeric scalar text and ignores
 scalar/reference errors; COUNTA counts those errors as occupied values. Error
@@ -336,3 +337,20 @@ Omitted IF branches in intermediate arrays are excluded from aggregates,
 whereas explicit FALSE members count as zero. TRANSPOSE and INDEX preserve
 the omitted-branch marker; arithmetic consumes its FALSE value. This keeps
 conditional averages/counts distinct from ordinary boolean arrays.
+
+PRODUCT with no numeric observations returns 0; MEDIAN with no observations
+returns `#VALUE!`. COUNTBLANK counts omitted IF paths as empty; AVERAGEA
+excludes them. Direct text is rejected by SUMSQ/MEDIAN/variance/deviation,
+while text in collections is ignored (AVERAGEA counts text as zero).
+GCD/LCM accept plain numeric scalar text; array text, omitted IF paths and
+negative inputs retain Calc argument-error origins. Empty single references
+count as zero in GCD/LCM, while empty ranges have no observations. Calc's
+GCD/LCM matrix boolean-run behaviour is preserved and differs from ordinary
+numeric/reference accumulation.
+
+ISNUMBER includes logical values under the Calc contract. MIN/MAX can retain
+the first numeric argument's reference logical type for 0/1 results; scalar
+and matrix arguments use numeric results. SUM/SUMSQ and averages use Kahan
+accumulation with reverse scalar-argument order. Extreme cancellation can
+therefore differ between separate arguments and an array; this does not
+establish bit-identical precision across all input shapes and magnitudes.

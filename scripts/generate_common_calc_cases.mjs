@@ -186,7 +186,10 @@ for (const name of ['SUM','AVERAGE','MIN','MAX','PRODUCT','COUNT','COUNTA','SUMS
   }
 }
 for (const name of ['SUM','AVERAGE','MIN','MAX','PRODUCT','COUNT','COUNTA','SUMSQ','MEDIAN','STDEV','STDEVP','VAR','VARP','AVERAGEA','GCD','LCM']) {
-  add('aggregate-edges', `=${name}(Inputs!A5:A5)`);
+  // Calc canonicalizes A5:A5 to A5 in XLSX even where the cached result differs
+  // (LCM: empty range = 1, empty scalar reference = 0). Use a real rectangle
+  // for the imported-range probe; the engine separately tests both expressions.
+  add('aggregate-edges', `=${name}(Inputs!A5:${name === 'LCM' ? 'A6' : 'A5'})`);
 }
 for (const name of ['SUMSQ','MEDIAN','STDEV','STDEVP','VAR','VARP','AVERAGEA','GCD','LCM']) {
   for (const args of ['TRUE(),2', '"3",2', '"bad",2', '{TRUE,2}', '{"3",2}', 'IF({0,1},{10,20})']) {
@@ -215,6 +218,10 @@ for (const name of ['GCD','LCM']) {
     add('aggregate-edges', `=ERROR.TYPE(${name}(${arg}))`);
   }
 }
+for (const arg of ['TRUE()', 'FALSE()', `A${logicalRow}`, `A${logicalRow + 1}`]) {
+  add('aggregate-edges', `=ISNUMBER(${arg})`);
+}
+add('aggregate-edges', '=SUMPRODUCT(ISNUMBER({TRUE,FALSE,1,"x"})*1)');
 writeFileSync('tests/calc-parity/common.json',JSON.stringify(cases,null,2)+'\n');
 const counts={};for(const c of cases) counts[c.group]=(counts[c.group]??0)+1;
 console.log(JSON.stringify({cases:cases.length,groups:counts}));

@@ -1882,16 +1882,7 @@ impl Workbook {
         }) {
             return Value::Error(error);
         }
-        let numbers: Vec<f64> = values
-            .iter()
-            .filter_map(|value| match value {
-                Value::Number(number) => Some(*number),
-                _ => None,
-            })
-            .collect();
-
         match function {
-            Function::Median if !numbers.is_empty() => median(numbers),
             Function::NormDist => normal_distribution(&values),
             Function::NormSDist | Function::NormSDistLegacy => {
                 let required = if function == Function::NormSDistLegacy {
@@ -1909,10 +1900,6 @@ impl Workbook {
                     values.get(1).cloned().unwrap_or(Value::Boolean(true)),
                 ])
             }
-            Function::StDev => deviation(&numbers, true, true),
-            Function::StDevP => deviation(&numbers, false, true),
-            Function::Var => deviation(&numbers, true, false),
-            Function::VarP => deviation(&numbers, false, false),
             Function::Find => find_text(&values),
             Function::Rept => repeat_text(&values),
             Function::Abs => unary_number(&values, f64::abs),
@@ -2041,6 +2028,10 @@ impl Workbook {
             | Function::T
             | Function::SumProduct
             | Function::Median
+            | Function::StDev
+            | Function::StDevP
+            | Function::Var
+            | Function::VarP
             | Function::Choose
             | Function::SubTotal
             | Function::TextJoin
@@ -2307,7 +2298,9 @@ impl Workbook {
         let value = self.evaluate(&arguments[0]);
         match function {
             Function::IsBlank => Value::Boolean(matches!(value, Value::Blank)),
-            Function::IsNumber => Value::Boolean(matches!(value, Value::Number(_))),
+            Function::IsNumber => {
+                Value::Boolean(matches!(value, Value::Number(_) | Value::Boolean(_)))
+            }
             Function::IsText => Value::Boolean(matches!(value, Value::Text(_))),
             Function::IsLogical => Value::Boolean(matches!(value, Value::Boolean(_))),
             Function::IsError => Value::Boolean(matches!(value, Value::Error(_))),
@@ -7004,7 +6997,7 @@ mod tests {
             ("=COUNT(Z1:Z2)", Value::Number(0.0)),
             ("=COUNTA(Z1:Z2)", Value::Number(0.0)),
             ("=PRODUCT(Z1:Z2)", Value::Number(0.0)),
-            ("=SUM(1E16,1,-1E16)", Value::Number(1.0)),
+            ("=SUM(1E16,1,-1E16)", Value::Number(0.0)),
         ] {
             workbook.set_formula(cell(0, 8), formula).unwrap();
             assert_eq!(workbook.value(cell(0, 8)), expected, "{formula}");

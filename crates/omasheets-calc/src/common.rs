@@ -90,10 +90,7 @@ impl Workbook {
         ) {
             return Some(self.common_statistic(function, arguments));
         }
-        if matches!(
-            function,
-            Function::CountBlank | Function::Gcd | Function::Lcm | Function::Xor
-        ) {
+        if matches!(function, Function::CountBlank | Function::Xor) {
             let mut values = Vec::new();
             for arg in arguments {
                 self.flatten_values(arg, &mut values);
@@ -394,7 +391,7 @@ fn common_aggregate(function: Function, values: &[Value], arguments: usize) -> V
     unreachable!("COUNTBLANK or XOR only")
 }
 
-pub(super) fn integer_aggregate(function: Function, values: &[Value]) -> Value {
+pub(super) fn integer_aggregate(function: Function, values: &[Value], matrix: bool) -> Value {
     if let Some(error) = first_error(values) {
         return Value::Error(error);
     }
@@ -403,14 +400,23 @@ pub(super) fn integer_aggregate(function: Function, values: &[Value]) -> Value {
     } else {
         1u64
     };
+    let mut boolean_block = false;
     for value in values {
         if matches!(value, Value::Blank | Value::Text(_)) {
             continue;
         }
         let n = match number(value.clone()) {
             Ok(n) if (0.0..=9_007_199_254_740_991.0).contains(&n) => n.trunc() as u64,
+            Ok(n) if n < 0.0 => return Value::Error(CalcError::IllegalArgument),
             _ => return Value::Error(CalcError::InvalidNumber),
         };
+        let is_boolean = matches!(value, Value::Boolean(_));
+        if matrix && is_boolean && !boolean_block {
+            // Calc's matrix reducer starts a new result for each boolean run;
+            // this differs from ordinary reference/scalar accumulation.
+            result = if function == Function::Gcd { 0 } else { 1 };
+        }
+        boolean_block = is_boolean;
         let (mut a, mut b) = (result, n);
         while b != 0 {
             (a, b) = (b, a % b);

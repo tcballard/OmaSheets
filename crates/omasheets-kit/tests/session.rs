@@ -246,6 +246,88 @@ fn common_calculations_survive_edits_and_owned_xlsx_round_trip() {
 }
 
 #[test]
+fn aggregate_logical_dependencies_survive_owned_edit_save_and_reopen() {
+    let fixture = Fixture::new();
+    let source = fixture.path("aggregate.xlsx");
+    let working = fixture.path("aggregate.omasheets");
+    let saved = fixture.path("aggregate-saved.xlsx");
+    write_xlsx(
+        &source,
+        r#"<row r="1">
+        <c r="A1" t="b"><f>TRUE()</f><v>1</v></c>
+        <c r="B1"><f>SUM(A1:A2,2)</f><v>3</v></c>
+        <c r="C1"><f>COUNT(A1:A2,2)</f><v>3</v></c>
+        <c r="D1"><f>SUMSQ(A1:A2,2)</f><v>5</v></c>
+        <c r="E1"><f>MEDIAN(A1:A2,2)</f><v>1</v></c>
+        <c r="F1"><f>VAR(A1:A2,2)</f><v>1</v></c>
+        <c r="G1"><f>PRODUCT(A1:A2,2)</f><v>0</v></c>
+        <c r="H1"><f>AVERAGEA(IF({0,1},{10,20}))</f><v>20</v></c>
+        <c r="I1"><f>COUNTBLANK(IF({0,1},{10,20}))</f><v>1</v></c>
+        <c r="J1"><f>GCD("3",2)</f><v>1</v></c>
+        <c r="K1"><f>SUM({1E16,-1E16,1})</f><v>1</v></c></row>
+        <row r="2"><c r="A2" t="b"><f>FALSE()</f><v>0</v></c></row>"#,
+        "",
+        "",
+        &[],
+    );
+    let original = fs::read(&source).unwrap();
+    let admission = probe(&source).unwrap();
+    assert!(admission.can_import, "{:?}", admission.reasons);
+    let mut session = WorkbookSession::open_xlsx(&source, &working).unwrap();
+    let sheet = session.sheets().unwrap()[0].id.to_string();
+    let check = |session: &mut WorkbookSession, sheet: &str, expected: [f64; 10]| {
+        for (column, expected) in expected.into_iter().enumerate() {
+            assert!(
+                (number(session, sheet, 0, column + 1) - expected).abs() < 1e-12,
+                "column {column}"
+            );
+        }
+    };
+    check(
+        &mut session,
+        &sheet,
+        [3.0, 3.0, 5.0, 1.0, 1.0, 0.0, 20.0, 1.0, 1.0, 1.0],
+    );
+    let revision = session.revision().unwrap();
+    session
+        .edit(
+            &sheet,
+            &revision,
+            Action::SetCells {
+                row: 0,
+                column: 0,
+                values: vec![vec!["=FALSE()".into()]],
+            },
+        )
+        .unwrap();
+    let expected = [2.0, 3.0, 4.0, 0.0, 4.0 / 3.0, 0.0, 20.0, 1.0, 1.0, 1.0];
+    check(&mut session, &sheet, expected);
+    let manifest = session.save_xlsx_copy(&saved).unwrap();
+    assert_eq!(manifest.formula_cells_preserved, 12);
+    assert_eq!(manifest.formula_cells_flattened, 0);
+    session.close().unwrap();
+    for mut reopened in [
+        WorkbookSession::open_native(&working).unwrap(),
+        WorkbookSession::open_xlsx(&saved, fixture.path("aggregate-reimport.omasheets")).unwrap(),
+    ] {
+        let sheet = reopened.sheets().unwrap()[0].id.to_string();
+        check(&mut reopened, &sheet, expected);
+        reopened.close().unwrap();
+    }
+    let mut archive = zip::ZipArchive::new(File::open(&saved).unwrap()).unwrap();
+    let mut xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .unwrap()
+        .read_to_string(&mut xml)
+        .unwrap();
+    assert!(xml.contains("<f>SUM(A1:A2,2)</f><v>2</v>"));
+    assert!(xml.contains("<f>SUMSQ(A1:A2,2)</f><v>4</v>"));
+    assert!(xml.contains("<f>SUM({1E16,-1E16,1})</f><v>1</v>"));
+    assert_eq!(fs::read(&source).unwrap(), original);
+}
+
+#[test]
 fn calculation_origins_survive_edits_and_native_and_xlsx_reopening() {
     let fixture = Fixture::new();
     let source = fixture.path("errors.xlsx");

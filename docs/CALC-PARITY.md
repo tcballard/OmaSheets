@@ -222,3 +222,57 @@ consumes the value. Ten regression probes cover explicit versus omitted
 branches, inspection, nesting, transpose, selection and arithmetic, yielding
 796 reference cases. The source contract is `ScMatrixImpl::IsEmptyPath`,
 `CountElements` and `ScMatrixImpl::IfJump` in pinned `scmatrix.cxx`.
+
+The fresh 796-case run at `e7b73c4` matched every case with no refusals or
+exceptions. All product CI checks subsequently passed, including the complete
+Rust workspace, Qt, compiler-free Arch install and package lifecycle.
+
+## Aggregate provenance and precision follow-up — 2026-10-11
+
+The next 108 probes deliberately use TRUE/FALSE formula cells, preserving
+logical results through XLSX instead of relying on normalized literal input
+cells. The first 904-case run matched 844 cases. Of its 60 discrepancies,
+55 were calculation differences and five were reference-generator defects:
+the exponent token in `1E16` had been translated as a cell address. The
+generator now consumes complete numeric tokens, with a regression assertion
+covering exponent signs, lowercase exponents, decimals and a genuine A16
+reference. The precision cases remain and require fresh Calc results.
+
+The Rust aggregates now share argument-provenance-aware sparse traversal.
+Logical references participate numerically; scalar text remains distinct from
+text in a collection. SUMSQ, MEDIAN, variance and standard deviation now use
+the correct coercion path. PRODUCT with no numeric observations returns zero;
+an empty MEDIAN returns the standard value error. AVERAGEA excludes omitted
+IF branches, while COUNTBLANK counts them. GCD/LCM distinguish direct numeric
+text from array text and retain argument-error origins. Compensated summation
+follows measured argument-order and cancellation behaviour in SUM, SUMSQ and averages. These
+changes do not establish bit-identical floating-point behaviour in all Calc
+functions.
+
+Reference contracts include `IterateParameters` and `lcl_IterResult` in
+`interpr6.cxx`, `ScMin`/`ScMax`, `GetStVarParams` and `ScCountEmptyCells` in
+`interpr1.cxx`, `GetNumberSequenceArray` in `interpr3.cxx`, `ScGCD`/`ScLCM`
+in `interpr5.cxx`, and matrix `CalcGcdLcm` in `scmatrix.cxx`, all at the
+source commit pinned above. No upstream implementation is copied.
+
+An additional product regression edits a logical formula, checks ten dependent
+aggregate results, saves all 12 formulas without flattening, reopens native
+and XLSX documents, and independently inspects exported caches. The original
+source file remains byte-for-byte unchanged.
+
+The fresh 944-case run matched 930. It confirmed all earlier coercion fixes
+but rejected Neumaier summation as a Calc substitute: these extreme
+cancellations require Kahan accumulation and reverse scalar-argument order,
+with array order preserved. Calc also reports logical values as ISNUMBER,
+and its GCD/LCM matrix reducer resets on boolean runs. The next increment
+implements those measured distinctions and negative-argument error origins.
+
+One fixture exposed an interchange ambiguity rather than a distinguishable
+calculation input: Calc exports `LCM(Inputs!A5:A5)` as `LCM(Inputs!A5)` with
+cache 1, while the genuine scalar-reference formula has cache 0. Identical
+serialized formulas cannot carry these two meanings in the owned engine.
+The empty-range XLSX fixture therefore uses `A5:A6`; native regressions retain
+both original expressions and their independently observed 1/0 results. This
+known Calc export normalization is recorded rather than consulting the cache
+to choose calculation semantics. Five explicit logical ISNUMBER probes bring
+the next fresh reference suite to 949 cases.
