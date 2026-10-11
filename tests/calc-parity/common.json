@@ -3978,5 +3978,545 @@
     "id": "coercion-0796",
     "group": "coercion",
     "formula": "=AVERAGE(IF({1,1},IF({0,1},{10,20}),0))"
+  },
+  {
+    "id": "aggregate-edges-0797",
+    "group": "aggregate-edges",
+    "formula": "=TRUE()"
+  },
+  {
+    "id": "aggregate-edges-0798",
+    "group": "aggregate-edges",
+    "formula": "=FALSE()"
+  },
+  {
+    "id": "aggregate-edges-0799",
+    "group": "aggregate-edges",
+    "formula": "=SUM(A797,2)"
+  },
+  {
+    "id": "aggregate-edges-0800",
+    "group": "aggregate-edges",
+    "formula": "=SUM(A797:A798,2)"
+  },
+  {
+    "id": "aggregate-edges-0801",
+    "group": "aggregate-edges",
+    "formula": "=AVERAGE(A797,2)"
+  },
+  {
+    "id": "aggregate-edges-0802",
+    "group": "aggregate-edges",
+    "formula": "=AVERAGE(A797:A798,2)"
+  },
+  {
+    "id": "aggregate-edges-0803",
+    "group": "aggregate-edges",
+    "formula": "=MIN(A797,2)"
+  },
+  {
+    "id": "aggregate-edges-0804",
+    "group": "aggregate-edges",
+    "formula": "=MIN(A797:A798,2)"
+  },
+  {
+    "id": "aggregate-edges-0805",
+    "group": "aggregate-edges",
+    "formula": "=MAX(A797,2)"
+  },
+  {
+    "id": "aggregate-edges-0806",
+    "group": "aggregate-edges",
+    "formula": "=MAX(A797:A798,2)"
+  },
+  {
+    "id": "aggregate-edges-0807",
+    "group": "aggregate-edges",
+    "formula": "=PRODUCT(A797,2)"
+  },
+  {
+    "id": "aggregate-edges-0808",
+    "group": "aggregate-edges",
+    "formula": "=PRODUCT(A797:A798,2)"
+  },
+  {
+    "id": "aggregate-edges-0809",
+    "group": "aggregate-edges",
+    "formula": "=COUNT(A797,2)"
+  },
+  {
+    "id": "aggregate-edges-0810",
+    "group": "aggregate-edges",
+    "formula": "=COUNT(A797:A798,2)"
+  },
+  {
+    "id": "aggregate-edges-0811",
+    "group": "aggregate-edges",
+    "formula": "=COUNTA(A797,2)"
+  },
+  {
+    "id": "aggregate-edges-0812",
+    "group": "aggregate-edges",
+    "formula": "=COUNTA(A797:A798,2)"
+  },
+  {
+    "id": "aggregate-edges-0813",
+    "group": "aggregate-edges",
+    "formula": "=SUMSQ(A797,2)"
+  },
+  {
+    "id": "aggregate-edges-0814",
+    "group": "aggregate-edges",
+    "formula": "=SUMSQ(A797:A798,2)"
+  },
+  {
+    "id": "aggregate-edges-0815",
+    "group": "aggregate-edges",
+    "formula": "=MEDIAN(A797,2)"
+  },
+  {
+    "id": "aggregate-edges-0816",
+    "group": "aggregate-edges",
+    "formula": "=MEDIAN(A797:A798,2)"
+  },
+  {
+    "id": "aggregate-edges-0817",
+    "group": "aggregate-edges",
+    "formula": "=STDEV(A797,2)"
+  },
+  {
+    "id": "aggregate-edges-0818",
+    "group": "aggregate-edges",
+    "formula": "=STDEV(A797:A798,2)"
+  },
+  {
+    "id": "aggregate-edges-0819",
+    "group": "aggregate-edges",
+    "formula": "=VAR(A797,2)"
+  },
+  {
+    "id": "aggregate-edges-0820",
+    "group": "aggregate-edges",
+    "formula": "=VAR(A797:A798,2)"
+  },
+  {
+    "id": "aggregate-edges-0821",
+    "group": "aggregate-edges",
+    "formula": "=AVERAGEA(A797,2)"
+  },
+  {
+    "id": "aggregate-edges-0822",
+    "group": "aggregate-edges",
+    "formula": "=AVERAGEA(A797:A798,2)"
+  },
+  {
+    "id": "aggregate-edges-0823",
+    "group": "aggregate-edges",
+    "formula": "=SUM(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0824",
+    "group": "aggregate-edges",
+    "formula": "=AVERAGE(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0825",
+    "group": "aggregate-edges",
+    "formula": "=MIN(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0826",
+    "group": "aggregate-edges",
+    "formula": "=MAX(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0827",
+    "group": "aggregate-edges",
+    "formula": "=PRODUCT(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0828",
+    "group": "aggregate-edges",
+    "formula": "=COUNT(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0829",
+    "group": "aggregate-edges",
+    "formula": "=COUNTA(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0830",
+    "group": "aggregate-edges",
+    "formula": "=SUMSQ(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0831",
+    "group": "aggregate-edges",
+    "formula": "=MEDIAN(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0832",
+    "group": "aggregate-edges",
+    "formula": "=STDEV(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0833",
+    "group": "aggregate-edges",
+    "formula": "=STDEVP(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0834",
+    "group": "aggregate-edges",
+    "formula": "=VAR(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0835",
+    "group": "aggregate-edges",
+    "formula": "=VARP(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0836",
+    "group": "aggregate-edges",
+    "formula": "=AVERAGEA(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0837",
+    "group": "aggregate-edges",
+    "formula": "=GCD(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0838",
+    "group": "aggregate-edges",
+    "formula": "=LCM(Inputs!A5:A5)"
+  },
+  {
+    "id": "aggregate-edges-0839",
+    "group": "aggregate-edges",
+    "formula": "=SUMSQ(TRUE(),2)"
+  },
+  {
+    "id": "aggregate-edges-0840",
+    "group": "aggregate-edges",
+    "formula": "=SUMSQ(\"3\",2)"
+  },
+  {
+    "id": "aggregate-edges-0841",
+    "group": "aggregate-edges",
+    "formula": "=SUMSQ(\"bad\",2)"
+  },
+  {
+    "id": "aggregate-edges-0842",
+    "group": "aggregate-edges",
+    "formula": "=SUMSQ({TRUE,2})"
+  },
+  {
+    "id": "aggregate-edges-0843",
+    "group": "aggregate-edges",
+    "formula": "=SUMSQ({\"3\",2})"
+  },
+  {
+    "id": "aggregate-edges-0844",
+    "group": "aggregate-edges",
+    "formula": "=SUMSQ(IF({0,1},{10,20}))"
+  },
+  {
+    "id": "aggregate-edges-0845",
+    "group": "aggregate-edges",
+    "formula": "=MEDIAN(TRUE(),2)"
+  },
+  {
+    "id": "aggregate-edges-0846",
+    "group": "aggregate-edges",
+    "formula": "=MEDIAN(\"3\",2)"
+  },
+  {
+    "id": "aggregate-edges-0847",
+    "group": "aggregate-edges",
+    "formula": "=MEDIAN(\"bad\",2)"
+  },
+  {
+    "id": "aggregate-edges-0848",
+    "group": "aggregate-edges",
+    "formula": "=MEDIAN({TRUE,2})"
+  },
+  {
+    "id": "aggregate-edges-0849",
+    "group": "aggregate-edges",
+    "formula": "=MEDIAN({\"3\",2})"
+  },
+  {
+    "id": "aggregate-edges-0850",
+    "group": "aggregate-edges",
+    "formula": "=MEDIAN(IF({0,1},{10,20}))"
+  },
+  {
+    "id": "aggregate-edges-0851",
+    "group": "aggregate-edges",
+    "formula": "=STDEV(TRUE(),2)"
+  },
+  {
+    "id": "aggregate-edges-0852",
+    "group": "aggregate-edges",
+    "formula": "=STDEV(\"3\",2)"
+  },
+  {
+    "id": "aggregate-edges-0853",
+    "group": "aggregate-edges",
+    "formula": "=STDEV(\"bad\",2)"
+  },
+  {
+    "id": "aggregate-edges-0854",
+    "group": "aggregate-edges",
+    "formula": "=STDEV({TRUE,2})"
+  },
+  {
+    "id": "aggregate-edges-0855",
+    "group": "aggregate-edges",
+    "formula": "=STDEV({\"3\",2})"
+  },
+  {
+    "id": "aggregate-edges-0856",
+    "group": "aggregate-edges",
+    "formula": "=STDEV(IF({0,1},{10,20}))"
+  },
+  {
+    "id": "aggregate-edges-0857",
+    "group": "aggregate-edges",
+    "formula": "=STDEVP(TRUE(),2)"
+  },
+  {
+    "id": "aggregate-edges-0858",
+    "group": "aggregate-edges",
+    "formula": "=STDEVP(\"3\",2)"
+  },
+  {
+    "id": "aggregate-edges-0859",
+    "group": "aggregate-edges",
+    "formula": "=STDEVP(\"bad\",2)"
+  },
+  {
+    "id": "aggregate-edges-0860",
+    "group": "aggregate-edges",
+    "formula": "=STDEVP({TRUE,2})"
+  },
+  {
+    "id": "aggregate-edges-0861",
+    "group": "aggregate-edges",
+    "formula": "=STDEVP({\"3\",2})"
+  },
+  {
+    "id": "aggregate-edges-0862",
+    "group": "aggregate-edges",
+    "formula": "=STDEVP(IF({0,1},{10,20}))"
+  },
+  {
+    "id": "aggregate-edges-0863",
+    "group": "aggregate-edges",
+    "formula": "=VAR(TRUE(),2)"
+  },
+  {
+    "id": "aggregate-edges-0864",
+    "group": "aggregate-edges",
+    "formula": "=VAR(\"3\",2)"
+  },
+  {
+    "id": "aggregate-edges-0865",
+    "group": "aggregate-edges",
+    "formula": "=VAR(\"bad\",2)"
+  },
+  {
+    "id": "aggregate-edges-0866",
+    "group": "aggregate-edges",
+    "formula": "=VAR({TRUE,2})"
+  },
+  {
+    "id": "aggregate-edges-0867",
+    "group": "aggregate-edges",
+    "formula": "=VAR({\"3\",2})"
+  },
+  {
+    "id": "aggregate-edges-0868",
+    "group": "aggregate-edges",
+    "formula": "=VAR(IF({0,1},{10,20}))"
+  },
+  {
+    "id": "aggregate-edges-0869",
+    "group": "aggregate-edges",
+    "formula": "=VARP(TRUE(),2)"
+  },
+  {
+    "id": "aggregate-edges-0870",
+    "group": "aggregate-edges",
+    "formula": "=VARP(\"3\",2)"
+  },
+  {
+    "id": "aggregate-edges-0871",
+    "group": "aggregate-edges",
+    "formula": "=VARP(\"bad\",2)"
+  },
+  {
+    "id": "aggregate-edges-0872",
+    "group": "aggregate-edges",
+    "formula": "=VARP({TRUE,2})"
+  },
+  {
+    "id": "aggregate-edges-0873",
+    "group": "aggregate-edges",
+    "formula": "=VARP({\"3\",2})"
+  },
+  {
+    "id": "aggregate-edges-0874",
+    "group": "aggregate-edges",
+    "formula": "=VARP(IF({0,1},{10,20}))"
+  },
+  {
+    "id": "aggregate-edges-0875",
+    "group": "aggregate-edges",
+    "formula": "=AVERAGEA(TRUE(),2)"
+  },
+  {
+    "id": "aggregate-edges-0876",
+    "group": "aggregate-edges",
+    "formula": "=AVERAGEA(\"3\",2)"
+  },
+  {
+    "id": "aggregate-edges-0877",
+    "group": "aggregate-edges",
+    "formula": "=AVERAGEA(\"bad\",2)"
+  },
+  {
+    "id": "aggregate-edges-0878",
+    "group": "aggregate-edges",
+    "formula": "=AVERAGEA({TRUE,2})"
+  },
+  {
+    "id": "aggregate-edges-0879",
+    "group": "aggregate-edges",
+    "formula": "=AVERAGEA({\"3\",2})"
+  },
+  {
+    "id": "aggregate-edges-0880",
+    "group": "aggregate-edges",
+    "formula": "=AVERAGEA(IF({0,1},{10,20}))"
+  },
+  {
+    "id": "aggregate-edges-0881",
+    "group": "aggregate-edges",
+    "formula": "=GCD(TRUE(),2)"
+  },
+  {
+    "id": "aggregate-edges-0882",
+    "group": "aggregate-edges",
+    "formula": "=GCD(\"3\",2)"
+  },
+  {
+    "id": "aggregate-edges-0883",
+    "group": "aggregate-edges",
+    "formula": "=GCD(\"bad\",2)"
+  },
+  {
+    "id": "aggregate-edges-0884",
+    "group": "aggregate-edges",
+    "formula": "=GCD({TRUE,2})"
+  },
+  {
+    "id": "aggregate-edges-0885",
+    "group": "aggregate-edges",
+    "formula": "=GCD({\"3\",2})"
+  },
+  {
+    "id": "aggregate-edges-0886",
+    "group": "aggregate-edges",
+    "formula": "=GCD(IF({0,1},{10,20}))"
+  },
+  {
+    "id": "aggregate-edges-0887",
+    "group": "aggregate-edges",
+    "formula": "=LCM(TRUE(),2)"
+  },
+  {
+    "id": "aggregate-edges-0888",
+    "group": "aggregate-edges",
+    "formula": "=LCM(\"3\",2)"
+  },
+  {
+    "id": "aggregate-edges-0889",
+    "group": "aggregate-edges",
+    "formula": "=LCM(\"bad\",2)"
+  },
+  {
+    "id": "aggregate-edges-0890",
+    "group": "aggregate-edges",
+    "formula": "=LCM({TRUE,2})"
+  },
+  {
+    "id": "aggregate-edges-0891",
+    "group": "aggregate-edges",
+    "formula": "=LCM({\"3\",2})"
+  },
+  {
+    "id": "aggregate-edges-0892",
+    "group": "aggregate-edges",
+    "formula": "=LCM(IF({0,1},{10,20}))"
+  },
+  {
+    "id": "aggregate-edges-0893",
+    "group": "aggregate-edges",
+    "formula": "=PRODUCT({\"text\"})"
+  },
+  {
+    "id": "aggregate-edges-0894",
+    "group": "aggregate-edges",
+    "formula": "=PRODUCT(IF({0,0},{10,20}))"
+  },
+  {
+    "id": "aggregate-edges-0895",
+    "group": "aggregate-edges",
+    "formula": "=COUNTBLANK(IF({0,1},{10,20}))"
+  },
+  {
+    "id": "aggregate-edges-0896",
+    "group": "aggregate-edges",
+    "formula": "=COUNTBLANK(IF({0,1},{10,20},\"\"))"
+  },
+  {
+    "id": "aggregate-edges-0897",
+    "group": "aggregate-edges",
+    "formula": "=SUM(1E16,1,-1E16)"
+  },
+  {
+    "id": "aggregate-edges-0898",
+    "group": "aggregate-edges",
+    "formula": "=SUM({1E16,1,-1E16})"
+  },
+  {
+    "id": "aggregate-edges-0899",
+    "group": "aggregate-edges",
+    "formula": "=SUM(1E16,-1E16,1)"
+  },
+  {
+    "id": "aggregate-edges-0900",
+    "group": "aggregate-edges",
+    "formula": "=SUM({1E16,-1E16,1})"
+  },
+  {
+    "id": "aggregate-edges-0901",
+    "group": "aggregate-edges",
+    "formula": "=AVERAGE({1E16,1,-1E16})"
+  },
+  {
+    "id": "aggregate-edges-0902",
+    "group": "aggregate-edges",
+    "formula": "=SUM(0.1,0.2,-0.3)"
+  },
+  {
+    "id": "aggregate-edges-0903",
+    "group": "aggregate-edges",
+    "formula": "=STDEV({10000000001,10000000002,10000000003})"
+  },
+  {
+    "id": "aggregate-edges-0904",
+    "group": "aggregate-edges",
+    "formula": "=VAR({10000000001,10000000002,10000000003})"
   }
 ]

@@ -175,6 +175,33 @@ for (const formula of [
   '=COUNT(IF({0,1},{10,20},FALSE()))',
   '=AVERAGE(IF({1,1},IF({0,1},{10,20}),0))',
 ]) add('coercion', formula);
+// Preserve boolean formula results through real cell dependencies, rather than
+// relying on XLSX's normalization of literal boolean input cells to numbers.
+const logicalRow = cases.length + 1;
+add('aggregate-edges', '=TRUE()');
+add('aggregate-edges', '=FALSE()');
+for (const name of ['SUM','AVERAGE','MIN','MAX','PRODUCT','COUNT','COUNTA','SUMSQ','MEDIAN','STDEV','VAR','AVERAGEA']) {
+  for (const arg of [`A${logicalRow}`, `A${logicalRow}:A${logicalRow + 1}`]) {
+    add('aggregate-edges', `=${name}(${arg},2)`);
+  }
+}
+for (const name of ['SUM','AVERAGE','MIN','MAX','PRODUCT','COUNT','COUNTA','SUMSQ','MEDIAN','STDEV','STDEVP','VAR','VARP','AVERAGEA','GCD','LCM']) {
+  add('aggregate-edges', `=${name}(Inputs!A5:A5)`);
+}
+for (const name of ['SUMSQ','MEDIAN','STDEV','STDEVP','VAR','VARP','AVERAGEA','GCD','LCM']) {
+  for (const args of ['TRUE(),2', '"3",2', '"bad",2', '{TRUE,2}', '{"3",2}', 'IF({0,1},{10,20})']) {
+    add('aggregate-edges', `=${name}(${args})`);
+  }
+}
+for (const formula of [
+  '=PRODUCT({"text"})', '=PRODUCT(IF({0,0},{10,20}))',
+  '=COUNTBLANK(IF({0,1},{10,20}))', '=COUNTBLANK(IF({0,1},{10,20},""))',
+  '=SUM(1E16,1,-1E16)', '=SUM({1E16,1,-1E16})',
+  '=SUM(1E16,-1E16,1)', '=SUM({1E16,-1E16,1})',
+  '=AVERAGE({1E16,1,-1E16})', '=SUM(0.1,0.2,-0.3)',
+  '=STDEV({10000000001,10000000002,10000000003})',
+  '=VAR({10000000001,10000000002,10000000003})',
+]) add('aggregate-edges', formula);
 writeFileSync('tests/calc-parity/common.json',JSON.stringify(cases,null,2)+'\n');
 const counts={};for(const c of cases) counts[c.group]=(counts[c.group]??0)+1;
 console.log(JSON.stringify({cases:cases.length,groups:counts}));
