@@ -222,6 +222,57 @@ for (const arg of ['TRUE()', 'FALSE()', `A${logicalRow}`, `A${logicalRow + 1}`])
   add('aggregate-edges', `=ISNUMBER(${arg})`);
 }
 add('aggregate-edges', '=SUMPRODUCT(ISNUMBER({TRUE,FALSE,1,"x"})*1)');
+// Statistical families: valid, empty, text, logical, domain and error-origin cases.
+const statisticalNames = ['MINA','MAXA','STDEVA','STDEVPA','VARA','VARPA','AVEDEV','DEVSQ','GEOMEAN','HARMEAN','MODE','MODE.SNGL','SKEW','SKEW.P','KURT'];
+for (const name of statisticalNames) {
+  for (const args of [data, '{0,2,4}', '{-5,-2,1,7}', '{2,2,2,2}', '{1}', 'Inputs!A5:A6', 'Inputs!A1:A5',
+      'TRUE(),2,4', '"3",2,4', '"bad",2,4', '{TRUE,FALSE,2,4}', '{"3",2,4}', '{"",2,4}',
+      'IF({0,1,1},{10,20,30})', 'A' + logicalRow + ':A' + (logicalRow + 1) + ',2,4']) {
+    add('statistics-expanded', '=' + name + '(' + args + ')');
+  }
+  for (const args of ['"bad",2', '{0,0,0,0}', 'Inputs!A5:A6', 'NA(),2']) {
+    add('statistics-expanded', '=ERROR.TYPE(' + name + '(' + args + '))');
+  }
+}
+for (const name of ['LARGE','SMALL','PERCENTILE.INC','PERCENTILE.EXC','QUARTILE.INC','QUARTILE.EXC']) {
+  const selector = name.startsWith('PERCENTILE') ? '0.5' : '1';
+  for (const arg of ['{TRUE,FALSE,2,4}', '{"3",2,4}', 'IF({0,1,1},{10,20,30})', 'Inputs!A5:A6', '"3"', 'A' + logicalRow + ':A' + (logicalRow + 1)]) {
+    add('statistics-expanded', '=' + name + '(' + arg + ',' + selector + ')');
+  }
+  for (const k of [-0.1, 0, 1, 5]) {
+    add('statistics-expanded', '=' + name + '({1,2,3,4},' + k + ')');
+    add('statistics-expanded', '=ERROR.TYPE(' + name + '({1,2,3,4},' + k + '))');
+  }
+}
+for (const name of ['RANK','RANK.EQ','RANK.AVG']) {
+  for (const arg of ['{TRUE,FALSE,2,4}', 'IF({0,1,1},{10,1,30})', 'Inputs!A5:A6', '"3"', 'A' + logicalRow + ':A' + (logicalRow + 1)]) {
+    add('statistics-expanded', '=' + name + '(1,' + arg + ')');
+  }
+  add('statistics-expanded', '=' + name + '(0.1+0.2,{0.3,1})');
+  add('statistics-expanded', '=' + name + '(2,{1,2,2,3},1)');
+}
+for (const name of ['PERCENTRANK','PERCENTRANK.INC','PERCENTRANK.EXC']) {
+  for (const n of [0,1,2,3,8,16,17]) add('statistics-expanded', '=' + name + '(' + data + ',' + n + ')');
+  for (const sig of [0,1,2,4,5.9]) add('statistics-expanded', '=' + name + '(' + data + ',3,' + sig + ')');
+  for (const arg of ['{2}', '{2,2,2}', 'Inputs!A5:A6', '"3"', 'IF({0,1},{10,2})']) add('statistics-expanded', '=' + name + '(' + arg + ',2)');
+}
+for (const fraction of [-0.1,0,0.1,0.25,0.5,0.9,1]) add('statistics-expanded', '=TRIMMEAN(' + data + ',' + fraction + ')');
+for (const arg of ['Inputs!A5:A6','{TRUE,FALSE,2,4}','"3"','IF({0,1,1},{10,20,30})']) add('statistics-expanded', '=TRIMMEAN(' + arg + ',0.5)');
+for (const args of ['1,0,1','10,5,2','1,0,0','1,0,-1','TRUE(),FALSE(),2','"3",0,1']) {
+  add('statistics-expanded', '=STANDARDIZE(' + args + ')');
+  add('statistics-expanded', '=ERROR.TYPE(STANDARDIZE(' + args + '))');
+}
+for (const name of ['SLOPE','INTERCEPT','RSQ','STEYX','PEARSON','FORECAST','FORECAST.LINEAR']) {
+  for (const args of ['{2,4,6,8},{1,2,3,4}', '{1,5,7,8},{2,3,4,6}', '{4,4,4},{1,2,3}', '{1,2,3},{4,4,4}',
+    '{1},{2}', '{1,2},{3,4}', '{1,2,3},{3,4}', '{TRUE,2,4},{1,2,3}', '{"x",2,4},{1,2,3}',
+    'IF({0,1,1},{1,2,4}),{1,2,3}', '{1,#N/A,3},{1,2,3}', 'Inputs!A5:A6,Inputs!A5:A6']) {
+    add('statistics-expanded', '=' + name + '(' + (name.startsWith('FORECAST') ? '5,' : '') + args + ')');
+  }
+}
+for (const expr of ['MODE({4,4,2,2})','MODE.SNGL({4,4,2,2})','MODE.SNGL({4,2;2,4})',
+  'GEOMEAN(0,NA())','GEOMEAN(NA(),0)','GEOMEAN({0,-1})','GEOMEAN({-1,0})','GEOMEAN({0,#N/A})']) {
+  add('statistics-expanded', '=' + expr);
+}
 writeFileSync('tests/calc-parity/common.json',JSON.stringify(cases,null,2)+'\n');
 const counts={};for(const c of cases) counts[c.group]=(counts[c.group]??0)+1;
 console.log(JSON.stringify({cases:cases.length,groups:counts}));

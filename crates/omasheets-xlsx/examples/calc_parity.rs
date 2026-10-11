@@ -24,7 +24,7 @@ fn run() -> Result<(), String> {
         ImportLimits {
             max_sheets: 8,
             max_cells: 10_000,
-            max_formulas: 1_000,
+            max_formulas: 5_000,
         },
     )
     .map_err(|e| e.to_string())?;

@@ -4743,5 +4743,2785 @@
     "id": "aggregate-edges-0949",
     "group": "aggregate-edges",
     "formula": "=SUMPRODUCT(ISNUMBER({TRUE,FALSE,1,\"x\"})*1)"
+  },
+  {
+    "id": "statistics-expanded-0950",
+    "group": "statistics-expanded",
+    "formula": "=MINA({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-0951",
+    "group": "statistics-expanded",
+    "formula": "=MINA({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-0952",
+    "group": "statistics-expanded",
+    "formula": "=MINA({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-0953",
+    "group": "statistics-expanded",
+    "formula": "=MINA({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-0954",
+    "group": "statistics-expanded",
+    "formula": "=MINA({1})"
+  },
+  {
+    "id": "statistics-expanded-0955",
+    "group": "statistics-expanded",
+    "formula": "=MINA(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-0956",
+    "group": "statistics-expanded",
+    "formula": "=MINA(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-0957",
+    "group": "statistics-expanded",
+    "formula": "=MINA(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-0958",
+    "group": "statistics-expanded",
+    "formula": "=MINA(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-0959",
+    "group": "statistics-expanded",
+    "formula": "=MINA(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-0960",
+    "group": "statistics-expanded",
+    "formula": "=MINA({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-0961",
+    "group": "statistics-expanded",
+    "formula": "=MINA({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-0962",
+    "group": "statistics-expanded",
+    "formula": "=MINA({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-0963",
+    "group": "statistics-expanded",
+    "formula": "=MINA(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-0964",
+    "group": "statistics-expanded",
+    "formula": "=MINA(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-0965",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MINA(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-0966",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MINA({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-0967",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MINA(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-0968",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MINA(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-0969",
+    "group": "statistics-expanded",
+    "formula": "=MAXA({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-0970",
+    "group": "statistics-expanded",
+    "formula": "=MAXA({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-0971",
+    "group": "statistics-expanded",
+    "formula": "=MAXA({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-0972",
+    "group": "statistics-expanded",
+    "formula": "=MAXA({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-0973",
+    "group": "statistics-expanded",
+    "formula": "=MAXA({1})"
+  },
+  {
+    "id": "statistics-expanded-0974",
+    "group": "statistics-expanded",
+    "formula": "=MAXA(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-0975",
+    "group": "statistics-expanded",
+    "formula": "=MAXA(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-0976",
+    "group": "statistics-expanded",
+    "formula": "=MAXA(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-0977",
+    "group": "statistics-expanded",
+    "formula": "=MAXA(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-0978",
+    "group": "statistics-expanded",
+    "formula": "=MAXA(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-0979",
+    "group": "statistics-expanded",
+    "formula": "=MAXA({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-0980",
+    "group": "statistics-expanded",
+    "formula": "=MAXA({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-0981",
+    "group": "statistics-expanded",
+    "formula": "=MAXA({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-0982",
+    "group": "statistics-expanded",
+    "formula": "=MAXA(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-0983",
+    "group": "statistics-expanded",
+    "formula": "=MAXA(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-0984",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MAXA(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-0985",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MAXA({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-0986",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MAXA(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-0987",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MAXA(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-0988",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-0989",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-0990",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-0991",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-0992",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA({1})"
+  },
+  {
+    "id": "statistics-expanded-0993",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-0994",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-0995",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-0996",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-0997",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-0998",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-0999",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1000",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1001",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-1002",
+    "group": "statistics-expanded",
+    "formula": "=STDEVA(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-1003",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STDEVA(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-1004",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STDEVA({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-1005",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STDEVA(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-1006",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STDEVA(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-1007",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-1008",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1009",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-1010",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1011",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA({1})"
+  },
+  {
+    "id": "statistics-expanded-1012",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1013",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-1014",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-1015",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1016",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1017",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1018",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1019",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1020",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-1021",
+    "group": "statistics-expanded",
+    "formula": "=STDEVPA(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-1022",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STDEVPA(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-1023",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STDEVPA({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-1024",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STDEVPA(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-1025",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STDEVPA(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-1026",
+    "group": "statistics-expanded",
+    "formula": "=VARA({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-1027",
+    "group": "statistics-expanded",
+    "formula": "=VARA({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1028",
+    "group": "statistics-expanded",
+    "formula": "=VARA({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-1029",
+    "group": "statistics-expanded",
+    "formula": "=VARA({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1030",
+    "group": "statistics-expanded",
+    "formula": "=VARA({1})"
+  },
+  {
+    "id": "statistics-expanded-1031",
+    "group": "statistics-expanded",
+    "formula": "=VARA(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1032",
+    "group": "statistics-expanded",
+    "formula": "=VARA(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-1033",
+    "group": "statistics-expanded",
+    "formula": "=VARA(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-1034",
+    "group": "statistics-expanded",
+    "formula": "=VARA(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1035",
+    "group": "statistics-expanded",
+    "formula": "=VARA(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1036",
+    "group": "statistics-expanded",
+    "formula": "=VARA({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1037",
+    "group": "statistics-expanded",
+    "formula": "=VARA({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1038",
+    "group": "statistics-expanded",
+    "formula": "=VARA({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1039",
+    "group": "statistics-expanded",
+    "formula": "=VARA(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-1040",
+    "group": "statistics-expanded",
+    "formula": "=VARA(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-1041",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(VARA(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-1042",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(VARA({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-1043",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(VARA(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-1044",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(VARA(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-1045",
+    "group": "statistics-expanded",
+    "formula": "=VARPA({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-1046",
+    "group": "statistics-expanded",
+    "formula": "=VARPA({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1047",
+    "group": "statistics-expanded",
+    "formula": "=VARPA({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-1048",
+    "group": "statistics-expanded",
+    "formula": "=VARPA({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1049",
+    "group": "statistics-expanded",
+    "formula": "=VARPA({1})"
+  },
+  {
+    "id": "statistics-expanded-1050",
+    "group": "statistics-expanded",
+    "formula": "=VARPA(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1051",
+    "group": "statistics-expanded",
+    "formula": "=VARPA(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-1052",
+    "group": "statistics-expanded",
+    "formula": "=VARPA(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-1053",
+    "group": "statistics-expanded",
+    "formula": "=VARPA(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1054",
+    "group": "statistics-expanded",
+    "formula": "=VARPA(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1055",
+    "group": "statistics-expanded",
+    "formula": "=VARPA({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1056",
+    "group": "statistics-expanded",
+    "formula": "=VARPA({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1057",
+    "group": "statistics-expanded",
+    "formula": "=VARPA({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1058",
+    "group": "statistics-expanded",
+    "formula": "=VARPA(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-1059",
+    "group": "statistics-expanded",
+    "formula": "=VARPA(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-1060",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(VARPA(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-1061",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(VARPA({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-1062",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(VARPA(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-1063",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(VARPA(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-1064",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-1065",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1066",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-1067",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1068",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV({1})"
+  },
+  {
+    "id": "statistics-expanded-1069",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1070",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-1071",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-1072",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1073",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1074",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1075",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1076",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1077",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-1078",
+    "group": "statistics-expanded",
+    "formula": "=AVEDEV(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-1079",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(AVEDEV(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-1080",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(AVEDEV({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-1081",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(AVEDEV(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-1082",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(AVEDEV(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-1083",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-1084",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1085",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-1086",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1087",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ({1})"
+  },
+  {
+    "id": "statistics-expanded-1088",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1089",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-1090",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-1091",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1092",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1093",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1094",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1095",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1096",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-1097",
+    "group": "statistics-expanded",
+    "formula": "=DEVSQ(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-1098",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(DEVSQ(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-1099",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(DEVSQ({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-1100",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(DEVSQ(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-1101",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(DEVSQ(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-1102",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-1103",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1104",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-1105",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1106",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN({1})"
+  },
+  {
+    "id": "statistics-expanded-1107",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1108",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-1109",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-1110",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1111",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1112",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1113",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1114",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1115",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-1116",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-1117",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(GEOMEAN(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-1118",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(GEOMEAN({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-1119",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(GEOMEAN(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-1120",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(GEOMEAN(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-1121",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-1122",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1123",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-1124",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1125",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN({1})"
+  },
+  {
+    "id": "statistics-expanded-1126",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1127",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-1128",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-1129",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1130",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1131",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1132",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1133",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1134",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-1135",
+    "group": "statistics-expanded",
+    "formula": "=HARMEAN(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-1136",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(HARMEAN(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-1137",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(HARMEAN({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-1138",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(HARMEAN(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-1139",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(HARMEAN(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-1140",
+    "group": "statistics-expanded",
+    "formula": "=MODE({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-1141",
+    "group": "statistics-expanded",
+    "formula": "=MODE({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1142",
+    "group": "statistics-expanded",
+    "formula": "=MODE({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-1143",
+    "group": "statistics-expanded",
+    "formula": "=MODE({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1144",
+    "group": "statistics-expanded",
+    "formula": "=MODE({1})"
+  },
+  {
+    "id": "statistics-expanded-1145",
+    "group": "statistics-expanded",
+    "formula": "=MODE(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1146",
+    "group": "statistics-expanded",
+    "formula": "=MODE(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-1147",
+    "group": "statistics-expanded",
+    "formula": "=MODE(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-1148",
+    "group": "statistics-expanded",
+    "formula": "=MODE(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1149",
+    "group": "statistics-expanded",
+    "formula": "=MODE(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1150",
+    "group": "statistics-expanded",
+    "formula": "=MODE({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1151",
+    "group": "statistics-expanded",
+    "formula": "=MODE({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1152",
+    "group": "statistics-expanded",
+    "formula": "=MODE({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1153",
+    "group": "statistics-expanded",
+    "formula": "=MODE(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-1154",
+    "group": "statistics-expanded",
+    "formula": "=MODE(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-1155",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MODE(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-1156",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MODE({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-1157",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MODE(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-1158",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MODE(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-1159",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-1160",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1161",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-1162",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1163",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL({1})"
+  },
+  {
+    "id": "statistics-expanded-1164",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1165",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-1166",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-1167",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1168",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1169",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1170",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1171",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1172",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-1173",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-1174",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MODE.SNGL(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-1175",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MODE.SNGL({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-1176",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MODE.SNGL(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-1177",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(MODE.SNGL(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-1178",
+    "group": "statistics-expanded",
+    "formula": "=SKEW({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-1179",
+    "group": "statistics-expanded",
+    "formula": "=SKEW({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1180",
+    "group": "statistics-expanded",
+    "formula": "=SKEW({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-1181",
+    "group": "statistics-expanded",
+    "formula": "=SKEW({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1182",
+    "group": "statistics-expanded",
+    "formula": "=SKEW({1})"
+  },
+  {
+    "id": "statistics-expanded-1183",
+    "group": "statistics-expanded",
+    "formula": "=SKEW(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1184",
+    "group": "statistics-expanded",
+    "formula": "=SKEW(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-1185",
+    "group": "statistics-expanded",
+    "formula": "=SKEW(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-1186",
+    "group": "statistics-expanded",
+    "formula": "=SKEW(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1187",
+    "group": "statistics-expanded",
+    "formula": "=SKEW(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1188",
+    "group": "statistics-expanded",
+    "formula": "=SKEW({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1189",
+    "group": "statistics-expanded",
+    "formula": "=SKEW({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1190",
+    "group": "statistics-expanded",
+    "formula": "=SKEW({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1191",
+    "group": "statistics-expanded",
+    "formula": "=SKEW(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-1192",
+    "group": "statistics-expanded",
+    "formula": "=SKEW(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-1193",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(SKEW(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-1194",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(SKEW({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-1195",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(SKEW(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-1196",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(SKEW(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-1197",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-1198",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1199",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-1200",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1201",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P({1})"
+  },
+  {
+    "id": "statistics-expanded-1202",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1203",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-1204",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-1205",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1206",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1207",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1208",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1209",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1210",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-1211",
+    "group": "statistics-expanded",
+    "formula": "=SKEW.P(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-1212",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(SKEW.P(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-1213",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(SKEW.P({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-1214",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(SKEW.P(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-1215",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(SKEW.P(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-1216",
+    "group": "statistics-expanded",
+    "formula": "=KURT({1,2,2,4,8,16})"
+  },
+  {
+    "id": "statistics-expanded-1217",
+    "group": "statistics-expanded",
+    "formula": "=KURT({0,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1218",
+    "group": "statistics-expanded",
+    "formula": "=KURT({-5,-2,1,7})"
+  },
+  {
+    "id": "statistics-expanded-1219",
+    "group": "statistics-expanded",
+    "formula": "=KURT({2,2,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1220",
+    "group": "statistics-expanded",
+    "formula": "=KURT({1})"
+  },
+  {
+    "id": "statistics-expanded-1221",
+    "group": "statistics-expanded",
+    "formula": "=KURT(Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1222",
+    "group": "statistics-expanded",
+    "formula": "=KURT(Inputs!A1:A5)"
+  },
+  {
+    "id": "statistics-expanded-1223",
+    "group": "statistics-expanded",
+    "formula": "=KURT(TRUE(),2,4)"
+  },
+  {
+    "id": "statistics-expanded-1224",
+    "group": "statistics-expanded",
+    "formula": "=KURT(\"3\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1225",
+    "group": "statistics-expanded",
+    "formula": "=KURT(\"bad\",2,4)"
+  },
+  {
+    "id": "statistics-expanded-1226",
+    "group": "statistics-expanded",
+    "formula": "=KURT({TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1227",
+    "group": "statistics-expanded",
+    "formula": "=KURT({\"3\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1228",
+    "group": "statistics-expanded",
+    "formula": "=KURT({\"\",2,4})"
+  },
+  {
+    "id": "statistics-expanded-1229",
+    "group": "statistics-expanded",
+    "formula": "=KURT(IF({0,1,1},{10,20,30}))"
+  },
+  {
+    "id": "statistics-expanded-1230",
+    "group": "statistics-expanded",
+    "formula": "=KURT(A797:A798,2,4)"
+  },
+  {
+    "id": "statistics-expanded-1231",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(KURT(\"bad\",2))"
+  },
+  {
+    "id": "statistics-expanded-1232",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(KURT({0,0,0,0}))"
+  },
+  {
+    "id": "statistics-expanded-1233",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(KURT(Inputs!A5:A6))"
+  },
+  {
+    "id": "statistics-expanded-1234",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(KURT(NA(),2))"
+  },
+  {
+    "id": "statistics-expanded-1235",
+    "group": "statistics-expanded",
+    "formula": "=LARGE({TRUE,FALSE,2,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1236",
+    "group": "statistics-expanded",
+    "formula": "=LARGE({\"3\",2,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1237",
+    "group": "statistics-expanded",
+    "formula": "=LARGE(IF({0,1,1},{10,20,30}),1)"
+  },
+  {
+    "id": "statistics-expanded-1238",
+    "group": "statistics-expanded",
+    "formula": "=LARGE(Inputs!A5:A6,1)"
+  },
+  {
+    "id": "statistics-expanded-1239",
+    "group": "statistics-expanded",
+    "formula": "=LARGE(\"3\",1)"
+  },
+  {
+    "id": "statistics-expanded-1240",
+    "group": "statistics-expanded",
+    "formula": "=LARGE(A797:A798,1)"
+  },
+  {
+    "id": "statistics-expanded-1241",
+    "group": "statistics-expanded",
+    "formula": "=LARGE({1,2,3,4},-0.1)"
+  },
+  {
+    "id": "statistics-expanded-1242",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(LARGE({1,2,3,4},-0.1))"
+  },
+  {
+    "id": "statistics-expanded-1243",
+    "group": "statistics-expanded",
+    "formula": "=LARGE({1,2,3,4},0)"
+  },
+  {
+    "id": "statistics-expanded-1244",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(LARGE({1,2,3,4},0))"
+  },
+  {
+    "id": "statistics-expanded-1245",
+    "group": "statistics-expanded",
+    "formula": "=LARGE({1,2,3,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1246",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(LARGE({1,2,3,4},1))"
+  },
+  {
+    "id": "statistics-expanded-1247",
+    "group": "statistics-expanded",
+    "formula": "=LARGE({1,2,3,4},5)"
+  },
+  {
+    "id": "statistics-expanded-1248",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(LARGE({1,2,3,4},5))"
+  },
+  {
+    "id": "statistics-expanded-1249",
+    "group": "statistics-expanded",
+    "formula": "=SMALL({TRUE,FALSE,2,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1250",
+    "group": "statistics-expanded",
+    "formula": "=SMALL({\"3\",2,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1251",
+    "group": "statistics-expanded",
+    "formula": "=SMALL(IF({0,1,1},{10,20,30}),1)"
+  },
+  {
+    "id": "statistics-expanded-1252",
+    "group": "statistics-expanded",
+    "formula": "=SMALL(Inputs!A5:A6,1)"
+  },
+  {
+    "id": "statistics-expanded-1253",
+    "group": "statistics-expanded",
+    "formula": "=SMALL(\"3\",1)"
+  },
+  {
+    "id": "statistics-expanded-1254",
+    "group": "statistics-expanded",
+    "formula": "=SMALL(A797:A798,1)"
+  },
+  {
+    "id": "statistics-expanded-1255",
+    "group": "statistics-expanded",
+    "formula": "=SMALL({1,2,3,4},-0.1)"
+  },
+  {
+    "id": "statistics-expanded-1256",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(SMALL({1,2,3,4},-0.1))"
+  },
+  {
+    "id": "statistics-expanded-1257",
+    "group": "statistics-expanded",
+    "formula": "=SMALL({1,2,3,4},0)"
+  },
+  {
+    "id": "statistics-expanded-1258",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(SMALL({1,2,3,4},0))"
+  },
+  {
+    "id": "statistics-expanded-1259",
+    "group": "statistics-expanded",
+    "formula": "=SMALL({1,2,3,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1260",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(SMALL({1,2,3,4},1))"
+  },
+  {
+    "id": "statistics-expanded-1261",
+    "group": "statistics-expanded",
+    "formula": "=SMALL({1,2,3,4},5)"
+  },
+  {
+    "id": "statistics-expanded-1262",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(SMALL({1,2,3,4},5))"
+  },
+  {
+    "id": "statistics-expanded-1263",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.INC({TRUE,FALSE,2,4},0.5)"
+  },
+  {
+    "id": "statistics-expanded-1264",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.INC({\"3\",2,4},0.5)"
+  },
+  {
+    "id": "statistics-expanded-1265",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.INC(IF({0,1,1},{10,20,30}),0.5)"
+  },
+  {
+    "id": "statistics-expanded-1266",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.INC(Inputs!A5:A6,0.5)"
+  },
+  {
+    "id": "statistics-expanded-1267",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.INC(\"3\",0.5)"
+  },
+  {
+    "id": "statistics-expanded-1268",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.INC(A797:A798,0.5)"
+  },
+  {
+    "id": "statistics-expanded-1269",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.INC({1,2,3,4},-0.1)"
+  },
+  {
+    "id": "statistics-expanded-1270",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(PERCENTILE.INC({1,2,3,4},-0.1))"
+  },
+  {
+    "id": "statistics-expanded-1271",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.INC({1,2,3,4},0)"
+  },
+  {
+    "id": "statistics-expanded-1272",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(PERCENTILE.INC({1,2,3,4},0))"
+  },
+  {
+    "id": "statistics-expanded-1273",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.INC({1,2,3,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1274",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(PERCENTILE.INC({1,2,3,4},1))"
+  },
+  {
+    "id": "statistics-expanded-1275",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.INC({1,2,3,4},5)"
+  },
+  {
+    "id": "statistics-expanded-1276",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(PERCENTILE.INC({1,2,3,4},5))"
+  },
+  {
+    "id": "statistics-expanded-1277",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.EXC({TRUE,FALSE,2,4},0.5)"
+  },
+  {
+    "id": "statistics-expanded-1278",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.EXC({\"3\",2,4},0.5)"
+  },
+  {
+    "id": "statistics-expanded-1279",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.EXC(IF({0,1,1},{10,20,30}),0.5)"
+  },
+  {
+    "id": "statistics-expanded-1280",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.EXC(Inputs!A5:A6,0.5)"
+  },
+  {
+    "id": "statistics-expanded-1281",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.EXC(\"3\",0.5)"
+  },
+  {
+    "id": "statistics-expanded-1282",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.EXC(A797:A798,0.5)"
+  },
+  {
+    "id": "statistics-expanded-1283",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.EXC({1,2,3,4},-0.1)"
+  },
+  {
+    "id": "statistics-expanded-1284",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(PERCENTILE.EXC({1,2,3,4},-0.1))"
+  },
+  {
+    "id": "statistics-expanded-1285",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.EXC({1,2,3,4},0)"
+  },
+  {
+    "id": "statistics-expanded-1286",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(PERCENTILE.EXC({1,2,3,4},0))"
+  },
+  {
+    "id": "statistics-expanded-1287",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.EXC({1,2,3,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1288",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(PERCENTILE.EXC({1,2,3,4},1))"
+  },
+  {
+    "id": "statistics-expanded-1289",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTILE.EXC({1,2,3,4},5)"
+  },
+  {
+    "id": "statistics-expanded-1290",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(PERCENTILE.EXC({1,2,3,4},5))"
+  },
+  {
+    "id": "statistics-expanded-1291",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.INC({TRUE,FALSE,2,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1292",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.INC({\"3\",2,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1293",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.INC(IF({0,1,1},{10,20,30}),1)"
+  },
+  {
+    "id": "statistics-expanded-1294",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.INC(Inputs!A5:A6,1)"
+  },
+  {
+    "id": "statistics-expanded-1295",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.INC(\"3\",1)"
+  },
+  {
+    "id": "statistics-expanded-1296",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.INC(A797:A798,1)"
+  },
+  {
+    "id": "statistics-expanded-1297",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.INC({1,2,3,4},-0.1)"
+  },
+  {
+    "id": "statistics-expanded-1298",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(QUARTILE.INC({1,2,3,4},-0.1))"
+  },
+  {
+    "id": "statistics-expanded-1299",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.INC({1,2,3,4},0)"
+  },
+  {
+    "id": "statistics-expanded-1300",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(QUARTILE.INC({1,2,3,4},0))"
+  },
+  {
+    "id": "statistics-expanded-1301",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.INC({1,2,3,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1302",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(QUARTILE.INC({1,2,3,4},1))"
+  },
+  {
+    "id": "statistics-expanded-1303",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.INC({1,2,3,4},5)"
+  },
+  {
+    "id": "statistics-expanded-1304",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(QUARTILE.INC({1,2,3,4},5))"
+  },
+  {
+    "id": "statistics-expanded-1305",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.EXC({TRUE,FALSE,2,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1306",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.EXC({\"3\",2,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1307",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.EXC(IF({0,1,1},{10,20,30}),1)"
+  },
+  {
+    "id": "statistics-expanded-1308",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.EXC(Inputs!A5:A6,1)"
+  },
+  {
+    "id": "statistics-expanded-1309",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.EXC(\"3\",1)"
+  },
+  {
+    "id": "statistics-expanded-1310",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.EXC(A797:A798,1)"
+  },
+  {
+    "id": "statistics-expanded-1311",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.EXC({1,2,3,4},-0.1)"
+  },
+  {
+    "id": "statistics-expanded-1312",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(QUARTILE.EXC({1,2,3,4},-0.1))"
+  },
+  {
+    "id": "statistics-expanded-1313",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.EXC({1,2,3,4},0)"
+  },
+  {
+    "id": "statistics-expanded-1314",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(QUARTILE.EXC({1,2,3,4},0))"
+  },
+  {
+    "id": "statistics-expanded-1315",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.EXC({1,2,3,4},1)"
+  },
+  {
+    "id": "statistics-expanded-1316",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(QUARTILE.EXC({1,2,3,4},1))"
+  },
+  {
+    "id": "statistics-expanded-1317",
+    "group": "statistics-expanded",
+    "formula": "=QUARTILE.EXC({1,2,3,4},5)"
+  },
+  {
+    "id": "statistics-expanded-1318",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(QUARTILE.EXC({1,2,3,4},5))"
+  },
+  {
+    "id": "statistics-expanded-1319",
+    "group": "statistics-expanded",
+    "formula": "=RANK(1,{TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1320",
+    "group": "statistics-expanded",
+    "formula": "=RANK(1,IF({0,1,1},{10,1,30}))"
+  },
+  {
+    "id": "statistics-expanded-1321",
+    "group": "statistics-expanded",
+    "formula": "=RANK(1,Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1322",
+    "group": "statistics-expanded",
+    "formula": "=RANK(1,\"3\")"
+  },
+  {
+    "id": "statistics-expanded-1323",
+    "group": "statistics-expanded",
+    "formula": "=RANK(1,A797:A798)"
+  },
+  {
+    "id": "statistics-expanded-1324",
+    "group": "statistics-expanded",
+    "formula": "=RANK(0.1+0.2,{0.3,1})"
+  },
+  {
+    "id": "statistics-expanded-1325",
+    "group": "statistics-expanded",
+    "formula": "=RANK(2,{1,2,2,3},1)"
+  },
+  {
+    "id": "statistics-expanded-1326",
+    "group": "statistics-expanded",
+    "formula": "=RANK.EQ(1,{TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1327",
+    "group": "statistics-expanded",
+    "formula": "=RANK.EQ(1,IF({0,1,1},{10,1,30}))"
+  },
+  {
+    "id": "statistics-expanded-1328",
+    "group": "statistics-expanded",
+    "formula": "=RANK.EQ(1,Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1329",
+    "group": "statistics-expanded",
+    "formula": "=RANK.EQ(1,\"3\")"
+  },
+  {
+    "id": "statistics-expanded-1330",
+    "group": "statistics-expanded",
+    "formula": "=RANK.EQ(1,A797:A798)"
+  },
+  {
+    "id": "statistics-expanded-1331",
+    "group": "statistics-expanded",
+    "formula": "=RANK.EQ(0.1+0.2,{0.3,1})"
+  },
+  {
+    "id": "statistics-expanded-1332",
+    "group": "statistics-expanded",
+    "formula": "=RANK.EQ(2,{1,2,2,3},1)"
+  },
+  {
+    "id": "statistics-expanded-1333",
+    "group": "statistics-expanded",
+    "formula": "=RANK.AVG(1,{TRUE,FALSE,2,4})"
+  },
+  {
+    "id": "statistics-expanded-1334",
+    "group": "statistics-expanded",
+    "formula": "=RANK.AVG(1,IF({0,1,1},{10,1,30}))"
+  },
+  {
+    "id": "statistics-expanded-1335",
+    "group": "statistics-expanded",
+    "formula": "=RANK.AVG(1,Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1336",
+    "group": "statistics-expanded",
+    "formula": "=RANK.AVG(1,\"3\")"
+  },
+  {
+    "id": "statistics-expanded-1337",
+    "group": "statistics-expanded",
+    "formula": "=RANK.AVG(1,A797:A798)"
+  },
+  {
+    "id": "statistics-expanded-1338",
+    "group": "statistics-expanded",
+    "formula": "=RANK.AVG(0.1+0.2,{0.3,1})"
+  },
+  {
+    "id": "statistics-expanded-1339",
+    "group": "statistics-expanded",
+    "formula": "=RANK.AVG(2,{1,2,2,3},1)"
+  },
+  {
+    "id": "statistics-expanded-1340",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({1,2,2,4,8,16},0)"
+  },
+  {
+    "id": "statistics-expanded-1341",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({1,2,2,4,8,16},1)"
+  },
+  {
+    "id": "statistics-expanded-1342",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({1,2,2,4,8,16},2)"
+  },
+  {
+    "id": "statistics-expanded-1343",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({1,2,2,4,8,16},3)"
+  },
+  {
+    "id": "statistics-expanded-1344",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({1,2,2,4,8,16},8)"
+  },
+  {
+    "id": "statistics-expanded-1345",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({1,2,2,4,8,16},16)"
+  },
+  {
+    "id": "statistics-expanded-1346",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({1,2,2,4,8,16},17)"
+  },
+  {
+    "id": "statistics-expanded-1347",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({1,2,2,4,8,16},3,0)"
+  },
+  {
+    "id": "statistics-expanded-1348",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({1,2,2,4,8,16},3,1)"
+  },
+  {
+    "id": "statistics-expanded-1349",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({1,2,2,4,8,16},3,2)"
+  },
+  {
+    "id": "statistics-expanded-1350",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({1,2,2,4,8,16},3,4)"
+  },
+  {
+    "id": "statistics-expanded-1351",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({1,2,2,4,8,16},3,5.9)"
+  },
+  {
+    "id": "statistics-expanded-1352",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({2},2)"
+  },
+  {
+    "id": "statistics-expanded-1353",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK({2,2,2},2)"
+  },
+  {
+    "id": "statistics-expanded-1354",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK(Inputs!A5:A6,2)"
+  },
+  {
+    "id": "statistics-expanded-1355",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK(\"3\",2)"
+  },
+  {
+    "id": "statistics-expanded-1356",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK(IF({0,1},{10,2}),2)"
+  },
+  {
+    "id": "statistics-expanded-1357",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({1,2,2,4,8,16},0)"
+  },
+  {
+    "id": "statistics-expanded-1358",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({1,2,2,4,8,16},1)"
+  },
+  {
+    "id": "statistics-expanded-1359",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({1,2,2,4,8,16},2)"
+  },
+  {
+    "id": "statistics-expanded-1360",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({1,2,2,4,8,16},3)"
+  },
+  {
+    "id": "statistics-expanded-1361",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({1,2,2,4,8,16},8)"
+  },
+  {
+    "id": "statistics-expanded-1362",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({1,2,2,4,8,16},16)"
+  },
+  {
+    "id": "statistics-expanded-1363",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({1,2,2,4,8,16},17)"
+  },
+  {
+    "id": "statistics-expanded-1364",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({1,2,2,4,8,16},3,0)"
+  },
+  {
+    "id": "statistics-expanded-1365",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({1,2,2,4,8,16},3,1)"
+  },
+  {
+    "id": "statistics-expanded-1366",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({1,2,2,4,8,16},3,2)"
+  },
+  {
+    "id": "statistics-expanded-1367",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({1,2,2,4,8,16},3,4)"
+  },
+  {
+    "id": "statistics-expanded-1368",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({1,2,2,4,8,16},3,5.9)"
+  },
+  {
+    "id": "statistics-expanded-1369",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({2},2)"
+  },
+  {
+    "id": "statistics-expanded-1370",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC({2,2,2},2)"
+  },
+  {
+    "id": "statistics-expanded-1371",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC(Inputs!A5:A6,2)"
+  },
+  {
+    "id": "statistics-expanded-1372",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC(\"3\",2)"
+  },
+  {
+    "id": "statistics-expanded-1373",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.INC(IF({0,1},{10,2}),2)"
+  },
+  {
+    "id": "statistics-expanded-1374",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({1,2,2,4,8,16},0)"
+  },
+  {
+    "id": "statistics-expanded-1375",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({1,2,2,4,8,16},1)"
+  },
+  {
+    "id": "statistics-expanded-1376",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({1,2,2,4,8,16},2)"
+  },
+  {
+    "id": "statistics-expanded-1377",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({1,2,2,4,8,16},3)"
+  },
+  {
+    "id": "statistics-expanded-1378",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({1,2,2,4,8,16},8)"
+  },
+  {
+    "id": "statistics-expanded-1379",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({1,2,2,4,8,16},16)"
+  },
+  {
+    "id": "statistics-expanded-1380",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({1,2,2,4,8,16},17)"
+  },
+  {
+    "id": "statistics-expanded-1381",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({1,2,2,4,8,16},3,0)"
+  },
+  {
+    "id": "statistics-expanded-1382",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({1,2,2,4,8,16},3,1)"
+  },
+  {
+    "id": "statistics-expanded-1383",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({1,2,2,4,8,16},3,2)"
+  },
+  {
+    "id": "statistics-expanded-1384",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({1,2,2,4,8,16},3,4)"
+  },
+  {
+    "id": "statistics-expanded-1385",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({1,2,2,4,8,16},3,5.9)"
+  },
+  {
+    "id": "statistics-expanded-1386",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({2},2)"
+  },
+  {
+    "id": "statistics-expanded-1387",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC({2,2,2},2)"
+  },
+  {
+    "id": "statistics-expanded-1388",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC(Inputs!A5:A6,2)"
+  },
+  {
+    "id": "statistics-expanded-1389",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC(\"3\",2)"
+  },
+  {
+    "id": "statistics-expanded-1390",
+    "group": "statistics-expanded",
+    "formula": "=PERCENTRANK.EXC(IF({0,1},{10,2}),2)"
+  },
+  {
+    "id": "statistics-expanded-1391",
+    "group": "statistics-expanded",
+    "formula": "=TRIMMEAN({1,2,2,4,8,16},-0.1)"
+  },
+  {
+    "id": "statistics-expanded-1392",
+    "group": "statistics-expanded",
+    "formula": "=TRIMMEAN({1,2,2,4,8,16},0)"
+  },
+  {
+    "id": "statistics-expanded-1393",
+    "group": "statistics-expanded",
+    "formula": "=TRIMMEAN({1,2,2,4,8,16},0.1)"
+  },
+  {
+    "id": "statistics-expanded-1394",
+    "group": "statistics-expanded",
+    "formula": "=TRIMMEAN({1,2,2,4,8,16},0.25)"
+  },
+  {
+    "id": "statistics-expanded-1395",
+    "group": "statistics-expanded",
+    "formula": "=TRIMMEAN({1,2,2,4,8,16},0.5)"
+  },
+  {
+    "id": "statistics-expanded-1396",
+    "group": "statistics-expanded",
+    "formula": "=TRIMMEAN({1,2,2,4,8,16},0.9)"
+  },
+  {
+    "id": "statistics-expanded-1397",
+    "group": "statistics-expanded",
+    "formula": "=TRIMMEAN({1,2,2,4,8,16},1)"
+  },
+  {
+    "id": "statistics-expanded-1398",
+    "group": "statistics-expanded",
+    "formula": "=TRIMMEAN(Inputs!A5:A6,0.5)"
+  },
+  {
+    "id": "statistics-expanded-1399",
+    "group": "statistics-expanded",
+    "formula": "=TRIMMEAN({TRUE,FALSE,2,4},0.5)"
+  },
+  {
+    "id": "statistics-expanded-1400",
+    "group": "statistics-expanded",
+    "formula": "=TRIMMEAN(\"3\",0.5)"
+  },
+  {
+    "id": "statistics-expanded-1401",
+    "group": "statistics-expanded",
+    "formula": "=TRIMMEAN(IF({0,1,1},{10,20,30}),0.5)"
+  },
+  {
+    "id": "statistics-expanded-1402",
+    "group": "statistics-expanded",
+    "formula": "=STANDARDIZE(1,0,1)"
+  },
+  {
+    "id": "statistics-expanded-1403",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STANDARDIZE(1,0,1))"
+  },
+  {
+    "id": "statistics-expanded-1404",
+    "group": "statistics-expanded",
+    "formula": "=STANDARDIZE(10,5,2)"
+  },
+  {
+    "id": "statistics-expanded-1405",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STANDARDIZE(10,5,2))"
+  },
+  {
+    "id": "statistics-expanded-1406",
+    "group": "statistics-expanded",
+    "formula": "=STANDARDIZE(1,0,0)"
+  },
+  {
+    "id": "statistics-expanded-1407",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STANDARDIZE(1,0,0))"
+  },
+  {
+    "id": "statistics-expanded-1408",
+    "group": "statistics-expanded",
+    "formula": "=STANDARDIZE(1,0,-1)"
+  },
+  {
+    "id": "statistics-expanded-1409",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STANDARDIZE(1,0,-1))"
+  },
+  {
+    "id": "statistics-expanded-1410",
+    "group": "statistics-expanded",
+    "formula": "=STANDARDIZE(TRUE(),FALSE(),2)"
+  },
+  {
+    "id": "statistics-expanded-1411",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STANDARDIZE(TRUE(),FALSE(),2))"
+  },
+  {
+    "id": "statistics-expanded-1412",
+    "group": "statistics-expanded",
+    "formula": "=STANDARDIZE(\"3\",0,1)"
+  },
+  {
+    "id": "statistics-expanded-1413",
+    "group": "statistics-expanded",
+    "formula": "=ERROR.TYPE(STANDARDIZE(\"3\",0,1))"
+  },
+  {
+    "id": "statistics-expanded-1414",
+    "group": "statistics-expanded",
+    "formula": "=SLOPE({2,4,6,8},{1,2,3,4})"
+  },
+  {
+    "id": "statistics-expanded-1415",
+    "group": "statistics-expanded",
+    "formula": "=SLOPE({1,5,7,8},{2,3,4,6})"
+  },
+  {
+    "id": "statistics-expanded-1416",
+    "group": "statistics-expanded",
+    "formula": "=SLOPE({4,4,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1417",
+    "group": "statistics-expanded",
+    "formula": "=SLOPE({1,2,3},{4,4,4})"
+  },
+  {
+    "id": "statistics-expanded-1418",
+    "group": "statistics-expanded",
+    "formula": "=SLOPE({1},{2})"
+  },
+  {
+    "id": "statistics-expanded-1419",
+    "group": "statistics-expanded",
+    "formula": "=SLOPE({1,2},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1420",
+    "group": "statistics-expanded",
+    "formula": "=SLOPE({1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1421",
+    "group": "statistics-expanded",
+    "formula": "=SLOPE({TRUE,2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1422",
+    "group": "statistics-expanded",
+    "formula": "=SLOPE({\"x\",2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1423",
+    "group": "statistics-expanded",
+    "formula": "=SLOPE(IF({0,1,1},{1,2,4}),{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1424",
+    "group": "statistics-expanded",
+    "formula": "=SLOPE({1,#N/A,3},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1425",
+    "group": "statistics-expanded",
+    "formula": "=SLOPE(Inputs!A5:A6,Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1426",
+    "group": "statistics-expanded",
+    "formula": "=INTERCEPT({2,4,6,8},{1,2,3,4})"
+  },
+  {
+    "id": "statistics-expanded-1427",
+    "group": "statistics-expanded",
+    "formula": "=INTERCEPT({1,5,7,8},{2,3,4,6})"
+  },
+  {
+    "id": "statistics-expanded-1428",
+    "group": "statistics-expanded",
+    "formula": "=INTERCEPT({4,4,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1429",
+    "group": "statistics-expanded",
+    "formula": "=INTERCEPT({1,2,3},{4,4,4})"
+  },
+  {
+    "id": "statistics-expanded-1430",
+    "group": "statistics-expanded",
+    "formula": "=INTERCEPT({1},{2})"
+  },
+  {
+    "id": "statistics-expanded-1431",
+    "group": "statistics-expanded",
+    "formula": "=INTERCEPT({1,2},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1432",
+    "group": "statistics-expanded",
+    "formula": "=INTERCEPT({1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1433",
+    "group": "statistics-expanded",
+    "formula": "=INTERCEPT({TRUE,2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1434",
+    "group": "statistics-expanded",
+    "formula": "=INTERCEPT({\"x\",2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1435",
+    "group": "statistics-expanded",
+    "formula": "=INTERCEPT(IF({0,1,1},{1,2,4}),{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1436",
+    "group": "statistics-expanded",
+    "formula": "=INTERCEPT({1,#N/A,3},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1437",
+    "group": "statistics-expanded",
+    "formula": "=INTERCEPT(Inputs!A5:A6,Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1438",
+    "group": "statistics-expanded",
+    "formula": "=RSQ({2,4,6,8},{1,2,3,4})"
+  },
+  {
+    "id": "statistics-expanded-1439",
+    "group": "statistics-expanded",
+    "formula": "=RSQ({1,5,7,8},{2,3,4,6})"
+  },
+  {
+    "id": "statistics-expanded-1440",
+    "group": "statistics-expanded",
+    "formula": "=RSQ({4,4,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1441",
+    "group": "statistics-expanded",
+    "formula": "=RSQ({1,2,3},{4,4,4})"
+  },
+  {
+    "id": "statistics-expanded-1442",
+    "group": "statistics-expanded",
+    "formula": "=RSQ({1},{2})"
+  },
+  {
+    "id": "statistics-expanded-1443",
+    "group": "statistics-expanded",
+    "formula": "=RSQ({1,2},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1444",
+    "group": "statistics-expanded",
+    "formula": "=RSQ({1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1445",
+    "group": "statistics-expanded",
+    "formula": "=RSQ({TRUE,2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1446",
+    "group": "statistics-expanded",
+    "formula": "=RSQ({\"x\",2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1447",
+    "group": "statistics-expanded",
+    "formula": "=RSQ(IF({0,1,1},{1,2,4}),{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1448",
+    "group": "statistics-expanded",
+    "formula": "=RSQ({1,#N/A,3},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1449",
+    "group": "statistics-expanded",
+    "formula": "=RSQ(Inputs!A5:A6,Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1450",
+    "group": "statistics-expanded",
+    "formula": "=STEYX({2,4,6,8},{1,2,3,4})"
+  },
+  {
+    "id": "statistics-expanded-1451",
+    "group": "statistics-expanded",
+    "formula": "=STEYX({1,5,7,8},{2,3,4,6})"
+  },
+  {
+    "id": "statistics-expanded-1452",
+    "group": "statistics-expanded",
+    "formula": "=STEYX({4,4,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1453",
+    "group": "statistics-expanded",
+    "formula": "=STEYX({1,2,3},{4,4,4})"
+  },
+  {
+    "id": "statistics-expanded-1454",
+    "group": "statistics-expanded",
+    "formula": "=STEYX({1},{2})"
+  },
+  {
+    "id": "statistics-expanded-1455",
+    "group": "statistics-expanded",
+    "formula": "=STEYX({1,2},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1456",
+    "group": "statistics-expanded",
+    "formula": "=STEYX({1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1457",
+    "group": "statistics-expanded",
+    "formula": "=STEYX({TRUE,2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1458",
+    "group": "statistics-expanded",
+    "formula": "=STEYX({\"x\",2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1459",
+    "group": "statistics-expanded",
+    "formula": "=STEYX(IF({0,1,1},{1,2,4}),{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1460",
+    "group": "statistics-expanded",
+    "formula": "=STEYX({1,#N/A,3},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1461",
+    "group": "statistics-expanded",
+    "formula": "=STEYX(Inputs!A5:A6,Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1462",
+    "group": "statistics-expanded",
+    "formula": "=PEARSON({2,4,6,8},{1,2,3,4})"
+  },
+  {
+    "id": "statistics-expanded-1463",
+    "group": "statistics-expanded",
+    "formula": "=PEARSON({1,5,7,8},{2,3,4,6})"
+  },
+  {
+    "id": "statistics-expanded-1464",
+    "group": "statistics-expanded",
+    "formula": "=PEARSON({4,4,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1465",
+    "group": "statistics-expanded",
+    "formula": "=PEARSON({1,2,3},{4,4,4})"
+  },
+  {
+    "id": "statistics-expanded-1466",
+    "group": "statistics-expanded",
+    "formula": "=PEARSON({1},{2})"
+  },
+  {
+    "id": "statistics-expanded-1467",
+    "group": "statistics-expanded",
+    "formula": "=PEARSON({1,2},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1468",
+    "group": "statistics-expanded",
+    "formula": "=PEARSON({1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1469",
+    "group": "statistics-expanded",
+    "formula": "=PEARSON({TRUE,2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1470",
+    "group": "statistics-expanded",
+    "formula": "=PEARSON({\"x\",2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1471",
+    "group": "statistics-expanded",
+    "formula": "=PEARSON(IF({0,1,1},{1,2,4}),{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1472",
+    "group": "statistics-expanded",
+    "formula": "=PEARSON({1,#N/A,3},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1473",
+    "group": "statistics-expanded",
+    "formula": "=PEARSON(Inputs!A5:A6,Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1474",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST(5,{2,4,6,8},{1,2,3,4})"
+  },
+  {
+    "id": "statistics-expanded-1475",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST(5,{1,5,7,8},{2,3,4,6})"
+  },
+  {
+    "id": "statistics-expanded-1476",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST(5,{4,4,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1477",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST(5,{1,2,3},{4,4,4})"
+  },
+  {
+    "id": "statistics-expanded-1478",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST(5,{1},{2})"
+  },
+  {
+    "id": "statistics-expanded-1479",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST(5,{1,2},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1480",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST(5,{1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1481",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST(5,{TRUE,2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1482",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST(5,{\"x\",2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1483",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST(5,IF({0,1,1},{1,2,4}),{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1484",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST(5,{1,#N/A,3},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1485",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST(5,Inputs!A5:A6,Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1486",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST.LINEAR(5,{2,4,6,8},{1,2,3,4})"
+  },
+  {
+    "id": "statistics-expanded-1487",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST.LINEAR(5,{1,5,7,8},{2,3,4,6})"
+  },
+  {
+    "id": "statistics-expanded-1488",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST.LINEAR(5,{4,4,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1489",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST.LINEAR(5,{1,2,3},{4,4,4})"
+  },
+  {
+    "id": "statistics-expanded-1490",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST.LINEAR(5,{1},{2})"
+  },
+  {
+    "id": "statistics-expanded-1491",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST.LINEAR(5,{1,2},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1492",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST.LINEAR(5,{1,2,3},{3,4})"
+  },
+  {
+    "id": "statistics-expanded-1493",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST.LINEAR(5,{TRUE,2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1494",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST.LINEAR(5,{\"x\",2,4},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1495",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST.LINEAR(5,IF({0,1,1},{1,2,4}),{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1496",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST.LINEAR(5,{1,#N/A,3},{1,2,3})"
+  },
+  {
+    "id": "statistics-expanded-1497",
+    "group": "statistics-expanded",
+    "formula": "=FORECAST.LINEAR(5,Inputs!A5:A6,Inputs!A5:A6)"
+  },
+  {
+    "id": "statistics-expanded-1498",
+    "group": "statistics-expanded",
+    "formula": "=MODE({4,4,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1499",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL({4,4,2,2})"
+  },
+  {
+    "id": "statistics-expanded-1500",
+    "group": "statistics-expanded",
+    "formula": "=MODE.SNGL({4,2;2,4})"
+  },
+  {
+    "id": "statistics-expanded-1501",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN(0,NA())"
+  },
+  {
+    "id": "statistics-expanded-1502",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN(NA(),0)"
+  },
+  {
+    "id": "statistics-expanded-1503",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN({0,-1})"
+  },
+  {
+    "id": "statistics-expanded-1504",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN({-1,0})"
+  },
+  {
+    "id": "statistics-expanded-1505",
+    "group": "statistics-expanded",
+    "formula": "=GEOMEAN({0,#N/A})"
   }
 ]

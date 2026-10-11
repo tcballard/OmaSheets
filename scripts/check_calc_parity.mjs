@@ -33,7 +33,7 @@ const fixturePath = resolve(`tests/calc-parity/${suite}.json`);
 const fixtureBytes = readFileSync(fixturePath);
 const cases = JSON.parse(fixtureBytes).map((item, index) => typeof item === 'string' ? { id: `information-${index + 1}`, group: 'information', formula: item } : item);
 const formulas = cases.map(item => item.formula);
-if (!Array.isArray(formulas) || !formulas.length || formulas.length > 1000
+if (!Array.isArray(formulas) || !formulas.length || formulas.length > 5000
     || formulas.some(f => typeof f !== 'string' || !f.startsWith('=') || f.length > 4096)) {
   throw new Error('invalid bounded formula fixture');
 }
