@@ -136,6 +136,7 @@ for (const expression of ['SQRT(-1)', 'VALUE("bad")', '#VALUE!', '#NUM!', '1/0',
     `=ERROR.TYPE(SUM(A${row}:A${row}))`, `=ERROR.TYPE(IF(TRUE(),A${row},42))`,
     `=ERROR.TYPE(IFNA(A${row},42))`, `=IFERROR(A${row},42)`,
     `=ISERR(A${row})`, `=ISNA(A${row})`, `=ERROR.TYPE(INDEX(A${row}:A${row},1))`,
+    `=SUBTOTAL(2,A${row}:A${row})`, `=SUBTOTAL(3,A${row}:A${row})`,
   ]) add('errors', formula);
 }
 for (const formula of [
@@ -158,6 +159,10 @@ for (const name of ['COUNT','COUNTA']) {
 for (const name of ['SUM','AVERAGE','MIN','MAX','PRODUCT']) {
   add('coercion', `=ERROR.TYPE(${name}("bad",2))`);
 }
+for (const formula of [
+  '=AVERAGE(IF({1,2,3,4,5}>3,{1,2,3,4,5}))',
+  '=COUNT(IF({10,0,30,0,50}>0,{10,0,30,0,50}))',
+]) add('coercion', formula);
 writeFileSync('tests/calc-parity/common.json',JSON.stringify(cases,null,2)+'\n');
 const counts={};for(const c of cases) counts[c.group]=(counts[c.group]??0)+1;
 console.log(JSON.stringify({cases:cases.length,groups:counts}));

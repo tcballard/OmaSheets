@@ -1867,7 +1867,7 @@ impl Workbook {
                 | Function::CountA
                 | Function::Product
         ) {
-            return self.evaluate_simple_aggregate(function, arguments);
+            return self.evaluate_simple_aggregate(function, arguments, false);
         }
         if function == Function::Hyperlink {
             return self.evaluate_hyperlink(arguments);
@@ -2273,6 +2273,18 @@ impl Workbook {
             11 => Function::VarP,
             _ => return Value::Error(CalcError::InvalidValue),
         };
+        if matches!(
+            function,
+            Function::Sum
+                | Function::Average
+                | Function::Min
+                | Function::Max
+                | Function::Count
+                | Function::CountA
+                | Function::Product
+        ) {
+            return self.evaluate_simple_aggregate(function, &arguments[1..], true);
+        }
         let mut aggregate_arguments = Vec::new();
         for argument in &arguments[1..] {
             let mut values = Vec::new();
@@ -2296,16 +2308,19 @@ impl Workbook {
         self.evaluate_function(function, &aggregate_arguments)
     }
 
+    fn cell_is_subtotal(&self, index: usize) -> bool {
+        matches!(
+            self.cells[index].input,
+            Input::Formula(Expr::Function(Function::SubTotal, _))
+        )
+    }
+
     fn flatten_values_skipping_subtotals(&self, expression: &Expr<usize>, output: &mut Vec<Value>) {
         match expression {
             Expr::RangeNode { node, .. } => {
                 for member in self.range_cells(*node) {
                     match member {
-                        Some(member)
-                            if matches!(
-                                self.cells[member].input,
-                                Input::Formula(Expr::Function(Function::SubTotal, _))
-                            ) => {}
+                        Some(member) if self.cell_is_subtotal(member) => {}
                         Some(member) => output.push(self.cells[member].value.clone()),
                         None => output.push(Value::Blank),
                     }
@@ -2762,7 +2777,12 @@ impl Workbook {
     /// These aggregates ignore blanks and need no positional array. Visit
     /// existing range cells directly, borrowing values instead of cloning them.
     /// Array expressions still use the established broadcasting evaluator.
-    fn evaluate_simple_aggregate(&self, function: Function, arguments: &[Expr<usize>]) -> Value {
+    fn evaluate_simple_aggregate(
+        &self,
+        function: Function,
+        arguments: &[Expr<usize>],
+        skip_subtotals: bool,
+    ) -> Value {
         let mut count = 0usize;
         let mut nonblank = 0usize;
         let mut accumulator = match function {
@@ -2770,29 +2790,33 @@ impl Workbook {
             _ => 0.0,
         };
         let mut error = None;
-        let mut visit = |value: &Value| {
+        let mut visit = |value: &Value, array_member: bool| {
             if !matches!(value, Value::Blank) {
                 nonblank += 1;
             }
-            match value {
-                Value::Error(value)
-                    if error.is_none()
-                        && !matches!(function, Function::Count | Function::CountA) =>
+            let numeric = match value {
+                Value::Number(number) => Some(*number),
+                Value::Boolean(flag) if array_member => Some(f64::from(*flag)),
+                _ => None,
+            };
+            if let Some(number) = numeric {
+                accumulator = match function {
+                    Function::Sum | Function::Average => accumulator + number,
+                    Function::Product => accumulator * number,
+                    Function::Min if count != 0 => accumulator.min(number),
+                    Function::Max if count != 0 => accumulator.max(number),
+                    Function::Min | Function::Max => number,
+                    _ => accumulator,
+                };
+                count += 1;
+            } else if let Value::Error(value) = value {
+                // Calc counts/ignores error cells and scalar errors in COUNT/A,
+                // but errors in array arguments still propagate.
+                if error.is_none()
+                    && (array_member || !matches!(function, Function::Count | Function::CountA))
                 {
                     error = Some(value.clone());
                 }
-                Value::Number(number) => {
-                    accumulator = match function {
-                        Function::Sum | Function::Average => accumulator + number,
-                        Function::Product => accumulator * number,
-                        Function::Min if count != 0 => accumulator.min(*number),
-                        Function::Max if count != 0 => accumulator.max(*number),
-                        Function::Min | Function::Max => *number,
-                        _ => accumulator,
-                    };
-                    count += 1;
-                }
-                _ => {}
             }
         };
         for argument in arguments {
@@ -2804,31 +2828,37 @@ impl Workbook {
                         columns,
                     } => {
                         self.for_each_rectangle_cell(anchor, rows, columns, |_, index| {
-                            visit(&self.cells[index].value);
+                            if !skip_subtotals || !self.cell_is_subtotal(index) {
+                                visit(&self.cells[index].value, false);
+                            }
                         });
                     }
                     RangeShape::Members { .. } => {
                         for index in &self.cells[*node].dependencies {
-                            visit(&self.cells[*index].value);
+                            if !skip_subtotals || !self.cell_is_subtotal(*index) {
+                                visit(&self.cells[*index].value, false);
+                            }
                         }
                     }
                 },
                 Expr::Function(Function::ReferenceSpan | Function::Index, _) => {
                     match self.reference_view(argument) {
-                        Ok(reference) => reference.visit(self, &mut visit),
+                        Ok(reference) => {
+                            reference.visit(self, &mut |value: &Value| visit(value, false))
+                        }
                         Err(CalcError::InvalidArguments) => match self.evaluate_array(argument) {
-                            Ok(array) => array.values.iter().for_each(&mut visit),
-                            Err(error) => visit(&Value::Error(error)),
+                            Ok(array) => array.values.iter().for_each(|value| visit(value, true)),
+                            Err(error) => visit(&Value::Error(error), true),
                         },
-                        Err(error) => visit(&Value::Error(error)),
+                        Err(error) => visit(&Value::Error(error), true),
                     }
                 }
                 Expr::Empty => {}
                 other if contains_array_operand(other) => match self.evaluate_array(other) {
-                    Ok(array) => array.values.iter().for_each(&mut visit),
-                    Err(error) => visit(&Value::Error(error)),
+                    Ok(array) => array.values.iter().for_each(|value| visit(value, true)),
+                    Err(error) => visit(&Value::Error(error), true),
                 },
-                Expr::Reference(_) => visit(&self.evaluate(argument)),
+                Expr::Reference(_) => visit(&self.evaluate(argument), false),
                 other => {
                     let value = self.evaluate(other);
                     // Scalar booleans count as numbers. Text in a reference or
@@ -2850,7 +2880,7 @@ impl Workbook {
                         }
                         other => other,
                     };
-                    visit(&value);
+                    visit(&value, false);
                 }
             }
         }
@@ -7154,12 +7184,12 @@ mod tests {
             ("=SUMPRODUCT((A1:A5>2)*B1:B5)", Value::Number(80.0)),
             ("=MAX(ABS(A1:A5-3))", Value::Number(2.0)),
             ("=SUM(IF(A1:A5>2,A1:A5))", Value::Number(12.0)),
-            ("=AVERAGE(IF(A1:A5>3,A1:A5))", Value::Number(4.5)),
+            ("=AVERAGE(IF(A1:A5>3,A1:A5))", Value::Number(1.8)),
             ("=SUM(A1:A5*E1)", Value::Number(30.0)),
             ("=SUM(-A1:A5)", Value::Number(-15.0)),
             ("=SUM(LEN(G1:G3))", Value::Number(6.0)),
             ("=SUM(IF(ISNUMBER(A1:A5),1,0))", Value::Number(5.0)),
-            ("=COUNT(IF(B1:B5>0,B1:B5))", Value::Number(3.0)),
+            ("=COUNT(IF(B1:B5>0,B1:B5))", Value::Number(5.0)),
             // A shorter operand runs out: those cells are #N/A, so the sum is.
             ("=SUM(A1:A5*D1:D2)", Value::Error(CalcError::NotAvailable)),
             ("=SUM(A1:A5)*2", Value::Number(30.0)),
@@ -9062,9 +9092,22 @@ mod information_parity_tests {
         let mut book = Workbook::default();
         book.set_text(CellId::new(0, 0, 0), "3");
         book.set_number(CellId::new(0, 1, 0), 2.0);
+        book.set_error(CellId::new(0, 2, 0), CalcError::NotAvailable);
         let output = CellId::new(0, 0, 1);
         for (formula, expected) in [
+            ("=SUBTOTAL(2,A1:A3)", Value::Number(1.0)),
+            ("=SUBTOTAL(3,A1:A3)", Value::Number(3.0)),
+            (
+                "=SUBTOTAL(2,{#N/A,2})",
+                Value::Error(CalcError::NotAvailable),
+            ),
             ("=SUM(TRUE(),2)", Value::Number(3.0)),
+            ("=SUM({TRUE,2})", Value::Number(3.0)),
+            ("=AVERAGE({TRUE,2})", Value::Number(1.5)),
+            ("=MIN({TRUE,2})", Value::Number(1.0)),
+            ("=COUNT({TRUE,2})", Value::Number(2.0)),
+            ("=COUNT({#N/A,2})", Value::Error(CalcError::NotAvailable)),
+            ("=COUNTA({#N/A,2})", Value::Error(CalcError::NotAvailable)),
             ("=AVERAGE(TRUE(),2)", Value::Number(1.5)),
             ("=MIN(TRUE(),2)", Value::Number(1.0)),
             ("=SUM(\"3\",2)", Value::Error(CalcError::InvalidValue)),

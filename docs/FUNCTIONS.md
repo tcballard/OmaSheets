@@ -313,3 +313,21 @@ Owned XLSX import refuses external scalar formulas without a resolved cell input
 - `RANK.AVG`
 - `PERCENTILE`
 - `QUARTILE`
+
+### Calc error origins and aggregate arguments
+
+`SQRT(-1)` and failed `VALUE` text conversions retain Calc's internal
+illegal-argument origin. Their XLSX error value is `#VALUE!`, while
+`ERROR.TYPE` returns `#N/A`. Literal/imported `#VALUE!` and `#NUM!` retain
+standard codes 3 and 6; references, nested formulas and array evaluation
+propagate the origin until a formula handles it. This is a Calc compatibility
+boundary, not a claim of identical Excel error semantics.
+
+SUM, AVERAGE, MIN, MAX and PRODUCT count direct and array boolean arguments as 1/0 and
+reject direct text under the measured Calc settings. Text members in arrays
+or references are ignored. COUNT accepts finite numeric scalar text and ignores
+scalar/reference errors; COUNTA counts those errors as occupied values. Error
+array members propagate through both counting functions. MIN/MAX's internal
+parameter-type error remains distinct from the standard error returned by
+SUM/AVERAGE/PRODUCT. Locale-sensitive conversion and other functions' coercion
+rules are not comprehensively measured; see [the parity scope](CALC-PARITY.md).

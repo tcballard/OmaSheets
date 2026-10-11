@@ -130,7 +130,7 @@ Numeric comparisons use the existing XLSX scorer's tolerance:
 `|owned-reference| <= 1e-9 * max(|reference|, 1)`. Typed strings, booleans and
 errors must match. This is not a bit-for-bit floating-point equality claim.
 
-`tests/calc-parity/common.json` contains 772 deterministic scenarios
+`tests/calc-parity/common.json` contains 786 deterministic scenarios
 in information, mathematics, rounding, statistics, text, dates, finance,
 references/arrays, error origins and aggregate coercion. `scripts/generate_common_calc_cases.mjs` reproduces them.
 The denominator is this declared suite, not the percentage of real workbooks
@@ -203,3 +203,12 @@ The imported FODS boolean input is serialized by Calc as numeric 1 in XLSX;
 its range cases must not be cited as proof of native boolean-reference parity.
 Locale-sensitive text conversion and other aggregate/function coercion rules
 remain separate acceptance work.
+
+The fresh 772-case run matched 766, with no refused formulas. It isolated six
+array differences: Calc counts boolean array members numerically, and array
+errors propagate through COUNT/COUNTA even though scalar and reference errors
+are ignored/counted. The implementation now preserves that distinction.
+Twelve more dependent SUBTOTAL count cases guard against turning reference
+members into array arguments during nested-subtotal filtering. The resulting
+786-case suite retains every previous valid case and adds two conditional-array
+probes for the omitted FALSE branch in AVERAGE/COUNT.
