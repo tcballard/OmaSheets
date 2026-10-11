@@ -331,3 +331,8 @@ array members propagate through both counting functions. MIN/MAX's internal
 parameter-type error remains distinct from the standard error returned by
 SUM/AVERAGE/PRODUCT. Locale-sensitive conversion and other functions' coercion
 rules are not comprehensively measured; see [the parity scope](CALC-PARITY.md).
+
+Omitted IF branches in intermediate arrays are excluded from aggregates,
+whereas explicit FALSE members count as zero. TRANSPOSE and INDEX preserve
+the omitted-branch marker; arithmetic consumes its FALSE value. This keeps
+conditional averages/counts distinct from ordinary boolean arrays.

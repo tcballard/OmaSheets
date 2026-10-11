@@ -13,12 +13,15 @@ impl Workbook {
             };
             let input = self.evaluate_array(input)?;
             let mut values = Vec::with_capacity(input.values.len());
+            let mut empty_paths = Vec::with_capacity(input.values.len());
             for column in 0..input.columns {
                 for row in 0..input.rows {
                     values.push(input.values[row * input.columns + column].clone());
+                    empty_paths.push(input.empty_path_at(row, column));
                 }
             }
-            return Ok(ArrayValue::from_parts(input.columns, input.rows, values));
+            return Ok(ArrayValue::from_parts(input.columns, input.rows, values)
+                .with_empty_paths(empty_paths));
         }
         let [left, right] = arguments else {
             return Err(CalcError::InvalidArguments);

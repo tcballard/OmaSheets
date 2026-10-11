@@ -3928,5 +3928,55 @@
     "id": "coercion-0786",
     "group": "coercion",
     "formula": "=COUNT(IF({10,0,30,0,50}>0,{10,0,30,0,50}))"
+  },
+  {
+    "id": "coercion-0787",
+    "group": "coercion",
+    "formula": "=AVERAGE(IF({0,1},{10,20}))"
+  },
+  {
+    "id": "coercion-0788",
+    "group": "coercion",
+    "formula": "=AVERAGE(IF({0,1},{10,20},FALSE()))"
+  },
+  {
+    "id": "coercion-0789",
+    "group": "coercion",
+    "formula": "=AVERAGE(IF({0,1},{10,20},0))"
+  },
+  {
+    "id": "coercion-0790",
+    "group": "coercion",
+    "formula": "=COUNTA(IF({0,1},{10,20}))"
+  },
+  {
+    "id": "coercion-0791",
+    "group": "coercion",
+    "formula": "=SUMPRODUCT(ISBLANK(IF({0,1},{10,20}))*1)"
+  },
+  {
+    "id": "coercion-0792",
+    "group": "coercion",
+    "formula": "=AVERAGE(TRANSPOSE(IF({0,1},{10,20})))"
+  },
+  {
+    "id": "coercion-0793",
+    "group": "coercion",
+    "formula": "=AVERAGE(INDEX(TRANSPOSE(IF({0,1},{10,20})),0))"
+  },
+  {
+    "id": "coercion-0794",
+    "group": "coercion",
+    "formula": "=AVERAGE(IF({0,1},{10,20})*1)"
+  },
+  {
+    "id": "coercion-0795",
+    "group": "coercion",
+    "formula": "=COUNT(IF({0,1},{10,20},FALSE()))"
+  },
+  {
+    "id": "coercion-0796",
+    "group": "coercion",
+    "formula": "=AVERAGE(IF({1,1},IF({0,1},{10,20}),0))"
   }
 ]

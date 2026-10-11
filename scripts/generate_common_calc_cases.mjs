@@ -163,6 +163,18 @@ for (const formula of [
   '=AVERAGE(IF({1,2,3,4,5}>3,{1,2,3,4,5}))',
   '=COUNT(IF({10,0,30,0,50}>0,{10,0,30,0,50}))',
 ]) add('coercion', formula);
+for (const formula of [
+  '=AVERAGE(IF({0,1},{10,20}))',
+  '=AVERAGE(IF({0,1},{10,20},FALSE()))',
+  '=AVERAGE(IF({0,1},{10,20},0))',
+  '=COUNTA(IF({0,1},{10,20}))',
+  '=SUMPRODUCT(ISBLANK(IF({0,1},{10,20}))*1)',
+  '=AVERAGE(TRANSPOSE(IF({0,1},{10,20})))',
+  '=AVERAGE(INDEX(TRANSPOSE(IF({0,1},{10,20})),0))',
+  '=AVERAGE(IF({0,1},{10,20})*1)',
+  '=COUNT(IF({0,1},{10,20},FALSE()))',
+  '=AVERAGE(IF({1,1},IF({0,1},{10,20}),0))',
+]) add('coercion', formula);
 writeFileSync('tests/calc-parity/common.json',JSON.stringify(cases,null,2)+'\n');
 const counts={};for(const c of cases) counts[c.group]=(counts[c.group]??0)+1;
 console.log(JSON.stringify({cases:cases.length,groups:counts}));

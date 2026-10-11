@@ -2847,7 +2847,9 @@ impl Workbook {
                             reference.visit(self, &mut |value: &Value| visit(value, false))
                         }
                         Err(CalcError::InvalidArguments) => match self.evaluate_array(argument) {
-                            Ok(array) => array.values.iter().for_each(|value| visit(value, true)),
+                            Ok(array) => array
+                                .aggregate_values()
+                                .for_each(|value| visit(value, true)),
                             Err(error) => visit(&Value::Error(error), true),
                         },
                         Err(error) => visit(&Value::Error(error), true),
@@ -2855,7 +2857,9 @@ impl Workbook {
                 }
                 Expr::Empty => {}
                 other if contains_array_operand(other) => match self.evaluate_array(other) {
-                    Ok(array) => array.values.iter().for_each(|value| visit(value, true)),
+                    Ok(array) => array
+                        .aggregate_values()
+                        .for_each(|value| visit(value, true)),
                     Err(error) => visit(&Value::Error(error), true),
                 },
                 Expr::Reference(_) => visit(&self.evaluate(argument), false),
@@ -2986,14 +2990,30 @@ impl Workbook {
                 let (rows, columns) = broadcast_shape(&shapes)?;
                 let mut values = Vec::with_capacity(rows * columns);
                 let mut literals = Vec::with_capacity(arrays.len());
+                let mut empty_paths = Vec::with_capacity(rows * columns);
                 for row in 0..rows {
                     for column in 0..columns {
                         literals.clear();
                         literals.extend(arrays.iter().map(|array| literal(array.at(row, column))));
+                        let empty_path =
+                            if *function == Function::If && matches!(arrays.len(), 2 | 3) {
+                                match truthy(arrays[0].at(row, column)) {
+                                    Ok(condition) => {
+                                        let selected = if condition { 1 } else { 2 };
+                                        arrays
+                                            .get(selected)
+                                            .is_none_or(|array| array.empty_path_at(row, column))
+                                    }
+                                    Err(_) => false,
+                                }
+                            } else {
+                                false
+                            };
+                        empty_paths.push(empty_path);
                         values.push(self.evaluate_function(*function, &literals));
                     }
                 }
-                Ok(ArrayValue::from_parts(rows, columns, values))
+                Ok(ArrayValue::from_parts(rows, columns, values).with_empty_paths(empty_paths))
             }
             other => Ok(ArrayValue::scalar(self.evaluate(other))),
         }
@@ -3331,6 +3351,9 @@ struct ArrayValue {
     rows: usize,
     columns: usize,
     values: Arc<[Value]>,
+    // An omitted IF branch displays FALSE but is excluded from aggregates.
+    // An empty slice means no such members, keeping ordinary arrays compact.
+    empty_paths: Arc<[bool]>,
 }
 
 /// Lookup inputs borrow constants and retain the existing range fast path.
@@ -3410,7 +3433,34 @@ impl ArrayValue {
             rows,
             columns,
             values: Arc::from(values),
+            empty_paths: Arc::from([]),
         }
+    }
+
+    fn with_empty_paths(mut self, paths: Vec<bool>) -> Self {
+        debug_assert_eq!(paths.len(), self.values.len());
+        if paths.iter().any(|path| *path) {
+            self.empty_paths = Arc::from(paths);
+        }
+        self
+    }
+
+    fn empty_path_at(&self, row: usize, column: usize) -> bool {
+        let row = if self.rows == 1 { 0 } else { row };
+        let column = if self.columns == 1 { 0 } else { column };
+        row < self.rows
+            && column < self.columns
+            && self
+                .empty_paths
+                .get(row * self.columns + column)
+                .copied()
+                .unwrap_or(false)
+    }
+
+    fn aggregate_values(&self) -> impl Iterator<Item = &Value> {
+        self.values.iter().enumerate().filter_map(|(index, value)| {
+            (!self.empty_paths.get(index).copied().unwrap_or(false)).then_some(value)
+        })
     }
 
     fn scalar(value: Value) -> Self {
@@ -7184,12 +7234,12 @@ mod tests {
             ("=SUMPRODUCT((A1:A5>2)*B1:B5)", Value::Number(80.0)),
             ("=MAX(ABS(A1:A5-3))", Value::Number(2.0)),
             ("=SUM(IF(A1:A5>2,A1:A5))", Value::Number(12.0)),
-            ("=AVERAGE(IF(A1:A5>3,A1:A5))", Value::Number(1.8)),
+            ("=AVERAGE(IF(A1:A5>3,A1:A5))", Value::Number(4.5)),
             ("=SUM(A1:A5*E1)", Value::Number(30.0)),
             ("=SUM(-A1:A5)", Value::Number(-15.0)),
             ("=SUM(LEN(G1:G3))", Value::Number(6.0)),
             ("=SUM(IF(ISNUMBER(A1:A5),1,0))", Value::Number(5.0)),
-            ("=COUNT(IF(B1:B5>0,B1:B5))", Value::Number(5.0)),
+            ("=COUNT(IF(B1:B5>0,B1:B5))", Value::Number(3.0)),
             // A shorter operand runs out: those cells are #N/A, so the sum is.
             ("=SUM(A1:A5*D1:D2)", Value::Error(CalcError::NotAvailable)),
             ("=SUM(A1:A5)*2", Value::Number(30.0)),
@@ -9101,6 +9151,22 @@ mod information_parity_tests {
                 "=SUBTOTAL(2,{#N/A,2})",
                 Value::Error(CalcError::NotAvailable),
             ),
+            ("=AVERAGE(IF({0,1},{10,20}))", Value::Number(20.0)),
+            ("=AVERAGE(IF({0,1},{10,20},FALSE()))", Value::Number(10.0)),
+            ("=COUNTA(IF({0,1},{10,20}))", Value::Number(1.0)),
+            (
+                "=SUMPRODUCT(ISBLANK(IF({0,1},{10,20}))*1)",
+                Value::Number(0.0),
+            ),
+            (
+                "=AVERAGE(TRANSPOSE(IF({0,1},{10,20})))",
+                Value::Number(20.0),
+            ),
+            (
+                "=AVERAGE(INDEX(TRANSPOSE(IF({0,1},{10,20})),0))",
+                Value::Number(20.0),
+            ),
+            ("=AVERAGE(IF({0,1},{10,20})*1)", Value::Number(10.0)),
             ("=SUM(TRUE(),2)", Value::Number(3.0)),
             ("=SUM({TRUE,2})", Value::Number(3.0)),
             ("=AVERAGE({TRUE,2})", Value::Number(1.5)),

@@ -130,7 +130,7 @@ Numeric comparisons use the existing XLSX scorer's tolerance:
 `|owned-reference| <= 1e-9 * max(|reference|, 1)`. Typed strings, booleans and
 errors must match. This is not a bit-for-bit floating-point equality claim.
 
-`tests/calc-parity/common.json` contains 786 deterministic scenarios
+`tests/calc-parity/common.json` contains 796 deterministic scenarios
 in information, mathematics, rounding, statistics, text, dates, finance,
 references/arrays, error origins and aggregate coercion. `scripts/generate_common_calc_cases.mjs` reproduces them.
 The denominator is this declared suite, not the percentage of real workbooks
@@ -212,3 +212,13 @@ Twelve more dependent SUBTOTAL count cases guard against turning reference
 members into array arguments during nested-subtotal filtering. The resulting
 786-case suite retains every previous valid case and adds two conditional-array
 probes for the omitted FALSE branch in AVERAGE/COUNT.
+
+The 786-case reference run matched 784, with no refusals. Only the two new
+conditional-array probes differed: an omitted IF branch is an internal empty
+path, distinct from an explicit FALSE array member. Array intermediates now
+retain that marker; aggregates exclude it while ordinary evaluation still
+observes FALSE. TRANSPOSE and INDEX preserve the marker, and arithmetic
+consumes the value. Ten regression probes cover explicit versus omitted
+branches, inspection, nesting, transpose, selection and arithmetic, yielding
+796 reference cases. The source contract is `ScMatrixImpl::IsEmptyPath`,
+`CountElements` and `ScMatrixImpl::IfJump` in pinned `scmatrix.cxx`.

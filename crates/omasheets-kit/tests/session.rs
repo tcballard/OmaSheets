@@ -246,7 +246,7 @@ fn common_calculations_survive_edits_and_owned_xlsx_round_trip() {
 }
 
 #[test]
-fn internal_error_origins_survive_edits_and_native_and_xlsx_reopening() {
+fn calculation_origins_survive_edits_and_native_and_xlsx_reopening() {
     let fixture = Fixture::new();
     let source = fixture.path("errors.xlsx");
     let working = fixture.path("errors.omasheets");
@@ -259,7 +259,9 @@ fn internal_error_origins_survive_edits_and_native_and_xlsx_reopening() {
         <c r="F1" t="e"><f>ERROR.TYPE(E1)</f><v>#N/A</v></c>
         <c r="G1"><f>ERROR.TYPE(#NUM!)</f><v>6</v></c>
         <c r="H1" t="e"><f>ERROR.TYPE(SUM(B1:B2))</f><v>#N/A</v></c>
-        <c r="I1"><f>SUMPRODUCT(ISERR(SQRT({-1,4,-9}))*1)</f><v>2</v></c></row>
+        <c r="I1"><f>SUMPRODUCT(ISERR(SQRT({-1,4,-9}))*1)</f><v>2</v></c>
+        <c r="J1"><f>AVERAGE(IF({0,1},{10,20}))</f><v>20</v></c>
+        <c r="K1"><f>COUNT(IF({0,1},{10,20}))</f><v>1</v></c></row>
         <row r="2"><c r="A2"><v>0</v></c></row>"#;
     write_xlsx(&source, cells, "", "", &[]);
     let admission = probe(&source).unwrap();
@@ -276,6 +278,8 @@ fn internal_error_origins_survive_edits_and_native_and_xlsx_reopening() {
             (6, CellValue::Number(6.0)),
             (7, CellValue::Error("#N/A".into())),
             (8, CellValue::Number(2.0)),
+            (9, CellValue::Number(20.0)),
+            (10, CellValue::Number(1.0)),
         ] {
             assert_eq!(
                 session.viewport(sheet, 0, column, 1, 1).unwrap().cells[0].value,
@@ -304,7 +308,7 @@ fn internal_error_origins_survive_edits_and_native_and_xlsx_reopening() {
         }
     }
     let manifest = session.save_xlsx_copy(&saved).unwrap();
-    assert_eq!(manifest.formula_cells_preserved, 8);
+    assert_eq!(manifest.formula_cells_preserved, 10);
     assert_eq!(manifest.formula_cells_flattened, 0);
     session.close().unwrap();
     for mut reopened in [
@@ -324,6 +328,7 @@ fn internal_error_origins_survive_edits_and_native_and_xlsx_reopening() {
         .unwrap();
     assert!(xml.contains("<f>SQRT(A1)</f><v>#VALUE!</v>"));
     assert!(xml.contains("<f>ERROR.TYPE(B1)</f><v>#N/A</v>"));
+    assert!(xml.contains("<f>AVERAGE(IF({0,1},{10,20}))</f><v>20</v>"));
 }
 
 #[test]
