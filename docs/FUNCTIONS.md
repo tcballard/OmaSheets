@@ -1,7 +1,7 @@
 # Supported formula functions
 
 The owned M0 engine (`crates/omasheets-calc`) accepts exactly the
-119 function names listed below, grouped for reading.
+209 function names listed below, grouped for reading.
 A test in the calc crate fails when this file and the registry disagree, so
 the count here is never edited by hand: add the function to the registry and
 regenerate this list.
@@ -145,11 +145,17 @@ Formula criteria with nonmatching/blank headings are not implemented and return
 - `OR`
 - `NOT`
 - `IFERROR`
+- `IFNA`
+- `TRUE`
+- `FALSE`
 - `ISBLANK`
 - `ISNUMBER`
 - `ISTEXT`
 - `ISLOGICAL`
 - `ISERROR`
+- `ISERR`
+- `ISNONTEXT`
+- `ERROR.TYPE`
 - `N`
 - `T`
 - `CHOOSE`
@@ -249,3 +255,138 @@ omitted order ranks the largest first. An absent target returns `#N/A`.
 Native `.omasheets` documents do not yet persist external workbook inputs. Native import therefore retains the source cached value and reports the formula as cached-only; it does not install an external formula that would evaluate to `#REF!` or an empty-range zero. The owned XLSX scorer can resolve linked inputs separately.
 
 Owned XLSX import refuses external scalar formulas without a resolved cell input, and external ranges without any resolved input for their sheet. It retains their source cached values and counts them as unsupported; dependent formulas can still use those caches. Missing cells within an otherwise resolved external range remain blank. This prevents absent workbooks from manufacturing zero or error values and is reflected in the raw coverage denominator.
+
+### Common calculation expansion
+
+- `SIN`
+- `COS`
+- `TAN`
+- `ASIN`
+- `ACOS`
+- `ATAN`
+- `ATAN2`
+- `SINH`
+- `COSH`
+- `TANH`
+- `ASINH`
+- `ACOSH`
+- `ATANH`
+- `DEGREES`
+- `RADIANS`
+- `QUOTIENT`
+- `MROUND`
+- `EVEN`
+- `ODD`
+- `FACT`
+- `FACTDOUBLE`
+- `COMBIN`
+- `COMBINA`
+- `ISEVEN`
+- `ISODD`
+- `SEARCH`
+- `SUBSTITUTE`
+- `REPLACE`
+- `CLEAN`
+- `PROPER`
+- `TIME`
+- `HOUR`
+- `MINUTE`
+- `SECOND`
+- `DAYS`
+- `FV`
+- `NPER`
+- `IPMT`
+- `PPMT`
+- `SLN`
+- `SYD`
+- `SUMSQ`
+- `COUNTBLANK`
+- `GCD`
+- `LCM`
+- `XOR`
+- `LARGE`
+- `SMALL`
+- `PERCENTILE.INC`
+- `PERCENTILE.EXC`
+- `QUARTILE.INC`
+- `QUARTILE.EXC`
+- `RANK.AVG`
+- `PERCENTILE`
+- `QUARTILE`
+
+### Calc error origins and aggregate arguments
+
+`SQRT(-1)` and failed `VALUE` text conversions retain Calc's internal
+illegal-argument origin. Their XLSX error value is `#VALUE!`, while
+`ERROR.TYPE` returns `#N/A`. Literal/imported `#VALUE!` and `#NUM!` retain
+standard codes 3 and 6; references, nested formulas and array evaluation
+propagate the origin until a formula handles it. This is a Calc compatibility
+boundary, not a claim of identical Excel error semantics.
+
+SUM, AVERAGE, MIN, MAX, PRODUCT, SUMSQ and the dispersion aggregates count
+direct, reference and array boolean arguments as 1/0 and
+reject direct text under the measured Calc settings. Text members in arrays
+or references are ignored. COUNT accepts finite numeric scalar text and ignores
+scalar/reference errors; COUNTA counts those errors as occupied values. Error
+array members propagate through both counting functions. MIN/MAX's internal
+parameter-type error remains distinct from the standard error returned by
+SUM/AVERAGE/PRODUCT. Locale-sensitive conversion and other functions' coercion
+rules are not comprehensively measured; see [the parity scope](CALC-PARITY.md).
+
+Omitted IF branches in intermediate arrays are excluded from aggregates,
+whereas explicit FALSE members count as zero. TRANSPOSE and INDEX preserve
+the omitted-branch marker; arithmetic consumes its FALSE value. This keeps
+conditional averages/counts distinct from ordinary boolean arrays.
+
+PRODUCT with no numeric observations returns 0; MEDIAN with no observations
+returns `#VALUE!`. COUNTBLANK counts omitted IF paths as empty; AVERAGEA
+excludes them. Direct text is rejected by SUMSQ/MEDIAN/variance/deviation,
+while text in collections is ignored (AVERAGEA counts text as zero).
+GCD/LCM accept plain numeric scalar text; array text, omitted IF paths and
+negative inputs retain Calc argument-error origins. Empty single references
+count as zero in GCD/LCM, while empty ranges have no observations. Calc's
+GCD/LCM matrix boolean-run behaviour is preserved and differs from ordinary
+numeric/reference accumulation.
+
+ISNUMBER includes logical values under the Calc contract. MIN/MAX can retain
+the first numeric argument's reference logical type for 0/1 results; scalar
+and matrix arguments use numeric results. SUM/SUMSQ and averages use Kahan
+accumulation with reverse scalar-argument order. Extreme cancellation can
+therefore differ between separate arguments and an array; this does not
+establish bit-identical precision across all input shapes and magnitudes.
+
+### Extended statistics
+
+- `MINA`
+- `MAXA`
+- `STDEVA`
+- `STDEVPA`
+- `VARA`
+- `VARPA`
+- `AVEDEV`
+- `DEVSQ`
+- `GEOMEAN`
+- `HARMEAN`
+- `MODE`
+- `MODE.SNGL`
+- `MODE.MULT`
+- `SKEW`
+- `SKEW.P`
+- `KURT`
+- `TRIMMEAN`
+- `PERCENTRANK`
+- `PERCENTRANK.INC`
+- `PERCENTRANK.EXC`
+- `RANK.EQ`
+- `STANDARDIZE`
+- `SLOPE`
+- `INTERCEPT`
+- `RSQ`
+- `STEYX`
+- `PEARSON`
+- `FORECAST`
+- `FORECAST.LINEAR`
+
+These functions share the owned evaluator and reference binding. Calc reference
+fixtures cover typed inputs, domains and empty collections. This inventory is
+not a claim of complete Calc semantics or workbook feature parity.

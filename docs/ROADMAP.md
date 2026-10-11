@@ -1,5 +1,14 @@
 # OmaSheets roadmap
 
+## Current direction — 2026-10-10
+
+The maintainer has requested full Calc spreadsheet parity with no LibreOfficeKit
+product dependency. [CALC-PARITY.md](CALC-PARITY.md) defines that programme and
+its acceptance gates. The original M0–M4 plan below is retained as historical
+architecture context; its compatibility fallback and parked-parity statements
+are superseded by this direction. The owned Kit is a development preview, not
+a completed Calc replacement.
+
 This roadmap converges the native, event-sourced spreadsheet architecture into
 OmaSheets without creating a second product. It separates what the v0.0.2
 baseline actually provides from future targets. Dates and focused-week
@@ -7,8 +16,8 @@ estimates are planning aids, not delivery promises.
 
 No milestone is complete merely because code exists for a demo. Promotion
 requires reproducible correctness, resource, cancellation and packaging
-evidence against immutable fixtures. LibreOffice remains the compatibility
-lane until a native capability passes its own gate.
+evidence against immutable fixtures. LibreOffice is now a test reference only. Unsupported product operations remain
+refused until their owned equivalents pass the relevant gate.
 
 ## v0.0.2 — compatibility and agent-safety baseline
 
@@ -235,7 +244,6 @@ dogfood or user evidence:
 
 - collaborative editing or CRDTs;
 - streaming/event-time tables and historical as-of views;
-- full Excel function, macro or pivot-table parity;
 - LAMBDA completeness;
 - a LibreOffice source fork; and
 - platform expansion that delays the Omarchy/Linux product path.

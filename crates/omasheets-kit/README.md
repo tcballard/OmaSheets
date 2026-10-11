@@ -93,11 +93,14 @@ sheets, fifty rows and twelve columns per sheet.
 
 Initial XLSX admission accepts values and formulas that translate completely
 to native cells, plus the checked presentation subset. It refuses cached-only
-formulas, source error cells, defined names, external links, VBA, pivots, source
+formulas, source error literals, defined names, external links, VBA, pivots, source
 tables, drawing/chart/comment parts, validation, array/spill metadata and
 unknown XML objects/attributes. More presentation forms can be added after
 preservation tests; some already supported by the general converter are
 deliberately excluded from this stricter writable-open path.
+Supported formulas with error caches are recalculated on import and replay;
+their error origins survive native save/reopen and XLSX reimport. Unsupported
+or empty formula records still fail admission.
 Implicit custom default styles, custom referenced themes and disabled style
 application flags are refused when the native converter cannot preserve them.
 

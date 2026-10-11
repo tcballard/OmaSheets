@@ -359,12 +359,18 @@ impl Workbook {
         let (row, column, rows, columns) =
             self.index_selection(arguments, input_rows, input_columns)?;
         let mut values = Vec::with_capacity(rows * columns);
+        let mut empty_paths = Vec::with_capacity(rows * columns);
         for r in row..row + rows {
             for c in column..column + columns {
                 values.push(input.value(self, r * input_columns + c));
+                empty_paths.push(match &input {
+                    ArrayInput::Constant(array) => array.empty_path_at(r, c),
+                    ArrayInput::Computed(array) => array.empty_path_at(r, c),
+                    _ => false,
+                });
             }
         }
-        Ok(ArrayValue::from_parts(rows, columns, values))
+        Ok(ArrayValue::from_parts(rows, columns, values).with_empty_paths(empty_paths))
     }
 }
 
